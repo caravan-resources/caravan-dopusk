@@ -1,0 +1,1124 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Допуск CR">
+<meta name="theme-color" content="#0B1A35">
+<title>Caravan Resources — Допуск в карьер</title>
+
+<!-- PWA Manifest inline -->
+<script>
+const manifestData = {
+  name: "Допуск в карьер — Caravan Resources",
+  short_name: "Допуск CR",
+  start_url: "./",
+  display: "standalone",
+  background_color: "#0B1A35",
+  theme_color: "#0B1A35",
+  icons: [{src:"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' fill='%230B1A35'/%3E%3Ctext x='96' y='130' text-anchor='middle' font-size='100' fill='%23F4A52A'%3E⛏%3C/text%3E%3C/svg%3E", sizes:"192x192", type:"image/svg+xml"}]
+};
+const blob = new Blob([JSON.stringify(manifestData)], {type:"application/json"});
+const manifestUrl = URL.createObjectURL(blob);
+document.addEventListener("DOMContentLoaded", () => {
+  const link = document.createElement("link");
+  link.rel = "manifest"; link.href = manifestUrl;
+  document.head.appendChild(link);
+});
+</script>
+
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body { font-family: -apple-system, 'Segoe UI', sans-serif; background: #F1F5F9; min-height: 100vh; }
+
+  /* ── ПЕРЕМЕННЫЕ ── */
+  :root {
+    --navy: #0B1A35; --navy2: #1B3B6F; --gold: #F4A52A; --gold2: #E8922A;
+    --red: #DC2626; --redbg: #FEF2F2; --green: #16A34A; --greenbg: #F0FDF4;
+    --yellow: #D97706; --yellowbg: #FFFBEB;
+    --gray: #64748B; --light: #F1F5F9; --border: #E2E8F0;
+  }
+
+  /* ── ШАПКА ── */
+  .app-header {
+    background: var(--navy); color: #fff;
+    padding: 0 16px; height: 52px;
+    display: flex; align-items: center; justify-content: space-between;
+    position: sticky; top: 0; z-index: 100;
+    border-bottom: 3px solid var(--gold);
+  }
+  .app-header .logo {
+    font-size: 15px; font-weight: 800; letter-spacing: .03em;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .app-header .logo-bar { width: 3px; height: 24px; background: var(--gold); border-radius: 2px; }
+
+  /* ── ЭКРАНЫ ── */
+  .screen { display: none; padding: 16px; max-width: 600px; margin: 0 auto; }
+  .screen.active { display: block; }
+
+  /* ── КАРТОЧКИ ── */
+  .card {
+    background: #fff; border-radius: 14px;
+    border: 1px solid var(--border); padding: 20px;
+    margin-bottom: 14px;
+  }
+  .card-title {
+    font-size: 15px; font-weight: 800; color: var(--navy);
+    margin-bottom: 14px; letter-spacing: .01em;
+  }
+
+  /* ── КНОПКИ ── */
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    border: none; border-radius: 10px; font-family: inherit;
+    font-weight: 800; cursor: pointer; transition: opacity .15s;
+    -webkit-appearance: none;
+  }
+  .btn:active { opacity: .75; }
+  .btn-gold  { background: var(--gold); color: var(--navy); }
+  .btn-navy  { background: var(--navy); color: #fff; }
+  .btn-ghost { background: transparent; color: var(--gray); border: 1.5px solid var(--border); }
+  .btn-green { background: var(--green); color: #fff; }
+  .btn-red   { background: var(--red); color: #fff; }
+  .btn-lg { padding: 14px 24px; font-size: 15px; width: 100%; }
+  .btn-md { padding: 11px 18px; font-size: 13px; }
+  .btn-sm { padding: 8px 14px; font-size: 12px; }
+  .btn:disabled { opacity: .4; cursor: not-allowed; }
+
+  /* ── ПОЛЯ ВВОДА ── */
+  .field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; }
+  .field label {
+    font-size: 11px; font-weight: 800; color: var(--navy);
+    text-transform: uppercase; letter-spacing: .07em;
+  }
+  .field input, .field select {
+    border: 1.5px solid var(--border); border-radius: 10px;
+    padding: 12px 14px; font-size: 15px; color: var(--navy);
+    font-family: inherit; outline: none; background: #fff;
+    -webkit-appearance: none; appearance: none;
+  }
+  .field input:focus, .field select:focus { border-color: var(--gold); }
+
+  /* ── СПИСОК РАБОТНИКОВ ── */
+  .emp-list { border: 1.5px solid var(--border); border-radius: 10px; overflow: hidden; }
+  .emp-item {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 14px; border-bottom: 1px solid var(--border);
+    cursor: pointer; background: #fff; border: none; width: 100%;
+    text-align: left; font-family: inherit;
+  }
+  .emp-item:last-child { border-bottom: none; }
+  .emp-item:active { background: var(--light); }
+  .emp-item.selected { background: #FFFBEB; border-color: var(--gold); }
+  .emp-avatar {
+    width: 38px; height: 38px; border-radius: 50%;
+    background: linear-gradient(135deg, var(--navy), var(--navy2));
+    color: #fff; display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 800; flex-shrink: 0;
+  }
+  .emp-name { font-size: 14px; font-weight: 700; color: var(--navy); }
+  .emp-pos  { font-size: 11px; color: var(--gray); margin-top: 1px; }
+
+  /* ── КАРТОЧКИ ТЕСТОВ ── */
+  .test-card {
+    border: 2px solid var(--border); border-radius: 12px;
+    padding: 16px; margin-bottom: 10px; cursor: pointer;
+    background: #fff; display: flex; align-items: center; gap: 14px;
+    transition: border-color .15s;
+  }
+  .test-card:active { background: var(--light); }
+  .test-card.selected { border-color: var(--gold); background: #FFFBEB; }
+  .test-icon {
+    width: 48px; height: 48px; border-radius: 10px;
+    background: var(--light); display: flex; align-items: center;
+    justify-content: center; font-size: 24px; flex-shrink: 0;
+  }
+  .test-card.selected .test-icon { background: var(--gold); }
+  .test-title { font-size: 14px; font-weight: 800; color: var(--navy); margin-bottom: 4px; }
+  .test-meta  { font-size: 11px; color: var(--gray); }
+  .test-check { margin-left: auto; font-size: 20px; color: var(--gold); flex-shrink: 0; }
+
+  /* ── ПОЛНОЭКРАННЫЙ ТЕСТ ── */
+  #testScreen {
+    position: fixed; inset: 0; background: #0F172A;
+    display: none; flex-direction: column; z-index: 200;
+    overscroll-behavior: none;
+  }
+  #testScreen.active { display: flex; }
+
+  .test-topbar {
+    background: var(--navy); padding: 0 16px; height: 52px;
+    display: flex; align-items: center; justify-content: space-between;
+    flex-shrink: 0; border-bottom: 3px solid var(--gold);
+  }
+  .test-progress-wrap { height: 3px; background: rgba(255,255,255,.1); flex-shrink: 0; }
+  .test-progress-bar  { height: 100%; background: var(--gold); transition: width .3s; }
+
+  .test-body { flex: 1; overflow-y: auto; padding: 20px 16px; }
+  .test-qnum {
+    display: inline-block; background: var(--gold); color: var(--navy);
+    border-radius: 8px; padding: 5px 12px;
+    font-size: 12px; font-weight: 800; margin-bottom: 16px;
+  }
+  .test-qtype {
+    font-size: 11px; color: rgba(255,255,255,.4); font-weight: 700;
+    text-transform: uppercase; letter-spacing: .07em; margin-bottom: 14px;
+  }
+  .test-qtext {
+    font-size: 18px; font-weight: 700; color: #fff;
+    line-height: 1.45; margin-bottom: 22px;
+  }
+
+  .opt-btn {
+    display: flex; align-items: center; gap: 12px;
+    width: 100%; padding: 14px 16px; margin-bottom: 8px;
+    border-radius: 10px; border: 2px solid rgba(255,255,255,.12);
+    background: rgba(255,255,255,.04); cursor: pointer;
+    text-align: left; font-family: inherit; transition: border-color .15s;
+  }
+  .opt-btn:active { background: rgba(255,255,255,.09); }
+  .opt-btn.sel {
+    border-color: var(--gold); background: rgba(244,165,42,.12);
+  }
+  .opt-circle {
+    width: 22px; height: 22px; border-radius: 50%;
+    border: 2px solid rgba(255,255,255,.3);
+    background: transparent; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .opt-sq {
+    width: 22px; height: 22px; border-radius: 4px;
+    border: 2px solid rgba(255,255,255,.3);
+    background: transparent; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .opt-btn.sel .opt-circle, .opt-btn.sel .opt-sq {
+    border-color: var(--gold); background: var(--gold);
+  }
+  .opt-mark { color: var(--navy); font-size: 13px; font-weight: 900; }
+  .opt-text { font-size: 14px; color: #fff; line-height: 1.4; }
+  .opt-btn.sel .opt-text { color: #fff; font-weight: 600; }
+
+  .test-timer {
+    font-size: 22px; font-weight: 900; font-variant-numeric: tabular-nums;
+    letter-spacing: .06em; color: #fff;
+  }
+  .test-timer.urgent { color: var(--red); }
+
+  .test-footer {
+    padding: 14px 16px; background: rgba(0,0,0,.4);
+    display: flex; gap: 10px; flex-shrink: 0;
+    border-top: 1px solid rgba(255,255,255,.08);
+  }
+
+  /* Навигация по вопросам (мини-точки) */
+  .q-dots { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 16px; }
+  .q-dot {
+    width: 28px; height: 28px; border-radius: 6px; border: none;
+    font-size: 11px; font-weight: 800; cursor: pointer;
+    background: rgba(255,255,255,.1); color: rgba(255,255,255,.5);
+  }
+  .q-dot.done  { background: rgba(22,163,74,.4); color: #fff; }
+  .q-dot.cur   { background: var(--gold); color: var(--navy); }
+
+  /* ── РЕЗУЛЬТАТ ── */
+  .result-circle {
+    width: 120px; height: 120px; border-radius: 50%;
+    margin: 0 auto 20px;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+  }
+  .result-score {
+    font-size: 38px; font-weight: 900; line-height: 1;
+  }
+  .result-lbl { font-size: 11px; font-weight: 700; margin-top: 2px; }
+  .review-item {
+    padding: 14px; border-radius: 10px; margin-bottom: 10px;
+  }
+  .review-item.ok   { background: var(--greenbg); border: 1px solid var(--green); }
+  .review-item.fail { background: var(--redbg);   border: 1px solid var(--red); }
+  .review-q { font-size: 13px; font-weight: 700; color: var(--navy); margin-bottom: 6px; }
+  .review-ans { font-size: 12px; margin-bottom: 4px; }
+  .review-exp { font-size: 11px; color: var(--gray); border-top: 1px solid rgba(0,0,0,.08); padding-top: 6px; margin-top: 6px; }
+
+  /* ── БЭЙДЖИ ── */
+  .badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 3px 10px; border-radius: 99px; font-size: 11px; font-weight: 800;
+  }
+  .badge-green { background: var(--greenbg); color: var(--green); border: 1px solid var(--green); }
+  .badge-red   { background: var(--redbg);   color: var(--red);   border: 1px solid var(--red);   }
+  .badge-yellow{ background: var(--yellowbg);color: var(--yellow); border: 1px solid var(--yellow);}
+
+  /* ── STATS GRID ── */
+  .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; }
+  .stat-box { background: var(--light); border-radius: 10px; padding: 14px 12px; text-align: center; }
+  .stat-val { font-size: 26px; font-weight: 900; color: var(--navy); line-height: 1; }
+  .stat-lbl { font-size: 11px; color: var(--gray); margin-top: 3px; font-weight: 600; }
+
+  /* ── УВЕДОМЛЕНИЕ "ДОБАВИТЬ НА ЭКРАН" ── */
+  #installBanner {
+    display: none; background: var(--navy2); color: #fff;
+    padding: 12px 16px; font-size: 13px; font-weight: 600;
+    align-items: center; gap:10px;
+  }
+  #installBanner.show { display: flex; }
+
+  /* ── BOTTOM NAV ── */
+  .bottom-nav {
+    display: flex; background: #fff;
+    border-top: 1px solid var(--border);
+    position: sticky; bottom: 0; z-index: 50;
+  }
+  .bottom-nav button {
+    flex: 1; padding: 10px 4px; border: none; background: none;
+    display: flex; flex-direction: column; align-items: center; gap: 2px;
+    cursor: pointer; font-family: inherit;
+  }
+  .bottom-nav .nav-icon { font-size: 20px; }
+  .bottom-nav .nav-lbl { font-size: 10px; font-weight: 700; color: var(--gray); }
+  .bottom-nav button.active .nav-lbl { color: var(--gold); }
+  .bottom-nav button.active .nav-icon { filter: none; }
+
+  @media (min-width: 600px) {
+    .screen { padding: 24px; }
+    .test-qtext { font-size: 20px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- БАННЕР УСТАНОВКИ -->
+<div id="installBanner">
+  <span>📱</span>
+  <span>Добавьте на главный экран для быстрого доступа</span>
+  <button id="installBtn" class="btn btn-gold btn-sm" style="margin-left:auto;white-space:nowrap">Добавить</button>
+  <button onclick="document.getElementById('installBanner').classList.remove('show')"
+    style="background:none;border:none;color:rgba(255,255,255,.5);font-size:18px;cursor:pointer;padding:0 4px">✕</button>
+</div>
+
+<!-- ШАПКА -->
+<div class="app-header">
+  <div class="logo">
+    <div class="logo-bar"></div>
+    <span>CARAVAN RESOURCES</span>
+  </div>
+  <div id="headerStatus" style="font-size:11px;color:rgba(255,255,255,.5)">Допуск в карьер</div>
+</div>
+
+<!-- ════════════════════════════════════════ -->
+<!-- ЭКРАН 1: ГЛАВНАЯ / СТАРТ               -->
+<!-- ════════════════════════════════════════ -->
+<div id="homeScreen" class="screen active">
+
+  <!-- Приветствие -->
+  <div style="padding:16px 0 8px;text-align:center">
+    <div style="font-size:40px;margin-bottom:8px">⛏</div>
+    <div style="font-size:22px;font-weight:900;color:var(--navy);margin-bottom:4px">
+      Сдача теста на допуск
+    </div>
+    <div style="font-size:13px;color:var(--gray)">
+      Caravan Resources · Карьер
+    </div>
+  </div>
+
+  <!-- Шаг 1: Сотрудник -->
+  <div class="card">
+    <div class="card-title">👷 Шаг 1. Выберите себя</div>
+
+    <div class="field">
+      <input type="text" id="empSearch" placeholder="🔍 Начните вводить ФИО..."
+        oninput="filterEmployees(this.value)">
+    </div>
+
+    <div id="empList" class="emp-list" style="max-height:240px;overflow-y:auto"></div>
+
+    <div style="display:flex;align-items:center;gap:10px;margin:12px 0 8px">
+      <div style="flex:1;height:1px;background:var(--border)"></div>
+      <span style="font-size:11px;color:var(--gray);white-space:nowrap">или введите вручную</span>
+      <div style="flex:1;height:1px;background:var(--border)"></div>
+    </div>
+
+    <div class="field">
+      <input type="text" id="manualName" placeholder="ФИО сотрудника..."
+        oninput="onManualName(this.value)">
+    </div>
+
+    <!-- Выбранный -->
+    <div id="selectedEmpBlock" style="display:none;background:var(--greenbg);
+      border:1px solid var(--green);border-radius:10px;padding:12px;
+      display:none;align-items:center;gap:10px">
+      <div class="emp-avatar" id="selAvatar" style="background:var(--green)">✓</div>
+      <div>
+        <div id="selName" style="font-size:14px;font-weight:800;color:var(--navy)"></div>
+        <div id="selPos"  style="font-size:11px;color:var(--gray)"></div>
+      </div>
+      <button onclick="clearEmployee()"
+        style="margin-left:auto;background:none;border:none;
+        color:var(--gray);font-size:18px;cursor:pointer">✕</button>
+    </div>
+  </div>
+
+  <!-- Шаг 2: Тест -->
+  <div class="card" id="step2Card" style="opacity:.4;pointer-events:none">
+    <div class="card-title">📋 Шаг 2. Выберите тест</div>
+    <div id="testList"></div>
+  </div>
+
+  <!-- Кнопка старт -->
+  <button class="btn btn-gold btn-lg" id="startBtn" disabled onclick="startTest()">
+    ▶ Начать тест
+  </button>
+
+  <div style="height:80px"></div>
+</div>
+
+<!-- ════════════════════════════════════════ -->
+<!-- ЭКРАН 2: МОИ РЕЗУЛЬТАТЫ                -->
+<!-- ════════════════════════════════════════ -->
+<div id="historyScreen" class="screen">
+  <div class="card-title" style="padding-top:8px">📊 История сдач</div>
+  <div id="historyList"></div>
+  <div style="height:80px"></div>
+</div>
+
+<!-- ════════════════════════════════════════ -->
+<!-- ЭКРАН 3: ИНФО                          -->
+<!-- ════════════════════════════════════════ -->
+<div id="infoScreen" class="screen">
+  <div class="card">
+    <div class="card-title">ℹ️ О системе</div>
+    <p style="font-size:13px;color:var(--gray);line-height:1.7;margin-bottom:12px">
+      Система автоматизированного тестирования для получения допуска в карьер.
+      Результаты сохраняются и передаются инструктору.
+    </p>
+    <p style="font-size:13px;color:var(--gray);line-height:1.7">
+      <strong style="color:var(--navy)">При проблемах обращайтесь:</strong><br>
+      Инструктор по эксплуатации оборудования
+    </p>
+  </div>
+  <div class="card">
+    <div class="card-title">📱 Добавить на экран телефона</div>
+    <div style="font-size:13px;color:var(--gray);line-height:1.8">
+      <strong>iPhone (Safari):</strong><br>
+      Нажмите 📤 → «На экран Домой»<br><br>
+      <strong>Android (Chrome):</strong><br>
+      Нажмите ⋮ → «Добавить на гл. экран»<br><br>
+      После этого приложение откроется без браузера.
+    </div>
+  </div>
+  <div style="height:80px"></div>
+</div>
+
+<!-- ════════════════════════════════════════ -->
+<!-- НИЖНЯЯ НАВИГАЦИЯ                       -->
+<!-- ════════════════════════════════════════ -->
+<div class="bottom-nav">
+  <button class="active" id="navHome" onclick="showScreen('home')">
+    <span class="nav-icon">🏠</span>
+    <span class="nav-lbl">Главная</span>
+  </button>
+  <button id="navHistory" onclick="showScreen('history')">
+    <span class="nav-icon">📊</span>
+    <span class="nav-lbl">Мои сдачи</span>
+  </button>
+  <button id="navInfo" onclick="showScreen('info')">
+    <span class="nav-icon">ℹ️</span>
+    <span class="nav-lbl">Справка</span>
+  </button>
+</div>
+
+<!-- ════════════════════════════════════════ -->
+<!-- ПОЛНОЭКРАННЫЙ ТЕСТ                     -->
+<!-- ════════════════════════════════════════ -->
+<div id="testScreen">
+  <div class="test-topbar">
+    <div style="display:flex;align-items:center;gap:10px">
+      <button onclick="confirmAbort()" class="btn btn-ghost btn-sm"
+        style="color:rgba(255,255,255,.6);border-color:rgba(255,255,255,.2)">✕</button>
+      <div>
+        <div style="font-size:13px;font-weight:800;color:#fff" id="testTitle">—</div>
+        <div style="font-size:10px;color:rgba(255,255,255,.4)" id="testWorker">—</div>
+      </div>
+    </div>
+    <div class="test-timer" id="timerDisplay">00:00</div>
+  </div>
+  <div class="test-progress-wrap">
+    <div class="test-progress-bar" id="progressBar" style="width:0%"></div>
+  </div>
+
+  <div class="test-body" id="testBody">
+    <!-- заполняется JS -->
+  </div>
+
+  <div class="test-footer">
+    <button class="btn btn-ghost btn-md" id="btnPrev"
+      onclick="navigate(-1)" disabled
+      style="color:rgba(255,255,255,.6);border-color:rgba(255,255,255,.2)">← Назад</button>
+    <button class="btn btn-navy btn-md" id="btnNext"
+      onclick="navigate(1)" style="flex:1">Далее →</button>
+    <button class="btn btn-gold btn-md" id="btnFinish"
+      onclick="finishTest()" style="display:none;flex:1">✓ Завершить</button>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════ -->
+<!-- МОДАЛКА РЕЗУЛЬТАТА                     -->
+<!-- ════════════════════════════════════════ -->
+<div id="resultModal" style="display:none;position:fixed;inset:0;
+  background:rgba(0,0,0,.7);z-index:300;overflow-y:auto">
+  <div style="max-width:520px;margin:20px auto;padding:16px">
+    <div class="card" style="text-align:center;padding:28px 20px">
+      <div id="resultIcon" style="font-size:52px;margin-bottom:12px">🏆</div>
+      <div id="resultTitle" style="font-size:24px;font-weight:900;margin-bottom:4px"></div>
+      <div id="resultSub"   style="font-size:13px;color:var(--gray);margin-bottom:20px"></div>
+
+      <div class="result-circle" id="resultCircle">
+        <div class="result-score" id="resultScore"></div>
+        <div class="result-lbl">РЕЗУЛЬТАТ</div>
+      </div>
+
+      <div class="stats-grid">
+        <div class="stat-box">
+          <div class="stat-val" id="rCorrect">—</div>
+          <div class="stat-lbl">Правильных</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-val" id="rTime">—</div>
+          <div class="stat-lbl">Время (мин)</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-val" id="rPassing">—</div>
+          <div class="stat-lbl">Проходной балл</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-val" id="rAttempt">—</div>
+          <div class="stat-lbl">Попытка №</div>
+        </div>
+      </div>
+
+      <div id="failWarning" style="display:none;background:var(--yellowbg);
+        border:1px solid var(--yellow);border-radius:10px;padding:12px;
+        margin-bottom:16px;font-size:13px;color:var(--yellow);font-weight:700">
+        Для допуска необходимо <span id="failPassScore"></span>%.
+        Обратитесь к инструктору для повторного прохождения.
+      </div>
+
+      <!-- Разбор -->
+      <details style="text-align:left;margin-bottom:16px">
+        <summary style="cursor:pointer;font-weight:800;color:var(--navy);
+          font-size:14px;padding:8px 0">📖 Разбор ответов</summary>
+        <div id="reviewList" style="margin-top:10px"></div>
+      </details>
+
+      <div style="display:flex;gap:10px;flex-direction:column">
+        <button class="btn btn-gold btn-lg" onclick="closeResult()">
+          ← На главную
+        </button>
+        <button class="btn btn-ghost btn-lg" onclick="retryTest()"
+          id="retryBtn" style="display:none">
+          🔄 Пройти ещё раз
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ══════════════════════════════════════════════════════
+// КОНФИГУРАЦИЯ — МЕНЯТЬ ЗДЕСЬ
+// ══════════════════════════════════════════════════════
+const CFG = {
+  // URL вашего Google Apps Script (для сохранения результатов)
+  // Оставьте пустым — система работает без сохранения
+  SHEET_URL: "https://script.google.com/macros/s/AKfycbwhdMV20k8US2BXUz1Xk2XCXE9MEwpHpQaadTF9xEfzbU1--dHL-Zuj06K2qXW-rFtKGw/exec",
+
+  // Предупреждать о проходном балле
+  WARN_DAYS: 30,
+};
+
+// ══════════════════════════════════════════════════════
+// БАЗА СОТРУДНИКОВ (загружается из Sheets или демо)
+// ══════════════════════════════════════════════════════
+let EMPLOYEES = [
+  {id:"1", name:"Ахметов Серик Болатович",    pos:"Машинист экскаватора", site:"Алмалы"},
+  {id:"2", name:"Байжанов Руслан Темирович",   pos:"Водитель БелАЗ",       site:"Ашыктас"},
+  {id:"3", name:"Сейткали Айбек Маратович",   pos:"Машинист бульдозера",  site:"Алмалы"},
+  {id:"4", name:"Дюсенов Нурлан Асылович",    pos:"Оператор буровой",     site:"Ашыктас"},
+  {id:"5", name:"Касымов Бауыржан Ерланович", pos:"Машинист экскаватора", site:"Алмалы"},
+  {id:"6", name:"Нурмаганбетов Дамир Б.",     pos:"Водитель БелАЗ",       site:"Алмалы"},
+  {id:"7", name:"Жумабаев Серік Қайратович",  pos:"Машинист грейдера",    site:"Ашыктас"},
+  {id:"8", name:"Тулеев Арман Маратович",     pos:"Водитель погрузчика",  site:"Алмалы"},
+];
+
+// ══════════════════════════════════════════════════════
+// БАНК ТЕСТОВ
+// ══════════════════════════════════════════════════════
+const DEMO_TESTS = [
+  {
+    id:"t1", title:"Допуск в карьер — Базовый курс",
+    passingScore:80, timeLimit:20, active:true,
+    questions:[
+      {id:"q1",text:"Что необходимо сделать перед въездом в карьер?",type:"single",
+       options:["Позвонить диспетчеру","Получить допуск у начальника карьера или мастера смены","Проверить уровень топлива","Надеть каску и жилет"],
+       correct:[1],explanation:"Въезд без допуска запрещён. Допуск выдаёт начальник карьера или мастер смены."},
+      {id:"q2",text:"Минимальная дистанция за впереди идущим транспортом в карьере?",type:"single",
+       options:["10 метров","20 метров","50 метров","100 метров"],
+       correct:[2],explanation:"Минимальное безопасное расстояние — 50 метров. При плохой видимости — вдвое больше."},
+      {id:"q3",text:"Какие действия запрещены при работе экскаватора?",type:"multi",
+       options:["Нахождение людей в радиусе действия стрелы","Подача звукового сигнала перед началом работы","Работа при видимости менее 50 м без освещения","Остановка двигателя при длительном перерыве","Подъезд самосвала под ковш без сигнала машиниста"],
+       correct:[0,2,4],explanation:"Запрещено: люди в зоне стрелы, работа без освещения в тумане, подъезд самосвала без сигнала."},
+      {id:"q4",text:"При обнаружении неисправности тормозной системы водитель обязан:",type:"single",
+       options:["Снизить скорость и доехать до базы","Немедленно остановить машину и сообщить мастеру","Продолжить работу до конца смены","Самостоятельно устранить неисправность"],
+       correct:[1],explanation:"Любая неисправность тормозов — немедленная остановка и доклад мастеру."},
+      {id:"q5",text:"Максимальная скорость для груженого самосвала в карьере:",type:"single",
+       options:["10 км/ч","20 км/ч","30 км/ч","40 км/ч"],
+       correct:[1],explanation:"Для груженых самосвалов — не более 20 км/ч. Для порожних на прямых — до 30 км/ч."},
+      {id:"q6",text:"Обязательные средства индивидуальной защиты в карьере:",type:"multi",
+       options:["Защитная каска","Солнцезащитные очки","Сигнальный жилет","Защитная обувь","Беруши при работе вблизи взрывов"],
+       correct:[0,2,3,4],explanation:"Обязательны: каска, сигнальный жилет, защитная обувь, беруши при взрывных работах."},
+      {id:"q7",text:"При сигнале 'Взрыв' персонал должен:",type:"single",
+       options:["Продолжить работу в кабине машины","Немедленно покинуть опасную зону по установленному маршруту","Остановить технику и наблюдать","Позвонить мастеру за инструкциями"],
+       correct:[1],explanation:"Немедленная эвакуация по заранее установленным маршрутам. Самовольный выбор маршрута запрещён."},
+      {id:"q8",text:"Нормативный угол откоса рабочего уступа не должен превышать:",type:"single",
+       options:["30°","45°","60°","80°"],
+       correct:[2],explanation:"Согласно ПБ, угол откоса рабочего уступа не должен превышать 60° для мягких пород."},
+      {id:"q9",text:"Для чего используется радиосвязь в карьере?",type:"multi",
+       options:["Координация движения транспорта","Оповещение о взрывных работах","Личные переговоры","Вызов аварийных служб"],
+       correct:[0,1,3],explanation:"Радиосвязь — только для производственных нужд. Личное использование запрещено."},
+      {id:"q10",text:"Кто несёт ответственность за соблюдение правил безопасности?",type:"single",
+       options:["Только начальник карьера","Только служба HSE","Каждый работник лично","Только мастер смены"],
+       correct:[2],explanation:"Каждый работник несёт личную ответственность за соблюдение правил безопасности."},
+    ]
+  },
+  {
+    id:"t2", title:"Правила дорожного движения в карьере",
+    passingScore:85, timeLimit:15, active:true,
+    questions:[
+      {id:"q1",text:"На каком расстоянии от края дороги запрещена остановка транспорта?",type:"single",
+       options:["0.5 метра","1 метр","2 метра","5 метров"],
+       correct:[2],explanation:"Остановка на расстоянии менее 2 метров от края проезжей части карьерной дороги запрещена."},
+      {id:"q2",text:"Кто имеет преимущество на перекрёстке карьерных дорог?",type:"single",
+       options:["Порожний транспорт","Груженый транспорт","Транспорт справа","Транспорт снизу вверх"],
+       correct:[1],explanation:"Груженый транспорт имеет преимущество перед порожним. Движение снизу вверх также имеет приоритет."},
+      {id:"q3",text:"Что запрещено при движении в карьере?",type:"multi",
+       options:["Обгон в зоне разгрузки","Движение задним ходом без сигнальщика","Включение ближнего света при тумане","Остановка на уклоне более 8°"],
+       correct:[0,1,3],explanation:"Запрещены: обгон в зонах разгрузки, движение задним ходом без сигнальщика, остановка на крутых уклонах."},
+      {id:"q4",text:"Минимальная ширина карьерной дороги для двустороннего движения:",type:"single",
+       options:["Ширина кузова × 2","Ширина кузова × 3","Ширина кузова × 2 + 1.5м","Ширина кузова × 3 + 2м"],
+       correct:[2],explanation:"Минимальная ширина проезжей части = ширина кузова самосвала × 2 + не менее 1.5м на каждую сторону."},
+      {id:"q5",text:"В каких случаях движение в карьере запрещается?",type:"multi",
+       options:["Видимость менее 50 метров","Гололёд без обработки","Скорость ветра более 25 м/с","Температура ниже -30°С","Ведение взрывных работ"],
+       correct:[0,1,2,4],explanation:"Движение запрещено при плохой видимости, гололёде, сильном ветре и во время взрывных работ."},
+    ]
+  },
+];
+
+let TESTS = []; // загружается из Google Sheets
+
+async function loadTestsFromSheets() {
+  try {
+    const r = await fetch(`${CFG.SHEET_URL}?action=getTests`);
+    const data = await r.json();
+    if (Array.isArray(data) && data.length > 0) {
+      TESTS = data;
+      renderTests();
+      console.log("Тесты загружены из Sheets:", TESTS.length);
+    }
+  } catch(e) {
+    console.log("Тесты из Sheets недоступны, используем встроенные");
+    // fallback — встроенные демо-тесты
+    TESTS = DEMO_TESTS;
+    renderTests();
+  }
+}
+
+// ══════════════════════════════════════════════════════
+// СОСТОЯНИЕ ПРИЛОЖЕНИЯ
+// ══════════════════════════════════════════════════════
+let state = {
+  selectedEmp: null,   // {id, name, pos, site}
+  selectedTest: null,  // Test object
+  currentQ: 0,
+  answers: {},         // {qId: [indices]}
+  startTime: null,
+  timerInterval: null,
+  timeLeft: 0,
+  history: JSON.parse(localStorage.getItem("cr_results")||"[]"),
+};
+
+// ══════════════════════════════════════════════════════
+// ИНИЦИАЛИЗАЦИЯ
+// ══════════════════════════════════════════════════════
+window.addEventListener("DOMContentLoaded", ()=>{
+  renderEmployees("");
+  renderTests();
+  renderHistory();
+
+  // Загрузка сотрудников из Sheets если настроено
+  if (CFG.SHEET_URL) loadEmployeesFromSheets();
+  if (CFG.SHEET_URL) loadTestsFromSheets();
+  else { TESTS = DEMO_TESTS; renderTests(); }
+
+  // PWA install
+  let deferredPrompt;
+  window.addEventListener("beforeinstallprompt", e=>{
+    e.preventDefault(); deferredPrompt = e;
+    document.getElementById("installBanner").classList.add("show");
+    document.getElementById("installBtn").onclick = ()=>{
+      deferredPrompt.prompt();
+      document.getElementById("installBanner").classList.remove("show");
+    };
+  });
+});
+
+async function loadEmployeesFromSheets() {
+  try {
+    const r = await fetch(`${CFG.SHEET_URL}?action=list`);
+    const data = await r.json();
+    if (Array.isArray(data) && data.length > 0) {
+      EMPLOYEES = data.map(e=>({
+        id:e.id, name:e.name, pos:e.position, site:e.site
+      }));
+      renderEmployees("");
+    }
+  } catch(e) { console.log("Sheets недоступен, используем демо-данные"); }
+}
+
+// ══════════════════════════════════════════════════════
+// НАВИГАЦИЯ
+// ══════════════════════════════════════════════════════
+function showScreen(name) {
+  ["homeScreen","historyScreen","infoScreen"].forEach(id=>{
+    document.getElementById(id).classList.remove("active");
+  });
+  ["navHome","navHistory","navInfo"].forEach(id=>{
+    document.getElementById(id).classList.remove("active");
+  });
+  document.getElementById(name+"Screen").classList.add("active");
+  document.getElementById("nav"+name.charAt(0).toUpperCase()+name.slice(1)).classList.add("active");
+  if (name==="history") renderHistory();
+}
+
+// ══════════════════════════════════════════════════════
+// СОТРУДНИКИ
+// ══════════════════════════════════════════════════════
+function renderEmployees(query) {
+  const list = document.getElementById("empList");
+  const q = query.toLowerCase();
+  const filtered = EMPLOYEES.filter(e=>e.name.toLowerCase().includes(q));
+
+  if (!query) { list.innerHTML=""; return; }
+
+  if (filtered.length===0) {
+    list.innerHTML = `<div style="padding:14px;color:var(--gray);font-size:13px;text-align:center">
+      Не найдено</div>`;
+    return;
+  }
+
+  list.innerHTML = filtered.slice(0,6).map(e=>`
+    <button class="emp-item ${state.selectedEmp?.id===e.id?"selected":""}"
+      onclick="selectEmployee(${JSON.stringify(e).replace(/"/g,'&quot;')})">
+      <div class="emp-avatar">${initials(e.name)}</div>
+      <div>
+        <div class="emp-name">${e.name}</div>
+        <div class="emp-pos">${e.pos} · ${e.site}</div>
+      </div>
+      ${state.selectedEmp?.id===e.id?'<span style="margin-left:auto;color:var(--gold)">✓</span>':""}
+    </button>
+  `).join("");
+}
+
+function filterEmployees(val) { renderEmployees(val); }
+
+function selectEmployee(emp) {
+  state.selectedEmp = emp;
+  document.getElementById("empSearch").value = "";
+  document.getElementById("manualName").value = "";
+  renderEmployees("");
+  showSelectedEmp(emp.name, emp.pos);
+}
+
+function onManualName(val) {
+  if (val.trim().length > 2) {
+    state.selectedEmp = {id:"manual", name:val.trim(), pos:"", site:""};
+    document.getElementById("empSearch").value = "";
+    renderEmployees("");
+    showSelectedEmp(val.trim(), "");
+  } else {
+    state.selectedEmp = null;
+    hideSelectedEmp();
+  }
+  updateStartBtn();
+}
+
+function showSelectedEmp(name, pos) {
+  const block = document.getElementById("selectedEmpBlock");
+  block.style.display = "flex";
+  document.getElementById("selName").textContent = name;
+  document.getElementById("selPos").textContent = pos;
+  document.getElementById("selAvatar").textContent = initials(name);
+  document.getElementById("step2Card").style.opacity = "1";
+  document.getElementById("step2Card").style.pointerEvents = "auto";
+  updateStartBtn();
+}
+
+function hideSelectedEmp() {
+  document.getElementById("selectedEmpBlock").style.display = "none";
+  document.getElementById("step2Card").style.opacity = ".4";
+  document.getElementById("step2Card").style.pointerEvents = "none";
+}
+
+function clearEmployee() {
+  state.selectedEmp = null;
+  state.selectedTest = null;
+  document.getElementById("manualName").value = "";
+  document.getElementById("empSearch").value = "";
+  hideSelectedEmp();
+  renderTests();
+  updateStartBtn();
+}
+
+// ══════════════════════════════════════════════════════
+// ТЕСТЫ
+// ══════════════════════════════════════════════════════
+function renderTests() {
+  const el = document.getElementById("testList");
+  const active = TESTS.filter(t=>t.active);
+  el.innerHTML = active.map(t=>`
+    <div class="test-card ${state.selectedTest?.id===t.id?"selected":""}"
+      onclick="selectTest('${t.id}')">
+      <div class="test-icon">${state.selectedTest?.id===t.id?"📋":"📝"}</div>
+      <div>
+        <div class="test-title">${t.title}</div>
+        <div class="test-meta">${t.questions.length} вопр. · ${t.timeLimit} мин. · проходной ${t.passingScore}%</div>
+      </div>
+      ${state.selectedTest?.id===t.id?'<div class="test-check">✓</div>':""}
+    </div>
+  `).join("") || '<div style="color:var(--gray);font-size:13px;text-align:center;padding:16px">Нет доступных тестов</div>';
+}
+
+function selectTest(id) {
+  state.selectedTest = TESTS.find(t=>t.id===id);
+  renderTests();
+  updateStartBtn();
+}
+
+function updateStartBtn() {
+  const btn = document.getElementById("startBtn");
+  btn.disabled = !(state.selectedEmp && state.selectedTest);
+}
+
+// ══════════════════════════════════════════════════════
+// ЗАПУСК ТЕСТА
+// ══════════════════════════════════════════════════════
+function startTest() {
+  if (!state.selectedEmp || !state.selectedTest) return;
+  state.currentQ = 0;
+  state.answers = {};
+  state.startTime = Date.now();
+  state.timeLeft = state.selectedTest.timeLimit * 60;
+
+  document.getElementById("testTitle").textContent = state.selectedTest.title;
+  document.getElementById("testWorker").textContent = state.selectedEmp.name;
+  document.getElementById("testScreen").classList.add("active");
+
+  renderQuestion();
+  startTimer();
+}
+
+function startTimer() {
+  clearInterval(state.timerInterval);
+  updateTimerDisplay();
+  state.timerInterval = setInterval(()=>{
+    state.timeLeft--;
+    updateTimerDisplay();
+    if (state.timeLeft <= 0) {
+      clearInterval(state.timerInterval);
+      finishTest(true);
+    }
+  }, 1000);
+}
+
+function updateTimerDisplay() {
+  const m = Math.floor(state.timeLeft/60);
+  const s = state.timeLeft % 60;
+  const el = document.getElementById("timerDisplay");
+  el.textContent = `${pad(m)}:${pad(s)}`;
+  el.className = "test-timer" + (state.timeLeft<60?" urgent":"");
+}
+
+function pad(n) { return String(n).padStart(2,"0"); }
+
+// ══════════════════════════════════════════════════════
+// РЕНДЕР ВОПРОСА
+// ══════════════════════════════════════════════════════
+function renderQuestion() {
+  const test = state.selectedTest;
+  const qi = state.currentQ;
+  const q = test.questions[qi];
+  const total = test.questions.length;
+  const sel = state.answers[q.id] || [];
+
+  // Прогресс
+  document.getElementById("progressBar").style.width = ((qi+1)/total*100)+"%";
+
+  // Кнопки навигации
+  document.getElementById("btnPrev").disabled = qi===0;
+  const isLast = qi===total-1;
+  const allAnswered = Object.keys(state.answers).length >= total;
+  document.getElementById("btnNext").style.display = isLast?"none":"block";
+  document.getElementById("btnFinish").style.display = isLast?"block":"none";
+  document.getElementById("btnFinish").disabled = !allAnswered;
+
+  // Точки
+  const dots = test.questions.map((qu,i)=>{
+    const done = state.answers[qu.id] && state.answers[qu.id].length>0;
+    const cur  = i===qi;
+    return `<button class="q-dot ${cur?"cur":done?"done":""}"
+      onclick="goToQ(${i})">${i+1}</button>`;
+  }).join("");
+
+  document.getElementById("testBody").innerHTML = `
+    <div class="q-dots">${dots}</div>
+    <div class="test-qnum">${qi+1} / ${total}</div>
+    <div class="test-qtype">${q.type==="multi"?"☑ Несколько правильных":"◯ Один правильный ответ"}</div>
+    <div class="test-qtext">${q.text}</div>
+    <div id="optList">
+      ${q.options.map((opt,i)=>`
+        <button class="opt-btn ${sel.includes(i)?"sel":""}"
+          onclick="toggleAnswer(${i})">
+          <div class="${q.type==="multi"?"opt-sq":"opt-circle"}">
+            ${sel.includes(i)?'<span class="opt-mark">'+(q.type==="multi"?"✓":"●")+'</span>':""}
+          </div>
+          <span class="opt-text">${opt}</span>
+        </button>
+      `).join("")}
+    </div>
+  `;
+}
+
+function goToQ(i) {
+  state.currentQ = i;
+  renderQuestion();
+}
+
+function navigate(dir) {
+  state.currentQ = Math.max(0, Math.min(state.selectedTest.questions.length-1, state.currentQ+dir));
+  renderQuestion();
+}
+
+function toggleAnswer(idx) {
+  const q = state.selectedTest.questions[state.currentQ];
+  const cur = state.answers[q.id] || [];
+  if (q.type==="single") {
+    state.answers[q.id] = [idx];
+  } else {
+    state.answers[q.id] = cur.includes(idx) ? cur.filter(i=>i!==idx) : [...cur,idx];
+  }
+  renderQuestion();
+
+  // Автопереход для одиночных
+  if (q.type==="single" && state.currentQ < state.selectedTest.questions.length-1) {
+    setTimeout(()=>navigate(1), 350);
+  }
+}
+
+// ══════════════════════════════════════════════════════
+// ЗАВЕРШЕНИЕ ТЕСТА
+// ══════════════════════════════════════════════════════
+function confirmAbort() {
+  if (confirm("Прервать тест? Результат не будет сохранён.")) {
+    clearInterval(state.timerInterval);
+    document.getElementById("testScreen").classList.remove("active");
+  }
+}
+
+function finishTest(expired=false) {
+  clearInterval(state.timerInterval);
+  const test = state.selectedTest;
+  const duration = Math.max(1, Math.round((Date.now()-state.startTime)/60000));
+
+  let correct=0;
+  test.questions.forEach(q=>{
+    const given = (state.answers[q.id]||[]).slice().sort().join(",");
+    const right = q.correct.slice().sort().join(",");
+    if (given===right) correct++;
+  });
+
+  const score = Math.round((correct/test.questions.length)*100);
+  const passed = score >= test.passingScore;
+
+  const result = {
+    id: "r"+Date.now(),
+    testId: test.id,
+    testTitle: test.title,
+    empName: state.selectedEmp.name,
+    date: new Date().toISOString().split("T")[0],
+    score, passed, duration, expired,
+    correctQ: correct,
+    totalQ: test.questions.length,
+    answers: {...state.answers},
+    passingScore: test.passingScore,
+  };
+
+  // Сохранение локально
+  state.history.unshift(result);
+  localStorage.setItem("cr_results", JSON.stringify(state.history.slice(0,50)));
+
+  // Отправка в Sheets
+  if (CFG.SHEET_URL) saveResultToSheets(result);
+
+  // Скрыть тест-экран
+  document.getElementById("testScreen").classList.remove("active");
+
+  // Показать результат
+  showResult(result);
+}
+
+async function saveResultToSheets(result) {
+  try {
+    await fetch(CFG.SHEET_URL, {
+      method:"POST",
+      body: JSON.stringify({action:"saveResult", result})
+    });
+
+    // Если тест сдан — автоматически обновляем дату допуска
+    if (result.passed && result.empName && result.empName !== "—") {
+      const today    = new Date();
+      const passDate = today.toISOString().split("T")[0]; // yyyy-mm-dd
+      const validDate = new Date(today);
+      validDate.setFullYear(validDate.getFullYear() + 1);
+      const validUntil = validDate.toISOString().split("T")[0];
+
+      await fetch(CFG.SHEET_URL, {
+        method:"POST",
+        body: JSON.stringify({
+          action: "updateAccess",
+          empName:   result.empName,
+          passDate:  passDate,
+          validUntil: validUntil,
+        })
+      });
+      console.log("Допуск обновлён:", result.empName, passDate, "→", validUntil);
+    }
+  } catch(e) { console.log("Ошибка сохранения:", e); }
+}
+
+function showResult(result) {
+  const test = TESTS.find(t=>t.id===result.testId);
+
+  document.getElementById("resultModal").style.display = "block";
+  document.getElementById("resultIcon").textContent = result.passed?"🏆":"📋";
+  document.getElementById("resultTitle").textContent = result.passed?"ТЕСТ СДАН":"ТЕСТ НЕ СДАН";
+  document.getElementById("resultTitle").style.color = result.passed?"var(--green)":"var(--red)";
+  document.getElementById("resultSub").textContent = result.empName;
+
+  const circle = document.getElementById("resultCircle");
+  circle.style.background = result.passed?"var(--greenbg)":"var(--redbg)";
+  circle.style.border = `4px solid ${result.passed?"var(--green)":"var(--red)"}`;
+  document.getElementById("resultScore").textContent = result.score+"%";
+  document.getElementById("resultScore").style.color = result.passed?"var(--green)":"var(--red)";
+
+  document.getElementById("rCorrect").textContent = `${result.correctQ}/${result.totalQ}`;
+  document.getElementById("rTime").textContent = result.duration;
+  document.getElementById("rPassing").textContent = result.passingScore+"%";
+
+  // Номер попытки
+  const attempts = state.history.filter(r=>r.testId===result.testId&&r.empName===result.empName).length;
+  document.getElementById("rAttempt").textContent = attempts;
+
+  // Предупреждение при провале
+  const fw = document.getElementById("failWarning");
+  fw.style.display = result.passed?"none":"block";
+  document.getElementById("failPassScore").textContent = result.passingScore;
+
+  // Кнопка повтора
+  document.getElementById("retryBtn").style.display = result.passed?"none":"block";
+
+  // Разбор ответов
+  if (test) {
+    const rev = test.questions.map((q,qi)=>{
+      const given = (result.answers[q.id]||[]).slice().sort().join(",");
+      const right = q.correct.slice().sort().join(",");
+      const ok = given===right;
+      const givenLabels = (result.answers[q.id]||[]).map(i=>q.options[i]).join(", ") || "Нет ответа";
+      const rightLabels = q.correct.map(i=>q.options[i]).join(", ");
+      return `
+        <div class="review-item ${ok?"ok":"fail"}">
+          <div class="review-q">${qi+1}. ${q.text}</div>
+          <div class="review-ans" style="color:${ok?"var(--green)":"var(--red)"}">
+            ${ok?"✓":"✗"} Ваш ответ: ${givenLabels}
+          </div>
+          ${!ok?`<div class="review-ans" style="color:var(--gray)">Верно: ${rightLabels}</div>`:""}
+          ${q.explanation?`<div class="review-exp">💡 ${q.explanation}</div>`:""}
+        </div>
+      `;
+    }).join("");
+    document.getElementById("reviewList").innerHTML = rev;
+  }
+}
+
+function closeResult() {
+  document.getElementById("resultModal").style.display="none";
+  // Сброс для новой сдачи
+  state.selectedTest = null;
+  renderTests();
+  updateStartBtn();
+}
+
+function retryTest() {
+  document.getElementById("resultModal").style.display="none";
+  startTest();
+}
+
+// ══════════════════════════════════════════════════════
+// ИСТОРИЯ
+// ══════════════════════════════════════════════════════
+function renderHistory() {
+  const el = document.getElementById("historyList");
+  if (state.history.length===0) {
+    el.innerHTML=`<div class="card" style="text-align:center;color:var(--gray);padding:32px">
+      <div style="font-size:36px;margin-bottom:8px">📋</div>
+      <div style="font-weight:700">Вы ещё не сдавали тестов</div>
+    </div>`;
+    return;
+  }
+  el.innerHTML = state.history.map(r=>`
+    <div class="card" style="padding:16px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div style="font-size:13px;font-weight:800;color:var(--navy)">${r.testTitle}</div>
+        <span class="badge ${r.passed?"badge-green":"badge-red"}">
+          ${r.passed?"✓ Сдал":"✗ Не сдал"}
+        </span>
+      </div>
+      <div style="display:flex;gap:12px;font-size:12px;color:var(--gray)">
+        <span>${formatDate(r.date)}</span>
+        <span>·</span>
+        <span>${r.correctQ}/${r.totalQ} верных</span>
+        <span>·</span>
+        <span style="font-weight:800;color:${r.passed?"var(--green)":"var(--red)"}">${r.score}%</span>
+        <span>·</span>
+        <span>${r.duration} мин</span>
+      </div>
+      <div style="font-size:12px;color:var(--gray);margin-top:4px">${r.empName}</div>
+    </div>
+  `).join("");
+}
+
+// ══════════════════════════════════════════════════════
+// УТИЛИТЫ
+// ══════════════════════════════════════════════════════
+function initials(name) {
+  return (name||"?").split(" ").slice(0,2).map(w=>w[0]||"").join("").toUpperCase();
+}
+function formatDate(d) {
+  if (!d) return "—";
+  const [y,m,dd]=d.split("-"); return `${dd}.${m}.${y}`;
+}
+</script>
+</body>
+</html>
