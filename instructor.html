@@ -293,7 +293,7 @@ tr:hover td { background:#FAFBFD; }
           <table>
             <thead>
               <tr>
-                <th>Сотрудник</th><th>Должность</th><th>Участок</th>
+                <th></th><th>Сотрудник</th><th>Должность</th><th>Участок</th>
                 <th>Дата прохождения</th><th>Действителен до</th>
                 <th>Статус</th><th>Дней осталось</th>
               </tr>
@@ -750,7 +750,21 @@ function renderAccessTable() {
     const dl = daysLeft(e.validUntil);
     const rowCls = st==="expired"?"row-red":st==="warning"?"row-yellow":"";
     const daysStr = dl===null?"—":dl<0?`${Math.abs(dl)} дн. назад`:`${dl} дн.`;
+    const initials = (e.name||"?").split(" ").slice(0,2).map(w=>w[0]||"").join("");
     return `<tr class="${rowCls}">
+      <td style="padding:8px 12px">
+        <div style="display:flex;align-items:center;gap:6px">
+          ${e.photoUrl && e.photoUrl !== "—" && e.photoUrl !== ""
+            ? `<img src="${e.photoUrl}" style="width:36px;height:36px;border-radius:50%;object-fit:cover;border:2px solid var(--border)">`
+            : `<div style="width:36px;height:36px;border-radius:50%;background:var(--light);border:2px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--gray)">${initials}</div>`
+          }
+          <label style="cursor:pointer;font-size:16px;line-height:1" title="Загрузить фото">
+            <input type="file" accept="image/*" style="display:none"
+              onchange="uploadPhoto(event,'${e.id}','${e.name}')">
+            📷
+          </label>
+        </div>
+      </td>
       <td><div class="emp-name">${e.name||"—"}</div></td>
       <td style="color:var(--gray);font-size:12px">${e.position||"—"}</td>
       <td><span class="badge b-gray">${e.site||"—"}</span></td>
@@ -885,6 +899,67 @@ const DEMO_RESULTS = [
   {"Дата":"28.06.2026","Время":"09:14","Сотрудник":"Трусов Иван","Тест":"Допуск в карьер — Базовый курс","Результат":"Сдал ✓","Балл (%)":90,"Правильных":9,"Всего вопросов":10,"Время (мин)":14},
   {"Дата":"27.06.2026","Время":"14:32","Сотрудник":"Ахметов Серик Болатович","Тест":"Допуск в карьер — Базовый курс","Результат":"Не сдал ✗","Балл (%)":70,"Правильных":7,"Всего вопросов":10,"Время (мин)":18},
 ];
+
+// ══════════════════════════════════════════════════════
+// ЗАГРУЗКА ФОТО
+// ══════════════════════════════════════════════════════
+async function uploadPhoto(event, empId, empName) {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  const MAX_SIZE = 800; // пикселей — уменьшаем большие фото
+  const reader = new FileReader();
+
+  reader.onload = async (e) => {
+    // Уменьшаем фото через canvas
+    const img = new Image();
+    img.onload = async () => {
+      const canvas = document.createElement("canvas");
+      let w = img.width, h = img.height;
+      if (w > MAX_SIZE || h > MAX_SIZE) {
+        if (w > h) { h = Math.round(h * MAX_SIZE/w); w = MAX_SIZE; }
+        else        { w = Math.round(w * MAX_SIZE/h); h = MAX_SIZE; }
+      }
+      canvas.width = w; canvas.height = h;
+      canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+      const base64 = canvas.toDataURL("image/jpeg", 0.85).split(",")[1];
+
+      // Показываем прогресс
+      const btn = event.target.parentElement.querySelector("span");
+      btn.textContent = "⏳";
+
+      try {
+        const res = await fetch(CFG.SHEET_URL, {
+          method: "POST",
+          body: JSON.stringify({
+            action: "uploadPhoto",
+            empId, empName, base64, mime: "image/jpeg"
+          })
+        });
+        const data = await res.json();
+        if (data.ok && data.url) {
+          // Обновляем фото в локальных данных
+          const emp = DATA.employees.find(e => e.id === empId);
+          if (emp) emp.photoUrl = data.url;
+          btn.textContent = "✅";
+          renderAccessTable();
+          renderPrintSelect();
+          setTimeout(() => { btn.textContent = "📷"; }, 2000);
+        } else {
+          btn.textContent = "❌";
+          alert("Ошибка: " + (data.error || "неизвестная ошибка"));
+          setTimeout(() => { btn.textContent = "📷"; }, 2000);
+        }
+      } catch(err) {
+        btn.textContent = "❌";
+        console.error(err);
+        setTimeout(() => { btn.textContent = "📷"; }, 2000);
+      }
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
 
 // ══════════════════════════════════════════════════════
 // ПЕЧАТЬ КАРТОЧЕК
