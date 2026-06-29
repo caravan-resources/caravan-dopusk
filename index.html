@@ -368,6 +368,15 @@ document.addEventListener("DOMContentLoaded", () => {
     <div id="testList"></div>
   </div>
 
+  <!-- Должность (показывается если пустая) -->
+  <div class="card" id="positionCard" style="display:none">
+    <div class="card-title">💼 Ваша должность</div>
+    <div class="field">
+      <input type="text" id="positionInput" placeholder="Например: Водитель карьерного самосвала"
+        oninput="updateStartBtn()">
+    </div>
+  </div>
+
   <!-- Кнопка старт -->
   <button class="btn btn-gold btn-lg" id="startBtn" disabled onclick="startTest()">
     ▶ Начать тест
@@ -759,10 +768,18 @@ function showSelectedEmp(name, pos) {
   const block = document.getElementById("selectedEmpBlock");
   block.style.display = "flex";
   document.getElementById("selName").textContent = name;
-  document.getElementById("selPos").textContent = pos;
+  document.getElementById("selPos").textContent = pos || "Должность не указана";
   document.getElementById("selAvatar").textContent = initials(name);
   document.getElementById("step2Card").style.opacity = "1";
   document.getElementById("step2Card").style.pointerEvents = "auto";
+  // Показываем поле должности только если она пустая
+  const posCard = document.getElementById("positionCard");
+  if (!pos || pos.trim() === "") {
+    posCard.style.display = "block";
+  } else {
+    posCard.style.display = "none";
+    document.getElementById("positionInput").value = pos;
+  }
   updateStartBtn();
 }
 
@@ -809,7 +826,11 @@ function selectTest(id) {
 
 function updateStartBtn() {
   const btn = document.getElementById("startBtn");
-  btn.disabled = !(state.selectedEmp && state.selectedTest);
+  const posCard = document.getElementById("positionCard");
+  const posInput = document.getElementById("positionInput");
+  const needPos = posCard && posCard.style.display !== "none";
+  const hasPos = !needPos || (posInput && posInput.value.trim().length > 2);
+  btn.disabled = !(state.selectedEmp && state.selectedTest && hasPos);
 }
 
 // ══════════════════════════════════════════════════════
@@ -989,10 +1010,14 @@ async function saveResultToSheets(result) {
     // Если тест сдан — автоматически обновляем дату допуска
     if (result.passed && result.empName && result.empName !== "—") {
       const today    = new Date();
-      const passDate = today.toISOString().split("T")[0]; // yyyy-mm-dd
+      const passDate = today.toISOString().split("T")[0];
       const validDate = new Date(today);
       validDate.setFullYear(validDate.getFullYear() + 1);
       const validUntil = validDate.toISOString().split("T")[0];
+
+      // Берём должность из поля ввода или из данных сотрудника
+      const posInput = document.getElementById("positionInput");
+      const position = posInput ? posInput.value.trim() : (state.selectedEmp?.pos || "");
 
       await fetch(CFG.SHEET_URL, {
         method:"POST",
@@ -1001,6 +1026,7 @@ async function saveResultToSheets(result) {
           empName:   result.empName,
           passDate:  passDate,
           validUntil: validUntil,
+          position:  position,
         })
       });
       console.log("Допуск обновлён:", result.empName, passDate, "→", validUntil);
