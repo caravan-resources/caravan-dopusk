@@ -1,0 +1,1101 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Панель инструктора — Caravan Resources</title>
+<style>
+* { box-sizing:border-box; margin:0; padding:0; }
+body { font-family:-apple-system,'Segoe UI',Arial,sans-serif; background:#F1F5F9; min-height:100vh; }
+
+:root {
+  --navy:#0B1A35; --navy2:#1B3B6F; --gold:#F4A52A;
+  --red:#DC2626; --redbg:#FEF2F2;
+  --green:#16A34A; --greenbg:#F0FDF4;
+  --yellow:#D97706; --yellowbg:#FFFBEB;
+  --gray:#64748B; --light:#F1F5F9; --border:#E2E8F0;
+}
+
+/* ── ЛОГИН ── */
+#loginScreen {
+  min-height:100vh; display:flex; align-items:center;
+  justify-content:center; background:var(--navy);
+}
+.login-box {
+  background:#fff; border-radius:16px; padding:40px 36px;
+  width:360px; text-align:center;
+  box-shadow:0 20px 60px rgba(0,0,0,.4);
+}
+.login-logo { font-size:48px; margin-bottom:12px; }
+.login-title { font-size:20px; font-weight:800; color:var(--navy); margin-bottom:4px; }
+.login-sub { font-size:12px; color:var(--gray); margin-bottom:28px; }
+.login-box input {
+  width:100%; border:1.5px solid var(--border); border-radius:10px;
+  padding:13px 16px; font-size:15px; font-family:inherit;
+  outline:none; margin-bottom:12px; text-align:center; letter-spacing:.2em;
+}
+.login-box input:focus { border-color:var(--gold); }
+.login-box button {
+  width:100%; background:var(--navy); color:#fff; border:none;
+  border-radius:10px; padding:13px; font-size:15px; font-weight:800;
+  cursor:pointer; font-family:inherit;
+}
+.login-box button:hover { background:var(--navy2); }
+.login-err { color:var(--red); font-size:13px; margin-top:8px; display:none; }
+
+/* ── ШАПКА ── */
+header {
+  background:var(--navy); color:#fff; height:56px;
+  display:flex; align-items:center; justify-content:space-between;
+  padding:0 20px; border-bottom:3px solid var(--gold);
+  position:sticky; top:0; z-index:100;
+}
+.hdr-logo { display:flex; align-items:center; gap:10px; }
+.hdr-bar { width:4px; height:28px; background:var(--gold); border-radius:2px; }
+.hdr-title { font-size:16px; font-weight:800; letter-spacing:.03em; }
+.hdr-sub { font-size:10px; color:rgba(255,255,255,.45); text-transform:uppercase; letter-spacing:.08em; }
+.hdr-right { display:flex; align-items:center; gap:10px; }
+.hdr-date { font-size:11px; color:rgba(255,255,255,.4); }
+
+/* ── НАВИГАЦИЯ ── */
+nav {
+  background:#fff; border-bottom:1px solid var(--border);
+  padding:0 20px; display:flex; gap:0; overflow-x:auto;
+}
+nav button {
+  padding:14px 18px; border:none; background:none;
+  color:var(--gray); font-weight:600; font-size:13px;
+  cursor:pointer; font-family:inherit; white-space:nowrap;
+  border-bottom:3px solid transparent;
+}
+nav button.active { color:var(--gold); font-weight:800; border-bottom-color:var(--gold); }
+
+/* ── КОНТЕНТ ── */
+main { padding:20px; max-width:1200px; margin:0 auto; }
+.screen { display:none; }
+.screen.active { display:block; }
+
+/* ── КАРТОЧКИ СТАТИСТИКИ ── */
+.stats-grid {
+  display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:20px;
+}
+@media(max-width:700px){ .stats-grid { grid-template-columns:repeat(2,1fr); } }
+.stat-card {
+  background:#fff; border-radius:12px; padding:18px 20px;
+  border:1px solid var(--border); border-left:4px solid var(--gold);
+}
+.stat-val { font-size:34px; font-weight:900; color:var(--navy); line-height:1; }
+.stat-lbl { font-size:12px; color:var(--gray); font-weight:600; margin-top:4px; }
+
+/* ── ПАНЕЛЬ ── */
+.panel {
+  background:#fff; border-radius:12px; border:1px solid var(--border);
+  padding:20px; margin-bottom:16px;
+}
+.panel-title {
+  font-size:15px; font-weight:800; color:var(--navy);
+  margin-bottom:16px; display:flex; align-items:center;
+  justify-content:space-between; gap:10px;
+}
+
+/* ── ТАБЛИЦА ── */
+.tbl-wrap { overflow-x:auto; }
+table { width:100%; border-collapse:collapse; }
+th {
+  padding:10px 12px; text-align:left; font-size:11px;
+  font-weight:800; color:var(--gray); text-transform:uppercase;
+  letter-spacing:.06em; border-bottom:1px solid var(--border);
+  background:var(--light); white-space:nowrap;
+}
+td { padding:11px 12px; font-size:13px; border-bottom:1px solid var(--border); }
+tr:last-child td { border-bottom:none; }
+tr:hover td { background:#FAFBFD; }
+.emp-name { font-weight:700; color:var(--navy); }
+.emp-pos  { font-size:11px; color:var(--gray); margin-top:1px; }
+
+/* ── БЭЙДЖИ ── */
+.badge {
+  display:inline-flex; align-items:center; gap:3px;
+  padding:3px 10px; border-radius:99px; font-size:11px; font-weight:800;
+}
+.b-red    { background:var(--redbg);    color:var(--red);   border:1px solid var(--red);   }
+.b-yellow { background:var(--yellowbg); color:var(--yellow); border:1px solid var(--yellow); }
+.b-green  { background:var(--greenbg); color:var(--green);  border:1px solid var(--green);  }
+.b-gray   { background:var(--light);   color:var(--gray);   border:1px solid var(--border); }
+
+/* ── ФИЛЬТРЫ ── */
+.filters { display:flex; gap:10px; margin-bottom:14px; flex-wrap:wrap; }
+.filters input, .filters select {
+  border:1.5px solid var(--border); border-radius:8px;
+  padding:8px 12px; font-size:13px; font-family:inherit;
+  outline:none; background:#fff; color:var(--navy);
+}
+.filters input { flex:1; min-width:160px; }
+.filters input:focus, .filters select:focus { border-color:var(--gold); }
+
+/* ── КНОПКИ ── */
+.btn {
+  display:inline-flex; align-items:center; gap:5px;
+  border:none; border-radius:8px; font-family:inherit;
+  font-weight:800; cursor:pointer; padding:8px 16px; font-size:13px;
+}
+.btn-gold  { background:var(--gold); color:var(--navy); }
+.btn-ghost { background:transparent; color:var(--gray); border:1px solid var(--border); }
+.btn-red   { background:var(--red); color:#fff; }
+
+/* ── СВЕТОФОР СТРОКИ ── */
+.row-red    td { background:#FFF5F5 !important; }
+.row-yellow td { background:#FFFDF0 !important; }
+
+/* ── ПУСТО ── */
+.empty { text-align:center; padding:40px; color:var(--gray); }
+.empty-icon { font-size:36px; margin-bottom:8px; }
+
+/* ── ЗАГРУЗКА ── */
+.loading { text-align:center; padding:40px; color:var(--gray); font-size:14px; }
+
+/* ── МОБИЛЬНЫЙ ── */
+@media(max-width:600px){
+  main { padding:12px; }
+  .panel { padding:14px; }
+  th, td { padding:8px 8px; font-size:12px; }
+}
+</style>
+</head>
+<body>
+
+<!-- ══ ЭКРАН ЛОГИНА ══════════════════════════════════════ -->
+<div id="loginScreen">
+  <div class="login-box">
+    <div class="login-logo">🛡️</div>
+    <div class="login-title">Панель инструктора</div>
+    <div class="login-sub">Caravan Resources · Допуск в карьер</div>
+    <input type="password" id="pinInput" placeholder="Введите PIN-код"
+      onkeydown="if(event.key==='Enter')checkPin()">
+    <button onclick="checkPin()">Войти</button>
+    <div class="login-err" id="loginErr">Неверный PIN-код</div>
+  </div>
+</div>
+
+<!-- ══ ОСНОВНОЕ ПРИЛОЖЕНИЕ ══════════════════════════════ -->
+<div id="app" style="display:none">
+
+  <header>
+    <div class="hdr-logo">
+      <div class="hdr-bar"></div>
+      <div>
+        <div class="hdr-title">ПАНЕЛЬ ИНСТРУКТОРА</div>
+        <div class="hdr-sub">Caravan Resources · Система допуска в карьер</div>
+      </div>
+    </div>
+    <div class="hdr-right">
+      <span class="hdr-date" id="headerDate"></span>
+      <button class="btn btn-ghost" onclick="loadAll()" style="font-size:12px">↻ Обновить</button>
+      <button class="btn btn-ghost" onclick="logout()" style="font-size:12px">Выйти</button>
+    </div>
+  </header>
+
+  <nav>
+    <button class="active" id="navDash"    onclick="showTab('dash')">📊 Дашборд</button>
+    <button id="navTests"   onclick="showTab('tests')">📋 Результаты тестов</button>
+    <button id="navAccess"  onclick="showTab('access')">🪪 Сроки допусков</button>
+    <button id="navAlerts"  onclick="showTab('alerts')">🔔 Требуют внимания</button>
+    <button id="navPrint"   onclick="showTab('print')">🖨 Печать карточек</button>
+  </nav>
+
+  <main>
+    <div id="loadingMsg" class="loading">⏳ Загрузка данных...</div>
+
+    <!-- ══ ДАШБОРД ══ -->
+    <div id="tabDash" class="screen">
+      <div class="stats-grid" id="statsGrid"></div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+        <!-- Просроченные допуски -->
+        <div class="panel">
+          <div class="panel-title">
+            🔴 Просроченные допуски
+            <span id="expiredCount" style="font-size:12px;color:var(--red)"></span>
+          </div>
+          <div id="expiredList"></div>
+        </div>
+        <!-- Последние тесты -->
+        <div class="panel">
+          <div class="panel-title">
+            📋 Последние сдачи тестов
+            <span style="font-size:12px;color:var(--gray)" id="lastTestsDate"></span>
+          </div>
+          <div id="lastTestsList"></div>
+        </div>
+      </div>
+
+      <!-- Истекают скоро -->
+      <div class="panel" style="margin-top:16px">
+        <div class="panel-title">
+          🟡 Истекают в течение 30 дней
+          <span id="warnCount" style="font-size:12px;color:var(--yellow)"></span>
+        </div>
+        <div id="warnList"></div>
+      </div>
+    </div>
+
+    <!-- ══ РЕЗУЛЬТАТЫ ТЕСТОВ ══ -->
+    <div id="tabTests" class="screen">
+      <div class="panel">
+        <div class="filters">
+          <input type="text" id="searchTest" placeholder="🔍 Поиск по имени..."
+            oninput="renderTestsTable()">
+          <select id="filterResult" onchange="renderTestsTable()">
+            <option value="all">Все результаты</option>
+            <option value="pass">Сдали</option>
+            <option value="fail">Не сдали</option>
+          </select>
+          <button class="btn btn-ghost" onclick="exportTestsCSV()">📥 CSV</button>
+        </div>
+        <div class="tbl-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Дата</th><th>Время</th><th>Сотрудник</th><th>Тест</th>
+                <th>Результат</th><th>Балл</th><th>Правильных</th><th>Время (мин)</th>
+              </tr>
+            </thead>
+            <tbody id="testsTableBody"></tbody>
+          </table>
+        </div>
+        <div id="testsEmpty" class="empty" style="display:none">
+          <div class="empty-icon">📋</div>Нет результатов
+        </div>
+        <div style="margin-top:8px;font-size:12px;color:var(--gray)" id="testsCount"></div>
+      </div>
+    </div>
+
+    <!-- ══ СРОКИ ДОПУСКОВ ══ -->
+    <div id="tabAccess" class="screen">
+      <div class="panel">
+        <div class="filters">
+          <input type="text" id="searchAccess" placeholder="🔍 Поиск по имени..."
+            oninput="renderAccessTable()">
+          <select id="filterSite" onchange="renderAccessTable()">
+            <option value="all">Все участки</option>
+            <option value="Алмалы">Алмалы</option>
+            <option value="Ашыктас">Ашыктас</option>
+          </select>
+          <select id="filterStatus" onchange="renderAccessTable()">
+            <option value="all">Все статусы</option>
+            <option value="expired">Просрочен</option>
+            <option value="warning">Истекает</option>
+            <option value="ok">Действителен</option>
+          </select>
+          <button class="btn btn-ghost" onclick="exportAccessCSV()">📥 CSV</button>
+        </div>
+        <div class="tbl-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Сотрудник</th><th>Должность</th><th>Участок</th>
+                <th>Дата прохождения</th><th>Действителен до</th>
+                <th>Статус</th><th>Дней осталось</th>
+              </tr>
+            </thead>
+            <tbody id="accessTableBody"></tbody>
+          </table>
+        </div>
+        <div id="accessEmpty" class="empty" style="display:none">
+          <div class="empty-icon">🪪</div>Нет сотрудников
+        </div>
+        <div style="margin-top:8px;font-size:12px;color:var(--gray)" id="accessCount"></div>
+      </div>
+    </div>
+
+    <!-- ══ ТРЕБУЮТ ВНИМАНИЯ ══ -->
+    <div id="tabAlerts" class="screen">
+      <div class="panel">
+        <div class="panel-title">
+          Список для руководителя
+          <button class="btn btn-gold" onclick="copyAlertsList()">📋 Скопировать</button>
+        </div>
+        <div id="alertsList"></div>
+      </div>
+    </div>
+
+    <!-- ══ ПЕЧАТЬ КАРТОЧЕК ══ -->
+    <div id="tabPrint" class="screen">
+      <div class="panel">
+        <div class="panel-title">
+          Выберите сотрудников для печати (до 10)
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-ghost" onclick="selectAllPrint()">Выбрать всех</button>
+            <button class="btn btn-ghost" onclick="clearPrintSelect()">Сбросить</button>
+            <button class="btn btn-gold" onclick="printCards()">🖨 Печать / PDF</button>
+          </div>
+        </div>
+        <div class="filters">
+          <input type="text" id="searchPrint" placeholder="🔍 Поиск..."
+            oninput="renderPrintSelect()">
+          <select id="filterPrintSite" onchange="renderPrintSelect()">
+            <option value="all">Все участки</option>
+            <option value="Алмалы">Алмалы</option>
+            <option value="Ашыктас">Ашыктас</option>
+          </select>
+        </div>
+        <div id="printSelectList" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:8px;margin-bottom:16px"></div>
+        <div style="font-size:12px;color:var(--gray)" id="printSelectedCount">Выбрано: 0 / 10</div>
+      </div>
+
+      <!-- Превью листа А4 -->
+      <div class="panel no-print">
+        <div class="panel-title">Предпросмотр</div>
+        <div id="printPreview" style="background:#e5e7eb;padding:16px;border-radius:8px;
+          display:flex;justify-content:center">
+          <div id="printSheet" style="
+            width:210mm;background:#fff;padding:5mm;
+            display:grid;grid-template-columns:85.6mm 85.6mm;
+            gap:3mm;box-shadow:0 4px 20px rgba(0,0,0,.2)">
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- СТИЛИ ПЕЧАТИ -->
+<style>
+@media print {
+  body > *:not(#printArea) { display:none !important; }
+  #printArea {
+    display:grid !important;
+    grid-template-columns:85.6mm 85.6mm;
+    gap:3mm; padding:5mm;
+    position:fixed; top:0; left:0;
+    background:#fff;
+    -webkit-print-color-adjust:exact;
+    print-color-adjust:exact;
+  }
+  .no-print { display:none !important; }
+  @page { size:A4 portrait; margin:0; }
+}
+</style>
+
+<script>
+// ══════════════════════════════════════════════════════
+// КОНФИГУРАЦИЯ
+// ══════════════════════════════════════════════════════
+const CFG = {
+  PIN: "1234",   // ← СМЕНИТЕ PIN перед использованием
+  SHEET_URL: "https://script.google.com/macros/s/AKfycbwhdMV20k8US2BXUz1Xk2XCXE9MEwpHpQaadTF9xEfzbU1--dHL-Zuj06K2qXW-rFtKGw/exec",
+  WARN_DAYS: 30,
+};
+
+// ══════════════════════════════════════════════════════
+// ДАННЫЕ
+// ══════════════════════════════════════════════════════
+let DATA = { employees: [], results: [] };
+
+// ══════════════════════════════════════════════════════
+// УТИЛИТЫ
+// ══════════════════════════════════════════════════════
+function today() { return new Date().toISOString().split("T")[0]; }
+function fmtDate(d) {
+  if (!d || d === "—") return "—";
+  try {
+    // Если это объект Date или строка типа "Sun Jun 28 2026..."
+    const date = new Date(d);
+    if (!isNaN(date.getTime())) {
+      const dd = String(date.getDate()).padStart(2,"0");
+      const mm = String(date.getMonth()+1).padStart(2,"0");
+      const yy = date.getFullYear();
+      return `${dd}.${mm}.${yy}`;
+    }
+    // Уже dd.mm.yyyy
+    if (String(d).includes(".")) return d;
+    // yyyy-mm-dd
+    const [y,m,day] = String(d).split("-");
+    if (y && m && day) return `${day}.${m}.${y}`;
+    return String(d);
+  } catch { return String(d); }
+}
+
+function daysLeft(dateStr) {
+  if (!dateStr) return null;
+  try {
+    let d = dateStr;
+    // dd.mm.yyyy → yyyy-mm-dd
+    if (String(d).includes(".")) {
+      const parts = String(d).split(".");
+      if (parts.length === 3) d = `${parts[2]}-${parts[1]}-${parts[0]}`;
+    }
+    const diff = new Date(d) - new Date(today());
+    if (isNaN(diff)) return null;
+    return Math.ceil(diff / 86400000);
+  } catch { return null; }
+}
+// daysLeft moved into fmtDate block above
+function statusOf(emp) {
+  const d = daysLeft(emp.validUntil);
+  if (d === null) return "nodate";
+  if (d < 0) return "expired";
+  if (d <= CFG.WARN_DAYS) return "warning";
+  return "ok";
+}
+function statusBadge(st) {
+  const map = {
+    expired: ['b-red',   '🔴 Просрочен'],
+    warning: ['b-yellow','🟡 Истекает'],
+    ok:      ['b-green', '✓ Действителен'],
+    nodate:  ['b-gray',  '— Нет данных'],
+  };
+  const [cls, lbl] = map[st] || map.nodate;
+  return `<span class="badge ${cls}">${lbl}</span>`;
+}
+function resultBadge(passed) {
+  return passed
+    ? `<span class="badge b-green">✓ Сдал</span>`
+    : `<span class="badge b-red">✗ Не сдал</span>`;
+}
+
+// ══════════════════════════════════════════════════════
+// ЛОГИН
+// ══════════════════════════════════════════════════════
+function checkPin() {
+  const val = document.getElementById("pinInput").value;
+  if (val === CFG.PIN) {
+    document.getElementById("loginScreen").style.display = "none";
+    document.getElementById("app").style.display = "block";
+    initApp();
+  } else {
+    document.getElementById("loginErr").style.display = "block";
+    document.getElementById("pinInput").value = "";
+    document.getElementById("pinInput").focus();
+  }
+}
+function logout() {
+  document.getElementById("loginScreen").style.display = "flex";
+  document.getElementById("app").style.display = "none";
+  document.getElementById("pinInput").value = "";
+}
+
+// ══════════════════════════════════════════════════════
+// ИНИЦИАЛИЗАЦИЯ
+// ══════════════════════════════════════════════════════
+function initApp() {
+  // Дата в шапке
+  const now = new Date();
+  document.getElementById("headerDate").textContent =
+    now.toLocaleDateString("ru-RU", { day:"2-digit", month:"long", year:"numeric" });
+  loadAll();
+}
+
+// JSONP — единственный способ обойти CORS в Apps Script
+function jsonpFetch(url, callbackName) {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      delete window[callbackName];
+      reject(new Error("timeout"));
+    }, 8000);
+    window[callbackName] = (data) => {
+      clearTimeout(timeout);
+      delete window[callbackName];
+      resolve(data);
+    };
+    const script = document.createElement("script");
+    script.src = `${url}&callback=${callbackName}`;
+    script.onerror = () => { clearTimeout(timeout); reject(new Error("script error")); };
+    document.head.appendChild(script);
+  });
+}
+
+async function loadAll() {
+  document.getElementById("loadingMsg").style.display = "block";
+
+  // Сотрудники
+  try {
+    const d = await jsonpFetch(`${CFG.SHEET_URL}?action=list`, "cb_employees");
+    DATA.employees = Array.isArray(d) && d.length > 0 ? d : DEMO_EMPLOYEES;
+  } catch(e) {
+    console.error("Сотрудники:", e);
+    DATA.employees = DEMO_EMPLOYEES;
+  }
+
+  // Результаты
+  try {
+    const d = await jsonpFetch(`${CFG.SHEET_URL}?action=getResults`, "cb_results");
+    DATA.results = Array.isArray(d) && d.length > 0 ? d : DEMO_RESULTS;
+  } catch(e) {
+    console.error("Результаты:", e);
+    DATA.results = DEMO_RESULTS;
+  }
+
+  document.getElementById("loadingMsg").style.display = "none";
+  renderAll();
+}
+
+function renderAll() {
+  renderDashboard();
+  renderTestsTable();
+  renderAccessTable();
+  renderAlerts();
+  renderPrintSelect();
+}
+
+// ══════════════════════════════════════════════════════
+// НАВИГАЦИЯ
+// ══════════════════════════════════════════════════════
+function showTab(name) {
+  ["dash","tests","access","alerts","print"].forEach(t => {
+    document.getElementById("tab"+cap(t)).classList.remove("active");
+    document.getElementById("nav"+cap(t)).classList.remove("active");
+  });
+  document.getElementById("tab"+cap(name)).classList.add("active");
+  document.getElementById("nav"+cap(name)).classList.add("active");
+}
+function cap(s) { return s.charAt(0).toUpperCase()+s.slice(1); }
+
+// ══════════════════════════════════════════════════════
+// ДАШБОРД
+// ══════════════════════════════════════════════════════
+function renderDashboard() {
+  const emps = DATA.employees;
+  const results = DATA.results;
+
+  const expired = emps.filter(e=>statusOf(e)==="expired");
+  const warning = emps.filter(e=>statusOf(e)==="warning");
+  const ok      = emps.filter(e=>statusOf(e)==="ok");
+  const passed  = results.filter(r=>isPassed(r));
+  const failed  = results.filter(r=>r.passed==="Не сдал ✗"||r.passed===false||r.passed==="FALSE");
+
+  // Статистика
+  document.getElementById("statsGrid").innerHTML = [
+    {lbl:"Сотрудников в базе", val:emps.length,    acc:"var(--gold)"},
+    {lbl:"Просроченных допусков", val:expired.length, acc:"var(--red)"},
+    {lbl:"Истекает в 30 дней",  val:warning.length, acc:"var(--yellow)"},
+    {lbl:"Тестов сдано",        val:passed.length,  acc:"var(--green)"},
+  ].map(s=>`
+    <div class="stat-card" style="border-left-color:${s.acc}">
+      <div class="stat-val" style="color:${s.acc}">${s.val}</div>
+      <div class="stat-lbl">${s.lbl}</div>
+    </div>
+  `).join("");
+
+  // Просроченные
+  document.getElementById("expiredCount").textContent = expired.length ? `${expired.length} чел.` : "";
+  document.getElementById("expiredList").innerHTML = expired.length
+    ? expired.sort((a,b)=>(daysLeft(a.validUntil)||0)-(daysLeft(b.validUntil)||0)).slice(0,6).map(e=>`
+      <div style="display:flex;justify-content:space-between;align-items:center;
+        padding:9px 0;border-bottom:1px solid var(--border)">
+        <div>
+          <div style="font-size:13px;font-weight:700;color:var(--navy)">${e.name}</div>
+          <div style="font-size:11px;color:var(--gray)">${e.position||""} · ${e.site||""}</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:13px;font-weight:800;color:var(--red)">${fmtDate(e.validUntil)}</div>
+          <div style="font-size:11px;color:var(--red)">${Math.abs(daysLeft(e.validUntil)||0)} дн. назад</div>
+        </div>
+      </div>
+    `).join("")
+    : `<div class="empty"><div class="empty-icon">✓</div>Просроченных нет</div>`;
+
+  // Последние тесты
+  const last = [...results].reverse().slice(0,6);
+  document.getElementById("lastTestsList").innerHTML = last.length
+    ? last.map(r=>{
+        const pass = isPassed(r);
+        const name = getField(r,"empName","Сотрудник");
+        const test = getField(r,"testTitle","Тест");
+        const date = getField(r,"date","Дата");
+        return `
+        <div style="display:flex;justify-content:space-between;align-items:center;
+          padding:9px 0;border-bottom:1px solid var(--border)">
+          <div>
+            <div style="font-size:13px;font-weight:700;color:var(--navy)">${name}</div>
+            <div style="font-size:11px;color:var(--gray)">${test}</div>
+          </div>
+          <div style="text-align:right">
+            ${resultBadge(pass)}
+            <div style="font-size:11px;color:var(--gray);margin-top:2px">${date}</div>
+          </div>
+        </div>`;
+      }).join("")
+    : `<div class="empty"><div class="empty-icon">📋</div>Нет данных</div>`;
+
+  // Предупреждения
+  document.getElementById("warnCount").textContent = warning.length ? `${warning.length} чел.` : "";
+  document.getElementById("warnList").innerHTML = warning.length
+    ? `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px">
+      ${warning.sort((a,b)=>(daysLeft(a.validUntil)||0)-(daysLeft(b.validUntil)||0)).map(e=>`
+        <div style="padding:12px;background:var(--yellowbg);border:1px solid var(--yellow);
+          border-radius:10px;display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <div style="font-size:13px;font-weight:700;color:var(--navy)">${e.name}</div>
+            <div style="font-size:11px;color:var(--gray)">${e.site||""}</div>
+          </div>
+          <div style="text-align:right">
+            <div style="font-size:13px;font-weight:800;color:var(--yellow)">${fmtDate(e.validUntil)}</div>
+            <div style="font-size:11px;color:var(--yellow)">${daysLeft(e.validUntil)} дн.</div>
+          </div>
+        </div>
+      `).join("")}
+    </div>`
+    : `<div class="empty"><div class="empty-icon">✓</div>Все допуски в порядке</div>`;
+}
+
+// ══════════════════════════════════════════════════════
+// ТАБЛИЦА РЕЗУЛЬТАТОВ ТЕСТОВ
+// ══════════════════════════════════════════════════════
+function getField(r, ...keys) {
+  for (const k of keys) {
+    if (r[k]!==undefined && r[k]!==null && String(r[k]).trim()!=="") return r[k];
+  }
+  return "—";
+}
+function isPassed(r) {
+  // Поддержка обоих форматов: старого (русские ключи) и нового (английские)
+  const v = r.result||r["Результат"]||r.passed||"";
+  return String(v).includes("Сдал") && !String(v).includes("Не сдал");
+}
+
+function renderTestsTable() {
+  const q = document.getElementById("searchTest").value.toLowerCase();
+  const f = document.getElementById("filterResult").value;
+
+  let rows = [...DATA.results].reverse().filter(r => {
+    const name = String(getField(r,"empName","Сотрудник")).toLowerCase();
+    if (q && !name.includes(q)) return false;
+    const pass = isPassed(r);
+    if (f==="pass" && !pass) return false;
+    if (f==="fail" && pass) return false;
+    return true;
+  });
+
+  const body = document.getElementById("testsTableBody");
+  const empty = document.getElementById("testsEmpty");
+  const count = document.getElementById("testsCount");
+
+  if (rows.length === 0) {
+    body.innerHTML = ""; empty.style.display = "block";
+    count.textContent = "";
+    return;
+  }
+  empty.style.display = "none";
+  count.textContent = `Показано ${rows.length} записей`;
+
+  body.innerHTML = rows.map(r => {
+    const pass  = isPassed(r);
+    const date  = getField(r,"date","Дата");
+    const time  = getField(r,"time","Время");
+    const name  = getField(r,"empName","Сотрудник");
+    const test  = getField(r,"testTitle","Тест");
+    const score = getField(r,"score","Балл (%)");
+    const corr  = getField(r,"correctQ","Правильных");
+    const total = getField(r,"totalQ","Всего вопросов");
+    const dur   = getField(r,"duration","Время (мин)");
+    return `<tr>
+      <td>${date}</td>
+      <td>${time}</td>
+      <td><div class="emp-name">${name}</div></td>
+      <td style="font-size:12px;color:var(--gray)">${test}</td>
+      <td>${resultBadge(pass)}</td>
+      <td style="font-weight:800;color:${pass?"var(--green)":"var(--red)"}">${score}%</td>
+      <td style="color:var(--gray)">${corr}${total!=="—"?"/"+total:""}</td>
+      <td style="color:var(--gray)">${dur}</td>
+    </tr>`;
+  }).join("");
+}
+
+function exportTestsCSV() {
+  const headers = ["Дата","Время","Сотрудник","Тест","Результат","Балл (%)","Правильных","Всего","Время (мин)"];
+  const rows = DATA.results.map(r=>[
+    r["Дата"]||r.date||"",
+    r["Время"]||r.time||"",
+    r["Сотрудник"]||r.empName||"",
+    r["Тест"]||r.testTitle||"",
+    r["Результат"]||"",
+    r["Балл (%)"]||r.score||"",
+    r["Правильных"]||r.correctQ||"",
+    r["Всего вопросов"]||r.totalQ||"",
+    r["Время (мин)"]||r.duration||"",
+  ]);
+  downloadCSV([headers,...rows], `Результаты_тестов_${today()}.csv`);
+}
+
+// ══════════════════════════════════════════════════════
+// ТАБЛИЦА ДОПУСКОВ
+// ══════════════════════════════════════════════════════
+function renderAccessTable() {
+  const q  = document.getElementById("searchAccess").value.toLowerCase();
+  const fs = document.getElementById("filterSite").value;
+  const fst= document.getElementById("filterStatus").value;
+
+  let emps = DATA.employees.filter(e => {
+    if (q && !(e.name||"").toLowerCase().includes(q)) return false;
+    if (fs!=="all" && e.site!==fs) return false;
+    if (fst!=="all" && statusOf(e)!==fst) return false;
+    return true;
+  }).sort((a,b)=>(daysLeft(a.validUntil)||999)-(daysLeft(b.validUntil)||999));
+
+  const body  = document.getElementById("accessTableBody");
+  const empty = document.getElementById("accessEmpty");
+  const count = document.getElementById("accessCount");
+
+  if (emps.length===0) {
+    body.innerHTML=""; empty.style.display="block";
+    count.textContent=""; return;
+  }
+  empty.style.display="none";
+  count.textContent=`Показано ${emps.length} сотрудников`;
+
+  body.innerHTML = emps.map(e => {
+    const st = statusOf(e);
+    const dl = daysLeft(e.validUntil);
+    const rowCls = st==="expired"?"row-red":st==="warning"?"row-yellow":"";
+    const daysStr = dl===null?"—":dl<0?`${Math.abs(dl)} дн. назад`:`${dl} дн.`;
+    return `<tr class="${rowCls}">
+      <td><div class="emp-name">${e.name||"—"}</div></td>
+      <td style="color:var(--gray);font-size:12px">${e.position||"—"}</td>
+      <td><span class="badge b-gray">${e.site||"—"}</span></td>
+      <td style="color:var(--gray)">${fmtDate(e.passDate)}</td>
+      <td style="font-weight:700;color:${st==="expired"?"var(--red)":st==="warning"?"var(--yellow)":"var(--navy)"}">
+        ${fmtDate(e.validUntil)}</td>
+      <td>${statusBadge(st)}</td>
+      <td style="font-weight:700;color:${st==="expired"?"var(--red)":st==="warning"?"var(--yellow)":"var(--gray)"}">${daysStr}</td>
+    </tr>`;
+  }).join("");
+}
+
+function exportAccessCSV() {
+  const headers = ["ФИО","Должность","Участок","Дата прохождения","Действителен до","Статус","Дней"];
+  const rows = DATA.employees.map(e=>[
+    e.name,e.position,e.site,
+    fmtDate(e.passDate),fmtDate(e.validUntil),
+    {expired:"Просрочен",warning:"Истекает",ok:"Действителен",nodate:"Нет данных"}[statusOf(e)],
+    daysLeft(e.validUntil)??""
+  ]);
+  downloadCSV([headers,...rows],`Допуски_${today()}.csv`);
+}
+
+// ══════════════════════════════════════════════════════
+// УВЕДОМЛЕНИЯ
+// ══════════════════════════════════════════════════════
+function renderAlerts() {
+  const expired = DATA.employees.filter(e=>statusOf(e)==="expired")
+    .sort((a,b)=>(daysLeft(a.validUntil)||0)-(daysLeft(b.validUntil)||0));
+  const warning = DATA.employees.filter(e=>statusOf(e)==="warning")
+    .sort((a,b)=>(daysLeft(a.validUntil)||0)-(daysLeft(b.validUntil)||0));
+  const failed  = DATA.results.filter(r=>r["Результат"]==="Не сдал ✗"||r.passed===false);
+
+  let html = "";
+
+  if (expired.length) {
+    html += `<div style="margin-bottom:20px">
+      <div style="font-weight:800;color:var(--red);font-size:14px;margin-bottom:10px">
+        🔴 Просроченные допуски (${expired.length} чел.)
+      </div>
+      ${expired.map(e=>`
+        <div style="display:flex;justify-content:space-between;align-items:center;
+          padding:10px 14px;background:var(--redbg);border:1px solid var(--red);
+          border-radius:10px;margin-bottom:8px">
+          <div>
+            <div style="font-weight:700;color:var(--navy)">${e.name}</div>
+            <div style="font-size:12px;color:var(--gray)">${e.position||""} · ${e.site||""} · ${e.phone||""}</div>
+          </div>
+          <div style="text-align:right">
+            <div style="font-weight:800;color:var(--red)">${fmtDate(e.validUntil)}</div>
+            <div style="font-size:12px;color:var(--red)">${Math.abs(daysLeft(e.validUntil)||0)} дн. просрочен</div>
+          </div>
+        </div>
+      `).join("")}
+    </div>`;
+  }
+
+  if (warning.length) {
+    html += `<div style="margin-bottom:20px">
+      <div style="font-weight:800;color:var(--yellow);font-size:14px;margin-bottom:10px">
+        🟡 Истекают в течение 30 дней (${warning.length} чел.)
+      </div>
+      ${warning.map(e=>`
+        <div style="display:flex;justify-content:space-between;align-items:center;
+          padding:10px 14px;background:var(--yellowbg);border:1px solid var(--yellow);
+          border-radius:10px;margin-bottom:8px">
+          <div>
+            <div style="font-weight:700;color:var(--navy)">${e.name}</div>
+            <div style="font-size:12px;color:var(--gray)">${e.position||""} · ${e.site||""} · ${e.phone||""}</div>
+          </div>
+          <div style="text-align:right">
+            <div style="font-weight:800;color:var(--yellow)">${fmtDate(e.validUntil)}</div>
+            <div style="font-size:12px;color:var(--yellow)">${daysLeft(e.validUntil)} дн. осталось</div>
+          </div>
+        </div>
+      `).join("")}
+    </div>`;
+  }
+
+  if (!expired.length && !warning.length) {
+    html = `<div class="empty" style="padding:60px">
+      <div class="empty-icon">✅</div>
+      <div style="font-size:16px;font-weight:800;color:var(--green);margin-top:8px">
+        Все допуски в порядке
+      </div>
+    </div>`;
+  }
+
+  document.getElementById("alertsList").innerHTML = html;
+}
+
+function copyAlertsList() {
+  const expired = DATA.employees.filter(e=>statusOf(e)==="expired");
+  const warning = DATA.employees.filter(e=>statusOf(e)==="warning");
+  let text = `СПИСОК ДЛЯ ПЕРЕСДАЧИ ДОПУСКА В КАРЬЕР\n${today().split("-").reverse().join(".")}\n\n`;
+  if (expired.length) {
+    text += `ПРОСРОЧЕННЫЕ ДОПУСКИ:\n`;
+    expired.forEach(e=>{ text+=`• ${e.name} (${e.site}) — до ${fmtDate(e.validUntil)}\n`; });
+    text += "\n";
+  }
+  if (warning.length) {
+    text += `ИСТЕКАЮТ В ТЕЧЕНИЕ 30 ДНЕЙ:\n`;
+    warning.forEach(e=>{ text+=`• ${e.name} (${e.site}) — до ${fmtDate(e.validUntil)}, осталось ${daysLeft(e.validUntil)} дн.\n`; });
+  }
+  navigator.clipboard.writeText(text).then(()=>alert("Список скопирован в буфер обмена"));
+}
+
+// ══════════════════════════════════════════════════════
+// CSV ЭКСПОРТ
+// ══════════════════════════════════════════════════════
+function downloadCSV(rows, filename) {
+  const csv = "\uFEFF" + rows.map(r=>
+    r.map(v=>`"${String(v??"").replace(/"/g,'""')}"`).join(";")
+  ).join("\n");
+  const a = document.createElement("a");
+  a.href = "data:text/csv;charset=utf-8," + encodeURIComponent(csv);
+  a.download = filename; a.click();
+}
+
+// ══════════════════════════════════════════════════════
+// ДЕМО-ДАННЫЕ (если Sheets недоступен)
+// ══════════════════════════════════════════════════════
+const DEMO_EMPLOYEES = [
+  {id:"1",name:"Ахметов Серик Болатович",position:"Машинист экскаватора",site:"Алмалы",passDate:"2024-06-15",validUntil:"2025-06-15",phone:"+7 701 111 2233"},
+  {id:"2",name:"Байжанов Руслан Темирович",position:"Водитель БелАЗ",site:"Ашыктас",passDate:"2025-04-10",validUntil:"2026-04-10",phone:"+7 702 222 3344"},
+  {id:"3",name:"Сейткали Айбек Маратович",position:"Машинист бульдозера",site:"Алмалы",passDate:"2025-05-20",validUntil:"2026-05-20",phone:"+7 705 333 4455"},
+  {id:"4",name:"Дюсенов Нурлан Асылович",position:"Оператор буровой",site:"Ашыктас",passDate:"2024-12-01",validUntil:"2025-12-01",phone:"+7 707 444 5566"},
+  {id:"5",name:"Касымов Бауыржан Ерланович",position:"Машинист экскаватора",site:"Алмалы",passDate:"2025-06-01",validUntil:"2026-06-01",phone:"+7 708 555 6677"},
+  {id:"6",name:"Нурмаганбетов Дамир Б.",position:"Водитель БелАЗ",site:"Алмалы",passDate:"2025-01-15",validUntil:"2025-07-15",phone:"+7 701 666 7788"},
+];
+const DEMO_RESULTS = [
+  {"Дата":"28.06.2026","Время":"09:14","Сотрудник":"Трусов Иван","Тест":"Допуск в карьер — Базовый курс","Результат":"Сдал ✓","Балл (%)":90,"Правильных":9,"Всего вопросов":10,"Время (мин)":14},
+  {"Дата":"27.06.2026","Время":"14:32","Сотрудник":"Ахметов Серик Болатович","Тест":"Допуск в карьер — Базовый курс","Результат":"Не сдал ✗","Балл (%)":70,"Правильных":7,"Всего вопросов":10,"Время (мин)":18},
+];
+
+// ══════════════════════════════════════════════════════
+// ПЕЧАТЬ КАРТОЧЕК
+// ══════════════════════════════════════════════════════
+let printSelected = new Set();
+
+function renderPrintSelect() {
+  const q  = (document.getElementById("searchPrint")?.value||"").toLowerCase();
+  const fs = document.getElementById("filterPrintSite")?.value||"all";
+  const emps = DATA.employees.filter(e=>{
+    if (q) {
+      const name = (e.name||"").toLowerCase();
+      const words = q.split(" ").filter(Boolean);
+      if (!words.every(w => name.includes(w))) return false;
+    }
+    if (fs!=="all" && e.site!==fs) return false;
+    return true;
+  });
+  const list = document.getElementById("printSelectList");
+  if (!list) return;
+  list.innerHTML = emps.map(e=>{
+    const sel = printSelected.has(e.id);
+    return `<label style="display:flex;align-items:center;gap:10px;
+      padding:10px 12px;border:1.5px solid ${sel?"var(--gold)":"var(--border)"};
+      border-radius:10px;cursor:pointer;
+      background:${sel?"#FFFBEB":"#fff"};user-select:none">
+      <input type="checkbox" ${sel?"checked":""} onchange="togglePrint('${e.id}')"
+        style="width:16px;height:16px;accent-color:var(--gold)">
+      <div>
+        <div style="font-size:13px;font-weight:700;color:var(--navy)">${e.name}</div>
+        <div style="font-size:11px;color:var(--gray)">${e.position||""} · ${e.site||""}</div>
+      </div>
+    </label>`;
+  }).join("");
+  document.getElementById("printSelectedCount").textContent =
+    `Выбрано: ${printSelected.size} / 10`;
+  renderPrintPreview();
+}
+
+function togglePrint(id) {
+  if (printSelected.has(id)) {
+    printSelected.delete(id);
+  } else {
+    if (printSelected.size >= 10) { alert("Максимум 10 карточек на листе"); return; }
+    printSelected.add(id);
+  }
+  renderPrintSelect();
+}
+
+function selectAllPrint() {
+  DATA.employees.slice(0,10).forEach(e=>printSelected.add(e.id));
+  renderPrintSelect();
+}
+
+function clearPrintSelect() {
+  printSelected.clear();
+  renderPrintSelect();
+}
+
+function renderPrintPreview() {
+  const sheet = document.getElementById("printSheet");
+  if (!sheet) return;
+  const selected = DATA.employees.filter(e=>printSelected.has(e.id));
+  const empty = Math.max(0, 10 - selected.length);
+  sheet.innerHTML = [
+    ...selected.map(e=>cardHTML(e)),
+    ...Array(empty).fill(`<div style="width:85.6mm;height:53.98mm;
+      border:1px dashed #E2E8F0;border-radius:3mm;
+      display:flex;align-items:center;justify-content:center">
+      <span style="color:#CBD5E1;font-size:11px">пусто</span>
+    </div>`)
+  ].join("");
+}
+
+function cardHTML(emp) {
+  const validDate = fmtDate(emp.validUntil);
+  const passDate  = fmtDate(emp.passDate);
+
+  const photoBlock = emp.photoUrl && emp.photoUrl !== "—" && emp.photoUrl !== ""
+    ? `<img src="${emp.photoUrl}" style="width:100%;height:100%;object-fit:cover;object-position:center top;display:block">`
+    : `<div style="width:100%;height:100%;background:#EEF2F7;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2mm">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
+          <rect x="2" y="3" width="20" height="18" rx="2" stroke="#94A3B8" stroke-width="1.5"/>
+          <circle cx="12" cy="10" r="3.5" stroke="#94A3B8" stroke-width="1.5"/>
+          <path d="M4 20c0-3.5 3.5-6 8-6s8 2.5 8 6" stroke="#94A3B8" stroke-width="1.5"/>
+        </svg>
+        <div style="font-size:4.5pt;color:#94A3B8;font-weight:600;text-align:center;line-height:1.4">ФОТО<br>СУРЕТ</div>
+      </div>`;
+
+  return `<div style="
+    width:85.6mm; height:53.98mm; position:relative;
+    border-radius:3.5mm; overflow:hidden; background:#fff;
+    border:.3mm solid rgba(11,26,53,.12);
+    box-shadow:0 .5mm 2mm rgba(0,0,0,.12);
+    font-family:Arial,sans-serif;
+    -webkit-print-color-adjust:exact; print-color-adjust:exact;">
+
+    <!-- Золотая полоса слева -->
+    <div style="position:absolute;left:0;top:0;bottom:0;width:1.2mm;
+      background:linear-gradient(180deg,#F4A52A,#E8922A 50%,#F4A52A)"></div>
+
+    <!-- Синяя шапка -->
+    <div style="
+      background:linear-gradient(135deg,#0B1A35 0%,#1A3060 100%);
+      height:11mm; padding:0 3mm 0 4mm;
+      display:flex; align-items:center; justify-content:space-between;">
+
+      <!-- Лого левая часть -->
+      <div style="display:flex;align-items:center;gap:2mm">
+        <!-- Треугольник-гора из CSS border -->
+        <div style="display:flex;gap:.8mm;align-items:flex-end;flex-shrink:0">
+          <div style="width:0;height:0;
+            border-left:3.5mm solid transparent;
+            border-right:3.5mm solid transparent;
+            border-bottom:5.5mm solid #F4A52A;opacity:.85"></div>
+          <div style="width:0;height:0;
+            border-left:4mm solid transparent;
+            border-right:4mm solid transparent;
+            border-bottom:6.5mm solid #F4A52A;margin-left:-2mm"></div>
+        </div>
+        <div style="border-left:.3mm solid rgba(255,255,255,.25);padding-left:2mm">
+          <div style="font-size:6pt;font-weight:700;color:#fff;letter-spacing:.05em;line-height:1.2">CARAVAN RESOURCES</div>
+          <div style="font-size:4pt;color:rgba(255,255,255,.5);letter-spacing:.04em">MINE ACCESS PERMIT</div>
+        </div>
+      </div>
+
+      <!-- Заголовок справа -->
+      <div style="text-align:right">
+        <div style="font-size:7pt;font-weight:700;color:#F4A52A;letter-spacing:.03em;line-height:1.2">ДОПУСК В КАРЬЕР</div>
+        <div style="font-size:4.5pt;color:rgba(255,255,255,.55);letter-spacing:.04em">КАРЬЕРГЕ РҰҚСАТ</div>
+      </div>
+    </div>
+
+    <!-- Тело -->
+    <div style="display:flex;height:42.98mm;margin-left:1.2mm">
+
+      <!-- Левая часть -->
+      <div style="flex:1;padding:2.5mm 2.5mm 2mm 3mm;display:flex;flex-direction:column;justify-content:space-between;min-width:0;overflow:hidden">
+
+        <!-- Имя -->
+        <div>
+          <div style="font-size:14pt;font-weight:700;color:#0B1A35;
+            text-transform:uppercase;line-height:1.05;letter-spacing:.01em;
+            word-break:break-word">
+            ${(emp.name||"— — —")}
+          </div>
+        </div>
+
+        <!-- Подпись -->
+        <div style="display:flex;align-items:center;gap:2mm">
+          <span style="font-size:4.5pt;color:#94A3B8;white-space:nowrap;
+            font-weight:600;text-transform:uppercase;letter-spacing:.03em">
+            Въезд разрешаю. Нач. карьера:
+          </span>
+          <div style="flex:1;height:.2mm;background:rgba(11,26,53,.2)"></div>
+        </div>
+
+        <!-- Даты -->
+        <div style="display:flex;border-top:.3mm solid #E2E8F0;padding-top:1.5mm">
+          <div style="flex:1;padding-right:2mm">
+            <div style="font-size:5pt;font-weight:700;color:#94A3B8;
+              text-transform:uppercase;letter-spacing:.04em;margin-bottom:.5mm">
+              Дата прохождения
+            </div>
+            <div style="font-size:11pt;font-weight:700;color:#0B1A35">${passDate}</div>
+          </div>
+          <div style="width:.3mm;background:#E2E8F0;margin-right:2mm"></div>
+          <div style="flex:1">
+            <div style="font-size:5pt;font-weight:700;color:#E8922A;
+              text-transform:uppercase;letter-spacing:.04em;margin-bottom:.5mm">
+              Действителен до
+            </div>
+            <div style="font-size:11pt;font-weight:700;color:#E8922A">${validDate}</div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Фото -->
+      <div style="width:27mm;flex-shrink:0;overflow:hidden;border-left:.3mm solid #E2E8F0">
+        ${photoBlock}
+      </div>
+
+    </div>
+  </div>`;
+}
+
+
+function printCards() {
+  if (printSelected.size === 0) { alert("Выберите сотрудников для печати"); return; }
+  const selected = DATA.employees.filter(e=>printSelected.has(e.id));
+
+  // Создаём скрытый div для печати
+  let area = document.getElementById("printArea");
+  if (area) area.remove();
+  area = document.createElement("div");
+  area.id = "printArea";
+  area.style.cssText = "display:none";
+  area.innerHTML = selected.map(e=>cardHTML(e)).join("");
+  document.body.appendChild(area);
+  window.print();
+}
+
+// ══════════════════════════════════════════════════════
+// СТАРТ
+// ══════════════════════════════════════════════════════
+document.getElementById("pinInput").addEventListener("keydown", e => {
+  if (e.key==="Enter") checkPin();
+});
+// Показать первый таб после логина
+showTab("dash");
+</script>
+</body>
+</html>
