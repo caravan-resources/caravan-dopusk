@@ -963,33 +963,64 @@ async function uploadPhoto(event, empId, empName) {
 let printSelected = new Set();
 
 function renderPrintSelect() {
-  const q  = (document.getElementById("searchPrint")?.value||"").toLowerCase();
-  const fs = document.getElementById("filterPrintSite")?.value||"all";
-  const emps = DATA.employees.filter(e=>{
-    if (q) {
-      const name = (e.name||"").toLowerCase();
-      const words = q.split(" ").filter(Boolean);
-      if (!words.every(w => name.includes(w))) return false;
-    }
-    if (fs!=="all" && e.site!==fs) return false;
-    return true;
-  });
+  const q   = (document.getElementById("searchPrint")?.value||"").toLowerCase();
+  const fs  = document.getElementById("filterPrintSite")?.value||"all";
   const list = document.getElementById("printSelectList");
   if (!list) return;
-  list.innerHTML = emps.map(e=>{
-    const sel = printSelected.has(e.id);
-    return `<label style="display:flex;align-items:center;gap:10px;
-      padding:10px 12px;border:1.5px solid ${sel?"var(--gold)":"var(--border)"};
-      border-radius:10px;cursor:pointer;
-      background:${sel?"#FFFBEB":"#fff"};user-select:none">
-      <input type="checkbox" ${sel?"checked":""} onchange="togglePrint('${e.id}')"
-        style="width:16px;height:16px;accent-color:var(--gold)">
-      <div>
-        <div style="font-size:13px;font-weight:700;color:var(--navy)">${e.name}</div>
-        <div style="font-size:11px;color:var(--gray)">${e.position||""} · ${e.site||""}</div>
-      </div>
-    </label>`;
-  }).join("");
+
+  // Если поиск пустой — показываем только выбранных
+  if (!q && fs === "all") {
+    const selected = DATA.employees.filter(e => printSelected.has(e.id));
+    if (selected.length === 0) {
+      list.innerHTML = `<div style="padding:24px;text-align:center;color:var(--gray);
+        font-size:13px;grid-column:1/-1">
+        🔍 Введите имя в поиске чтобы найти сотрудника
+      </div>`;
+    } else {
+      list.innerHTML = selected.map(e => `
+        <label style="display:flex;align-items:center;gap:8px;
+          padding:10px 12px;border:1.5px solid var(--gold);
+          border-radius:10px;cursor:pointer;background:#FFFBEB;user-select:none">
+          <input type="checkbox" checked onchange="togglePrint('${e.id}')"
+            style="width:16px;height:16px;accent-color:var(--gold)">
+          <div>
+            <div style="font-size:13px;font-weight:700;color:var(--navy)">${e.name}</div>
+            <div style="font-size:11px;color:var(--gray)">${e.position||""} · ${e.site||""}</div>
+          </div>
+        </label>`).join("");
+    }
+    document.getElementById("printSelectedCount").textContent =
+      `Выбрано: ${printSelected.size} / 10`;
+    renderPrintPreview();
+    return;
+  }
+
+  // Поиск активен — фильтруем и показываем
+  const emps = DATA.employees.filter(e => {
+    if (q && !(e.name||"").toLowerCase().includes(q)) return false;
+    if (fs !== "all" && e.site !== fs) return false;
+    return true;
+  });
+
+  if (emps.length === 0) {
+    list.innerHTML = `<div style="padding:16px;text-align:center;color:var(--gray);
+      font-size:13px;grid-column:1/-1">Не найдено</div>`;
+  } else {
+    list.innerHTML = emps.slice(0,20).map(e => {
+      const sel = printSelected.has(e.id);
+      return `<label style="display:flex;align-items:center;gap:8px;
+        padding:10px 12px;border:1.5px solid ${sel?"var(--gold)":"var(--border)"};
+        border-radius:10px;cursor:pointer;
+        background:${sel?"#FFFBEB":"#fff"};user-select:none">
+        <input type="checkbox" ${sel?"checked":""} onchange="togglePrint('${e.id}')"
+          style="width:16px;height:16px;accent-color:var(--gold)">
+        <div>
+          <div style="font-size:13px;font-weight:700;color:var(--navy)">${e.name}</div>
+          <div style="font-size:11px;color:var(--gray)">${e.position||""} · ${e.site||""}</div>
+        </div>
+      </label>`;
+    }).join("");
+  }
   document.getElementById("printSelectedCount").textContent =
     `Выбрано: ${printSelected.size} / 10`;
   renderPrintPreview();
