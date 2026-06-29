@@ -924,9 +924,9 @@ async function uploadPhoto(event, empId, empName) {
       canvas.getContext("2d").drawImage(img, 0, 0, w, h);
       const base64 = canvas.toDataURL("image/jpeg", 0.85).split(",")[1];
 
-      // Показываем прогресс
-      const btn = event.target.parentElement.querySelector("span");
-      btn.textContent = "⏳";
+      // Показываем прогресс — ищем label безопасно
+      const label = event.target.closest("label");
+      const setBtn = (txt) => { if (label) label.setAttribute("data-icon", txt); };
 
       try {
         const res = await fetch(CFG.SHEET_URL, {
@@ -938,22 +938,18 @@ async function uploadPhoto(event, empId, empName) {
         });
         const data = await res.json();
         if (data.ok && data.url) {
-          // Обновляем фото в локальных данных
-          const emp = DATA.employees.find(e => e.id === empId);
+          const emp = DATA.employees.find(e => String(e.id) === String(empId));
           if (emp) emp.photoUrl = data.url;
-          btn.textContent = "✅";
           renderAccessTable();
           renderPrintSelect();
-          setTimeout(() => { btn.textContent = "📷"; }, 2000);
+          alert("✅ Фото загружено успешно!");
         } else {
-          btn.textContent = "❌";
-          alert("Ошибка: " + (data.error || "неизвестная ошибка"));
-          setTimeout(() => { btn.textContent = "📷"; }, 2000);
+          console.error("uploadPhoto error:", data);
+          alert("❌ Ошибка загрузки: " + (data.error || "неизвестная ошибка"));
         }
       } catch(err) {
-        btn.textContent = "❌";
-        console.error(err);
-        setTimeout(() => { btn.textContent = "📷"; }, 2000);
+        console.error("uploadPhoto catch:", err);
+        alert("❌ Ошибка соединения: " + err.message);
       }
     };
     img.src = e.target.result;
