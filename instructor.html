@@ -200,7 +200,8 @@ tr:hover td { background:#FAFBFD; }
     <button id="navTests"   onclick="showTab('tests')">📋 Результаты тестов</button>
     <button id="navAccess"  onclick="showTab('access')">🪪 Сроки допусков</button>
     <button id="navAlerts"  onclick="showTab('alerts')">🔔 Требуют внимания</button>
-    <button id="navPrint"   onclick="showTab('print')">🖨 Печать карточек</button>
+    <button id="navPrint"    onclick="showTab('print')">🖨 Печать карточек</button>
+    <button id="navTraining" onclick="showTab('training')">🎓 Обучение</button>
   </nav>
 
   <main>
@@ -319,6 +320,34 @@ tr:hover td { background:#FAFBFD; }
       </div>
     </div>
 
+    <!-- ══ ОБУЧЕНИЕ ══ -->
+    <div id="tabTraining" class="screen">
+      <div class="panel">
+        <div class="panel-title">
+          История обучения по профессии
+          <button class="btn btn-ghost" onclick="exportTrainingCSV()">📥 CSV</button>
+        </div>
+        <div class="filters">
+          <input type="text" id="searchTraining" placeholder="🔍 Поиск по имени или курсу..."
+            oninput="renderTrainingTable()">
+        </div>
+        <div class="tbl-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Дата</th><th>Сотрудник</th><th>Курс / оборудование</th>
+              </tr>
+            </thead>
+            <tbody id="trainingTableBody"></tbody>
+          </table>
+        </div>
+        <div id="trainingEmpty" class="empty" style="display:none">
+          <div class="empty-icon">🎓</div>Нет записей об обучении
+        </div>
+        <div style="margin-top:8px;font-size:12px;color:var(--gray)" id="trainingCount"></div>
+      </div>
+    </div>
+
     <!-- ══ ПЕЧАТЬ КАРТОЧЕК ══ -->
     <div id="tabPrint" class="screen">
       <div class="panel">
@@ -391,7 +420,7 @@ const CFG = {
 // ══════════════════════════════════════════════════════
 // ДАННЫЕ
 // ══════════════════════════════════════════════════════
-let DATA = { employees: [], results: [] };
+let DATA = { employees: [], results: [], training: [] };
 
 // ══════════════════════════════════════════════════════
 // УТИЛИТЫ
@@ -527,6 +556,15 @@ async function loadAll() {
     DATA.results = DEMO_RESULTS;
   }
 
+  // Обучение по профессии
+  try {
+    const d = await jsonpFetch(`${CFG.SHEET_URL}?action=getTraining`, "cb_training");
+    DATA.training = Array.isArray(d) ? d : [];
+  } catch(e) {
+    console.error("Обучение:", e);
+    DATA.training = [];
+  }
+
   document.getElementById("loadingMsg").style.display = "none";
   renderAll();
 }
@@ -537,13 +575,14 @@ function renderAll() {
   renderAccessTable();
   renderAlerts();
   renderPrintSelect();
+  renderTrainingTable();
 }
 
 // ══════════════════════════════════════════════════════
 // НАВИГАЦИЯ
 // ══════════════════════════════════════════════════════
 function showTab(name) {
-  ["dash","tests","access","alerts","print"].forEach(t => {
+  ["dash","tests","access","alerts","print","training"].forEach(t => {
     document.getElementById("tab"+cap(t)).classList.remove("active");
     document.getElementById("nav"+cap(t)).classList.remove("active");
   });
@@ -1175,6 +1214,57 @@ function printCards() {
   area.innerHTML = selected.map(e=>cardHTML(e)).join("");
   document.body.appendChild(area);
   window.print();
+}
+
+// ══════════════════════════════════════════════════════
+// ОБУЧЕНИЕ ПО ПРОФЕССИИ
+// ══════════════════════════════════════════════════════
+function renderTrainingTable() {
+  const q = (document.getElementById("searchTraining")?.value||"").toLowerCase();
+  const rows = [...DATA.training].reverse().filter(r => {
+    if (!q) return true;
+    const name   = String(r.empName||"").toLowerCase();
+    const course = String(r.course||"").toLowerCase();
+    return name.includes(q) || course.includes(q);
+  });
+
+  const body  = document.getElementById("trainingTableBody");
+  const empty = document.getElementById("trainingEmpty");
+  const count = document.getElementById("trainingCount");
+  if (!body) return;
+
+  if (rows.length === 0) {
+    body.innerHTML = ""; empty.style.display = "block";
+    if (count) count.textContent = ""; return;
+  }
+  empty.style.display = "none";
+  if (count) count.textContent = `${rows.length} записей`;
+
+  body.innerHTML = rows.map((r,idx) => `
+    <tr style="background:${idx%2===0?"#fff":"#FAFBFD"};border-bottom:1px solid var(--border)">
+      <td style="padding:10px 12px;color:var(--gray);font-size:13px;white-space:nowrap">
+        ${r.date||"—"}
+      </td>
+      <td style="padding:10px 12px;font-weight:700;color:var(--navy);font-size:13px">
+        ${r.empName||"—"}
+      </td>
+      <td style="padding:10px 12px;font-size:13px;color:var(--gray)">
+        <span style="background:var(--light);padding:3px 10px;border-radius:99px;
+          font-size:12px;color:var(--navy);font-weight:600">
+          ${r.course||"—"}
+        </span>
+      </td>
+    </tr>`).join("");
+}
+
+function exportTrainingCSV() {
+  const headers = ["Дата","Сотрудник","Курс / оборудование"];
+  const rows = DATA.training.map(r=>[r.date||"",r.empName||"",r.course||""]);
+  const csv = "\uFEFF" + [headers,...rows]
+    .map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(";")).join("\n");
+  const a = document.createElement("a");
+  a.href = "data:text/csv;charset=utf-8," + encodeURIComponent(csv);
+  a.download = `Обучение_${today()}.csv`; a.click();
 }
 
 // ══════════════════════════════════════════════════════
