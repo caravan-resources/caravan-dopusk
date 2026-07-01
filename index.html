@@ -1033,32 +1033,58 @@ async function saveResultToSheets(result) {
       body: JSON.stringify({action:"saveResult", result})
     });
 
-    // Если тест сдан — автоматически обновляем дату допуска
     if (result.passed && result.empName && result.empName !== "—") {
-      const today    = new Date();
-      const passDate = today.toISOString().split("T")[0];
-      const validDate = new Date(today);
-      validDate.setFullYear(validDate.getFullYear() + 1);
-      const validUntil = validDate.toISOString().split("T")[0];
-
-      // Берём должность и участок из полей ввода или из данных сотрудника
+      const today   = new Date();
+      const todayStr = today.toISOString().split("T")[0];
       const posInput   = document.getElementById("positionInput");
       const siteSelect = document.getElementById("siteSelect");
       const position = (posInput && posInput.value.trim()) || (state.selectedEmp?.pos || "");
       const site     = (siteSelect && siteSelect.value) || (state.selectedEmp?.site || "");
 
-      await fetch(CFG.SHEET_URL, {
-        method:"POST",
-        body: JSON.stringify({
-          action:     "updateAccess",
-          empName:    result.empName,
-          passDate:   passDate,
-          validUntil: validUntil,
-          position:   position,
-          site:       site,
-        })
-      });
-      console.log("Допуск обновлён:", result.empName, passDate, "→", validUntil);
+      // Определяем тип теста
+      const test = TESTS.find(t => t.id === result.testId) || {};
+      const testType = test.testType || "dopusk"; // "dopusk" или "profession"
+
+      if (testType === "profession") {
+        // Профессиональное обучение — пишем в лист «Обучение»
+        const dateStr = today.toLocaleDateString("ru-RU", {day:"2-digit",month:"2-digit",year:"numeric"});
+        await fetch(CFG.SHEET_URL, {
+          method:"POST",
+          body: JSON.stringify({
+            action:  "saveTraining",
+            empId:   state.selectedEmp?.id || "",
+            empName: result.empName,
+            course:  result.testTitle,
+            date:    dateStr,
+          })
+        });
+        // Также обновляем должность/участок если нужно
+        await fetch(CFG.SHEET_URL, {
+          method:"POST",
+          body: JSON.stringify({
+            action: "updateAccess",
+            empName: result.empName,
+            passDate: "", validUntil: "",
+            position, site,
+          })
+        });
+        console.log("Обучение записано:", result.empName, result.testTitle);
+      } else {
+        // Допуск в карьер — обновляем даты
+        const validDate = new Date(today);
+        validDate.setFullYear(validDate.getFullYear() + 1);
+        const validUntil = validDate.toISOString().split("T")[0];
+        await fetch(CFG.SHEET_URL, {
+          method:"POST",
+          body: JSON.stringify({
+            action: "updateAccess",
+            empName: result.empName,
+            passDate: todayStr, validUntil,
+            position, site,
+          })
+        });
+        console.log("Допуск обновлён:", result.empName, todayStr, "→", validUntil);
+      }
     }
   } catch(e) { console.log("Ошибка сохранения:", e); }
 }
