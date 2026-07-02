@@ -660,12 +660,25 @@ function cap(s) { return s.charAt(0).toUpperCase()+s.slice(1); }
 // ══════════════════════════════════════════════════════
 // ДАШБОРД
 // ══════════════════════════════════════════════════════
+// Записи «Обучение» с заполненным validUntil (инструктаж) приводим к форме,
+// понятной существующим шаблонам статуса/уведомлений (name/position/site/phone) —
+// это не подмена сотрудника, а адаптер для переиспользования daysLeft/statusOf.
+function instruktazhAsAccessLike() {
+  return (DATA.training||[])
+    .filter(t => t.validUntil)
+    .map(t => ({
+      name: t.empName, position: t.course, site: "", phone: "",
+      validUntil: t.validUntil, __kind: "instruktazh",
+    }));
+}
+
 function renderDashboard() {
   const emps = DATA.employees;
+  const instr = instruktazhAsAccessLike();
   const results = DATA.results;
 
-  const expired = emps.filter(e=>statusOf(e)==="expired");
-  const warning = emps.filter(e=>statusOf(e)==="warning");
+  const expired = [...emps, ...instr].filter(e=>statusOf(e)==="expired");
+  const warning = [...emps, ...instr].filter(e=>statusOf(e)==="warning");
   const ok      = emps.filter(e=>statusOf(e)==="ok");
   const passed  = results.filter(r=>isPassed(r));
   const failed  = results.filter(r=>r.passed==="Не сдал ✗"||r.passed===false||r.passed==="FALSE");
@@ -691,7 +704,7 @@ function renderDashboard() {
         padding:9px 0;border-bottom:1px solid var(--border)">
         <div>
           <div style="font-size:13px;font-weight:700;color:var(--navy)">${e.name}</div>
-          <div style="font-size:11px;color:var(--gray)">${e.position||""} · ${e.site||""}</div>
+          <div style="font-size:11px;color:var(--gray)">${e.__kind==="instruktazh"?"🔻 "+e.position:(e.position||"")+" · "+(e.site||"")}</div>
         </div>
         <div style="text-align:right">
           <div style="font-size:13px;font-weight:800;color:var(--red)">${fmtDate(e.validUntil)}</div>
@@ -733,7 +746,7 @@ function renderDashboard() {
           border-radius:10px;display:flex;justify-content:space-between;align-items:center">
           <div>
             <div style="font-size:13px;font-weight:700;color:var(--navy)">${e.name}</div>
-            <div style="font-size:11px;color:var(--gray)">${e.site||""}</div>
+            <div style="font-size:11px;color:var(--gray)">${e.__kind==="instruktazh"?"🔻 "+e.position:(e.site||"")}</div>
           </div>
           <div style="text-align:right">
             <div style="font-size:13px;font-weight:800;color:var(--yellow)">${fmtDate(e.validUntil)}</div>
@@ -897,9 +910,10 @@ function exportAccessCSV() {
 // УВЕДОМЛЕНИЯ
 // ══════════════════════════════════════════════════════
 function renderAlerts() {
-  const expired = DATA.employees.filter(e=>statusOf(e)==="expired")
+  const pool = [...DATA.employees, ...instruktazhAsAccessLike()];
+  const expired = pool.filter(e=>statusOf(e)==="expired")
     .sort((a,b)=>(daysLeft(a.validUntil)||0)-(daysLeft(b.validUntil)||0));
-  const warning = DATA.employees.filter(e=>statusOf(e)==="warning")
+  const warning = pool.filter(e=>statusOf(e)==="warning")
     .sort((a,b)=>(daysLeft(a.validUntil)||0)-(daysLeft(b.validUntil)||0));
   const failed  = DATA.results.filter(r=>r["Результат"]==="Не сдал ✗"||r.passed===false);
 
@@ -916,7 +930,7 @@ function renderAlerts() {
           border-radius:10px;margin-bottom:8px">
           <div>
             <div style="font-weight:700;color:var(--navy)">${e.name}</div>
-            <div style="font-size:12px;color:var(--gray)">${e.position||""} · ${e.site||""} · ${e.phone||""}</div>
+            <div style="font-size:12px;color:var(--gray)">${e.__kind==="instruktazh"?"🔻 Инструктаж: "+e.position:(e.position||"")+" · "+(e.site||"")+" · "+(e.phone||"")}</div>
           </div>
           <div style="text-align:right">
             <div style="font-weight:800;color:var(--red)">${fmtDate(e.validUntil)}</div>
@@ -938,7 +952,7 @@ function renderAlerts() {
           border-radius:10px;margin-bottom:8px">
           <div>
             <div style="font-weight:700;color:var(--navy)">${e.name}</div>
-            <div style="font-size:12px;color:var(--gray)">${e.position||""} · ${e.site||""} · ${e.phone||""}</div>
+            <div style="font-size:12px;color:var(--gray)">${e.__kind==="instruktazh"?"🔻 Инструктаж: "+e.position:(e.position||"")+" · "+(e.site||"")+" · "+(e.phone||"")}</div>
           </div>
           <div style="text-align:right">
             <div style="font-weight:800;color:var(--yellow)">${fmtDate(e.validUntil)}</div>
@@ -962,17 +976,18 @@ function renderAlerts() {
 }
 
 function copyAlertsList() {
-  const expired = DATA.employees.filter(e=>statusOf(e)==="expired");
-  const warning = DATA.employees.filter(e=>statusOf(e)==="warning");
-  let text = `СПИСОК ДЛЯ ПЕРЕСДАЧИ ДОПУСКА В КАРЬЕР\n${today().split("-").reverse().join(".")}\n\n`;
+  const pool = [...DATA.employees, ...instruktazhAsAccessLike()];
+  const expired = pool.filter(e=>statusOf(e)==="expired");
+  const warning = pool.filter(e=>statusOf(e)==="warning");
+  let text = `СПИСОК ДЛЯ ПЕРЕСДАЧИ ДОПУСКА / ИНСТРУКТАЖА\n${today().split("-").reverse().join(".")}\n\n`;
   if (expired.length) {
-    text += `ПРОСРОЧЕННЫЕ ДОПУСКИ:\n`;
-    expired.forEach(e=>{ text+=`• ${e.name} (${e.site}) — до ${fmtDate(e.validUntil)}\n`; });
+    text += `ПРОСРОЧЕННЫЕ:\n`;
+    expired.forEach(e=>{ text+=`• ${e.name}${e.__kind==="instruktazh"?" ["+e.position+"]":" ("+e.site+")"} — до ${fmtDate(e.validUntil)}\n`; });
     text += "\n";
   }
   if (warning.length) {
     text += `ИСТЕКАЮТ В ТЕЧЕНИЕ 30 ДНЕЙ:\n`;
-    warning.forEach(e=>{ text+=`• ${e.name} (${e.site}) — до ${fmtDate(e.validUntil)}, осталось ${daysLeft(e.validUntil)} дн.\n`; });
+    warning.forEach(e=>{ text+=`• ${e.name}${e.__kind==="instruktazh"?" ["+e.position+"]":" ("+e.site+")"} — до ${fmtDate(e.validUntil)}, осталось ${daysLeft(e.validUntil)} дн.\n`; });
   }
   navigator.clipboard.writeText(text).then(()=>alert("Список скопирован в буфер обмена"));
 }
@@ -1431,14 +1446,12 @@ function renderCertPrintPreview() {
   ].join("");
 }
 
-// Карточка удостоверения — тот же формат/размер, что и допуск,
-// но: бирюзовый акцент вместо янтарного, одна дата (без срока действия),
-// название курса/профессии как основной идентификатор вместо участка.
-function certCardHTML(t) {
-  const issueDate = fmtDate(t.date);
-  const photoUrl  = findEmpPhoto(t);
-
-  const photoBlock = photoUrl && photoUrl !== "—" && photoUrl !== ""
+// Карточка удостоверения — тот же формат/размер, что и допуск.
+// Ветвится по наличию t.validUntil:
+//   пусто    → бирюзовая, бессрочное обучение (одна дата выдачи)
+//   заполнено → малиновая, годовая сертификация (инструктаж), две даты
+function photoBlockHTML(photoUrl) {
+  return photoUrl && photoUrl !== "—" && photoUrl !== ""
     ? `<img src="${photoUrl}" style="width:100%;height:100%;object-fit:cover;object-position:center top;display:block">`
     : `<div style="width:100%;height:100%;background:#EEF2F7;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2mm">
         <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
@@ -1448,7 +1461,107 @@ function certCardHTML(t) {
         </svg>
         <div style="font-size:4.5pt;color:#94A3B8;font-weight:600;text-align:center;line-height:1.4">ФОТО<br>СУРЕТ</div>
       </div>`;
+}
 
+function certCardHTML(t) {
+  const photoUrl = findEmpPhoto(t);
+  const photoBlock = photoBlockHTML(photoUrl);
+
+  // ── Годовая сертификация (инструктаж) — малиновая карточка ──
+  if (t.validUntil) {
+    const passDate  = fmtDate(t.date);
+    const validDate = fmtDate(t.validUntil);
+    return `<div style="
+      width:85.6mm; height:53.98mm; position:relative;
+      border-radius:3.5mm; overflow:hidden; background:#fff;
+      border:.3mm solid rgba(11,26,53,.12);
+      box-shadow:0 .5mm 2mm rgba(0,0,0,.12);
+      font-family:Arial,sans-serif;
+      -webkit-print-color-adjust:exact; print-color-adjust:exact;">
+
+      <!-- Малиновая полоса слева -->
+      <div style="position:absolute;left:0;top:0;bottom:0;width:1.2mm;
+        background:linear-gradient(180deg,#9C2748,#7A1D38 50%,#9C2748)"></div>
+
+      <!-- Синяя шапка -->
+      <div style="
+        background:linear-gradient(135deg,#0B1A35 0%,#1A3060 100%);
+        height:11mm; padding:0 3mm 0 4mm;
+        display:flex; align-items:center; justify-content:space-between;">
+
+        <div style="display:flex;align-items:center;gap:0;flex-shrink:0">
+          <img src="${CR_LOGO_SRC}"
+            style="height:8mm;width:auto;object-fit:contain;opacity:.95">
+        </div>
+
+        <div style="text-align:right">
+          <div style="font-size:7pt;font-weight:700;color:#E85D8A;letter-spacing:.03em;line-height:1.2">ИНСТРУКТАЖ</div>
+          <div style="font-size:4.5pt;color:rgba(255,255,255,.55);letter-spacing:.04em">НҰСҚАУЛЫҚ</div>
+        </div>
+      </div>
+
+      <!-- Тело -->
+      <div style="display:flex;height:42.98mm;margin-left:1.2mm">
+
+        <div style="flex:1;padding:2.5mm 2.5mm 2mm 3mm;display:flex;flex-direction:column;justify-content:space-between;min-width:0;overflow:hidden">
+
+          <!-- Имя -->
+          <div>
+            <div style="font-size:13pt;font-weight:700;color:#0B1A35;
+              text-transform:uppercase;line-height:1.05;letter-spacing:.01em;
+              word-break:break-word">
+              ${(t.empName||"— — —")}
+            </div>
+            <div style="margin-top:1.5mm">
+              <span style="display:inline-block;background:#FDF1F4;color:#9C2748;
+                font-size:6.5pt;font-weight:700;padding:1mm 2.5mm;border-radius:99px;
+                border:.3mm solid #F0B8C8">
+                ${(t.course||"—")}
+              </span>
+            </div>
+          </div>
+
+          <!-- Подпись -->
+          <div style="display:flex;align-items:center;gap:2mm">
+            <span style="font-size:4.5pt;color:#94A3B8;white-space:nowrap;
+              font-weight:600;text-transform:uppercase;letter-spacing:.03em">
+              Инструктаж провёл:
+            </span>
+            <div style="flex:1;height:.2mm;background:rgba(11,26,53,.2)"></div>
+          </div>
+
+          <!-- Даты -->
+          <div style="display:flex;border-top:.3mm solid #E2E8F0;padding-top:1.5mm">
+            <div style="flex:1;padding-right:2mm">
+              <div style="font-size:5pt;font-weight:700;color:#94A3B8;
+                text-transform:uppercase;letter-spacing:.04em;margin-bottom:.5mm">
+                Дата прохождения
+              </div>
+              <div style="font-size:11pt;font-weight:700;color:#0B1A35">${passDate}</div>
+            </div>
+            <div style="width:.3mm;background:#E2E8F0;margin-right:2mm"></div>
+            <div style="flex:1">
+              <div style="font-size:5pt;font-weight:700;color:#9C2748;
+                text-transform:uppercase;letter-spacing:.04em;margin-bottom:.5mm">
+                Действителен до
+              </div>
+              <div style="font-size:11pt;font-weight:700;color:#9C2748">${validDate}</div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Фото -->
+        <div style="width:27mm;flex-shrink:0;overflow:hidden;border-left:.3mm solid #E2E8F0">
+          ${photoBlock}
+        </div>
+
+      </div>
+    </div>`;
+  }
+
+  // ── Бессрочное обучение — бирюзовая карточка (без изменений) ──
+  const issueDate = fmtDate(t.date);
   return `<div style="
     width:85.6mm; height:53.98mm; position:relative;
     border-radius:3.5mm; overflow:hidden; background:#fff;
