@@ -1046,7 +1046,7 @@ async function saveResultToSheets(result) {
       const testType = test.testType || "dopusk"; // "dopusk" или "profession"
 
       if (testType === "profession") {
-        // Профессиональное обучение — пишем в лист «Обучение»
+        // Профессиональное обучение — пишем в лист «Обучение», бессрочно
         const dateStr = today.toLocaleDateString("ru-RU", {day:"2-digit",month:"2-digit",year:"numeric"});
         await fetch(CFG.SHEET_URL, {
           method:"POST",
@@ -1069,6 +1069,36 @@ async function saveResultToSheets(result) {
           })
         });
         console.log("Обучение записано:", result.empName, result.testTitle);
+      } else if (testType === "instruktazh") {
+        // Ежегодный инструктаж (напр. безопасное вождение) — пишем в лист
+        // «Обучение», но со сроком действия 1 год, как допуск в карьер.
+        // НЕ трогает passDate/validUntil в «Сотрудники» — это отдельная
+        // от базового допуска годовая сертификация.
+        const dateStr = today.toLocaleDateString("ru-RU", {day:"2-digit",month:"2-digit",year:"numeric"});
+        const validDate = new Date(today);
+        validDate.setFullYear(validDate.getFullYear() + 1);
+        const validUntilStr = validDate.toLocaleDateString("ru-RU", {day:"2-digit",month:"2-digit",year:"numeric"});
+        await fetch(CFG.SHEET_URL, {
+          method:"POST",
+          body: JSON.stringify({
+            action:     "saveTraining",
+            empId:      state.selectedEmp?.id || "",
+            empName:    result.empName,
+            course:     result.testTitle,
+            date:       dateStr,
+            validUntil: validUntilStr,
+          })
+        });
+        await fetch(CFG.SHEET_URL, {
+          method:"POST",
+          body: JSON.stringify({
+            action: "updateAccess",
+            empName: result.empName,
+            passDate: "", validUntil: "",
+            position, site,
+          })
+        });
+        console.log("Инструктаж записан:", result.empName, result.testTitle, "до", validUntilStr);
       } else {
         // Допуск в карьер — обновляем даты
         const validDate = new Date(today);
