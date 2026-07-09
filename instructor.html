@@ -1874,6 +1874,9 @@ function selectPersonnelEmployee(id) {
         <div><span style="color:var(--gray)">Дата приёма:</span> <b>${fmtDate(emp.hireDate)}</b></div>
         <div><span style="color:var(--gray)">Телефон:</span> <b>${emp.phone||"—"}</b></div>
         <div style="grid-column:1/-1"><span style="color:var(--gray)">Адрес:</span> <b>${emp.address||"—"}</b></div>
+        <div><span style="color:var(--gray)">Образование:</span> <b>${emp.education||"—"}</b></div>
+        <div><span style="color:var(--gray)">Стаж по профессии:</span> <b>${emp.experienceYears?emp.experienceYears+" лет":"—"}</b></div>
+        <div style="grid-column:1/-1"><span style="color:var(--gray)">Специальности:</span> <b>${emp.specialties||"—"}</b></div>
       </div>
 
       <div style="padding:10px 12px;background:var(--light);border-radius:10px;margin-bottom:16px;
@@ -1962,6 +1965,16 @@ function openHireModal() {
       </select>
       <input id="hirePhone" placeholder="Телефон" style="padding:10px;border:1px solid var(--border);border-radius:8px">
       <input id="hireAddress" placeholder="Адрес" style="padding:10px;border:1px solid var(--border);border-radius:8px">
+      <select id="hireEducation" style="padding:10px;border:1px solid var(--border);border-radius:8px">
+        <option value="">Образование — не указано</option>
+        <option value="Среднее общее">Среднее общее</option>
+        <option value="Среднее специальное (ТиПО)">Среднее специальное (ТиПО)</option>
+        <option value="Незаконченное высшее">Незаконченное высшее</option>
+        <option value="Высшее техническое">Высшее техническое</option>
+        <option value="Высшее нетехническое">Высшее нетехническое</option>
+      </select>
+      <input id="hireExperience" type="number" min="0" max="60" placeholder="Стаж по профессии (лет)" style="padding:10px;border:1px solid var(--border);border-radius:8px">
+      <textarea id="hireSpecialties" placeholder="Имеющиеся специальности" rows="2" style="padding:10px;border:1px solid var(--border);border-radius:8px;font-family:inherit;resize:vertical"></textarea>
       <label style="font-size:11px;color:var(--gray)">Дата приёма
         <input id="hireDate" type="date" value="${today()}" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;margin-top:4px">
       </label>
@@ -1989,6 +2002,9 @@ async function submitHire(force) {
     phone: document.getElementById("hirePhone").value.trim(),
     address: document.getElementById("hireAddress").value.trim(),
     hireDate: document.getElementById("hireDate").value,
+    education: document.getElementById("hireEducation").value,
+    experienceYears: document.getElementById("hireExperience").value,
+    specialties: document.getElementById("hireSpecialties").value.trim(),
     force: !!force,
   };
 
@@ -2102,6 +2118,9 @@ function renderSurveysList() {
         <div><span style="color:var(--gray)">Дата приёма:</span> <b>${fmtDate(s.hireDate)}</b></div>
         <div><span style="color:var(--gray)">Телефон:</span> <b>${s.phone||"—"}</b></div>
         <div style="grid-column:1/-1"><span style="color:var(--gray)">Адрес:</span> <b>${s.address||"—"}</b></div>
+        <div><span style="color:var(--gray)">Образование:</span> <b>${s.education||"—"}</b></div>
+        <div><span style="color:var(--gray)">Стаж:</span> <b>${s.experienceYears?s.experienceYears+" лет":"—"}</b></div>
+        <div style="grid-column:1/-1"><span style="color:var(--gray)">Специальности:</span> <b>${s.specialties||"—"}</b></div>
       </div>
       <div style="display:flex;gap:8px">
         <button class="btn btn-ghost" onclick="handleRejectSurvey(${s.__row})" style="flex:1">Отклонить</button>
