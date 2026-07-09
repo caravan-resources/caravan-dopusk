@@ -156,6 +156,13 @@ input:focus, select:focus, textarea:focus { border-color:var(--gold); }
         <option value="CL">ТОО «Караван Логистик»</option>
       </select>
 
+      <label class="label">Участок</label>
+      <select id="fSite">
+        <option value="">— выберите —</option>
+        <option value="Алмалы">Алмалы</option>
+        <option value="Ашыктас">Ашыктас</option>
+      </select>
+
       <label class="label">Дата приёма на работу</label>
       <input type="date" id="fHireDate">
 
@@ -414,6 +421,8 @@ function showForm() {
     posOther.style.display = "none";
     posOther.value = "";
   }
+
+  document.getElementById("fSite").value = selected.site || "";
 }
 
 function backToSearch() {
@@ -427,9 +436,21 @@ function backToSearch() {
 async function submitForm() {
   const name = document.getElementById("fName").value.trim();
   const too  = document.getElementById("fToo").value;
+  const checkedSpecs = Array.from(document.querySelectorAll(".spec-check:checked")).map(c=>c.value);
+
+  // Должность и специальности для рабочих позиций — одно и то же (по факту
+  // из справочника ЕТКС). Если человек не тронул отдельное поле «Должность»,
+  // но отметил специальности — берём первую отмеченную как должность,
+  // чтобы поле не осталось пустым из-за того, что это два разных контрола.
+  let position = getPositionValue("f");
+  if (!position && checkedSpecs.length) position = checkedSpecs[0];
 
   if (!name) { alert("Укажите ФИО"); return; }
   if (!too)  { alert("Выберите основное ТОО"); return; }
+  if (!position && checkedSpecs.length === 0) {
+    alert("Укажите должность или отметьте хотя бы одну специальность");
+    return;
+  }
 
   const btn = document.getElementById("submitBtn");
   btn.disabled = true;
@@ -439,7 +460,8 @@ async function submitForm() {
     action: "submitSurvey",
     empId: selected && selected.id ? selected.id : "",
     empName: name,
-    position: getPositionValue("f"),
+    position,
+    site: document.getElementById("fSite").value,
     too,
     tooSecondary: document.getElementById("fTooSecondary").value,
     hireDate: document.getElementById("fHireDate").value,
@@ -448,7 +470,7 @@ async function submitForm() {
     email: document.getElementById("fEmail").value.trim(),
     education: document.getElementById("fEducation").value,
     experienceYears: document.getElementById("fExperience").value,
-    specialties: Array.from(document.querySelectorAll(".spec-check:checked")).map(c=>c.value).join(", "),
+    specialties: checkedSpecs.join(", "),
     additionalSkills: document.getElementById("fAdditionalSkills").value.trim(),
     certificates: document.getElementById("fCertificates").value.trim(),
     courses: document.getElementById("fCourses").value.trim(),
