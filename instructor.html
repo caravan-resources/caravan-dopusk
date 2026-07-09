@@ -203,6 +203,8 @@ tr:hover td { background:#FAFBFD; }
     <button id="navPrint"    onclick="showTab('print')">🖨 Печать карточек</button>
     <button id="navCertPrint" onclick="showTab('certPrint')">🏅 Печать удостоверений</button>
     <button id="navTraining" onclick="showTab('training')">🎓 Обучение</button>
+    <button id="navPersonnel" onclick="showTab('personnel')">👥 Сотрудники</button>
+    <button id="navSurveys" onclick="showTab('surveys')">📋 Анкеты <span id="surveyBadge" style="display:none;background:var(--red);color:#fff;border-radius:99px;padding:1px 7px;font-size:11px;margin-left:4px"></span></button>
     <button id="navImport"   onclick="showTab('import')">➕ Импорт теста</button>
   </nav>
 
@@ -451,7 +453,43 @@ tr:hover td { background:#FAFBFD; }
       </div>
     </div>
 
+    <div id="tabPersonnel" class="screen">
+      <div class="panel">
+        <div class="panel-title">
+          База сотрудников
+          <button class="btn btn-gold" onclick="openHireModal()">➕ Принять сотрудника</button>
+        </div>
+        <div class="filters">
+          <input type="text" id="searchPersonnel" placeholder="🔍 Поиск по имени, должности, табельному номеру..."
+            oninput="renderPersonnelList()">
+        </div>
+        <div style="display:grid;grid-template-columns:360px 1fr;gap:16px;align-items:start">
+          <div id="personnelList" style="max-height:640px;overflow-y:auto;display:flex;flex-direction:column;gap:6px"></div>
+          <div id="personnelProfile">
+            <div class="empty"><div class="empty-icon">👤</div>Выберите сотрудника из списка слева</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="tabSurveys" class="screen">
+      <div class="panel">
+        <div class="panel-title">
+          Анкеты на проверку
+          <button class="btn btn-ghost" onclick="loadAll()">🔄 Обновить</button>
+        </div>
+        <div id="surveysList"></div>
+      </div>
+    </div>
+
   </main>
+</div>
+
+<!-- МОДАЛКИ: приём сотрудника, событие личного дела -->
+<div id="modalOverlay" style="display:none;position:fixed;inset:0;background:rgba(11,26,53,.55);
+  z-index:1000;align-items:center;justify-content:center" onclick="if(event.target===this)closeModal()">
+  <div id="modalBox" style="background:#fff;border-radius:14px;padding:24px;width:420px;
+    max-height:85vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.4)"></div>
 </div>
 
 <!-- СТИЛИ ПЕЧАТИ -->
@@ -485,7 +523,7 @@ const CFG = {
 // ══════════════════════════════════════════════════════
 // ДАННЫЕ
 // ══════════════════════════════════════════════════════
-let DATA = { employees: [], results: [], training: [] };
+let DATA = { employees: [], results: [], training: [], requirements: [], personnelEvents: [], surveys: [] };
 
 // ══════════════════════════════════════════════════════
 // УТИЛИТЫ
@@ -630,6 +668,33 @@ async function loadAll() {
     DATA.training = [];
   }
 
+  // Требования по должностям
+  try {
+    const d = await jsonpFetch(`${CFG.SHEET_URL}?action=getRequirements`, "cb_requirements");
+    DATA.requirements = Array.isArray(d) ? d : [];
+  } catch(e) {
+    console.error("Требования:", e);
+    DATA.requirements = [];
+  }
+
+  // Личное дело — поощрения, награды, взыскания
+  try {
+    const d = await jsonpFetch(`${CFG.SHEET_URL}?action=getPersonnelEvents`, "cb_personnel_events");
+    DATA.personnelEvents = Array.isArray(d) ? d : [];
+  } catch(e) {
+    console.error("Личное дело:", e);
+    DATA.personnelEvents = [];
+  }
+
+  // Анкеты на проверку
+  try {
+    const d = await jsonpFetch(`${CFG.SHEET_URL}?action=getSurveys`, "cb_surveys");
+    DATA.surveys = Array.isArray(d) ? d : [];
+  } catch(e) {
+    console.error("Анкеты:", e);
+    DATA.surveys = [];
+  }
+
   document.getElementById("loadingMsg").style.display = "none";
   renderAll();
 }
@@ -642,13 +707,15 @@ function renderAll() {
   renderPrintSelect();
   renderCertPrintSelect();
   renderTrainingTable();
+  renderPersonnelList();
+  renderSurveysList();
 }
 
 // ══════════════════════════════════════════════════════
 // НАВИГАЦИЯ
 // ══════════════════════════════════════════════════════
 function showTab(name) {
-  ["dash","tests","access","alerts","print","certPrint","training","import"].forEach(t => {
+  ["dash","tests","access","alerts","print","certPrint","training","personnel","surveys","import"].forEach(t => {
     document.getElementById("tab"+cap(t)).classList.remove("active");
     document.getElementById("nav"+cap(t)).classList.remove("active");
   });
@@ -1712,6 +1779,367 @@ function exportTrainingCSV() {
 document.getElementById("pinInput").addEventListener("keydown", e => {
   if (e.key==="Enter") checkPin();
 });
+// ══════════════════════════════════════════════════════
+// СОТРУДНИКИ — база, профиль, приём, личное дело
+// ══════════════════════════════════════════════════════
+
+function findEmpByAnyKey(idOrName) {
+  return (DATA.employees||[]).find(e =>
+    String(e.id) === String(idOrName) || e.name === idOrName
+  );
+}
+
+// Сверка «Требования» (по должности) с тем, что реально закрыто.
+// Закрытым считается: тест сдан («Результаты», passed) ИЛИ есть запись
+// в «Обучение» с тем же testId/названием курса.
+function competencyGap(emp) {
+  const req = (DATA.requirements||[]).find(r =>
+    String(r.position||"").trim().toLowerCase() === String(emp.position||"").trim().toLowerCase()
+  );
+  if (!req || !req.requiredTests.length) return { required: [], done: [], missing: [] };
+
+  const passedTestIds = new Set(
+    (DATA.results||[])
+      .filter(r => (r.empName===emp.name) && isPassed(r))
+      .map(r => r.testId)
+      .filter(Boolean)
+  );
+
+  const done = req.requiredTests.filter(t => passedTestIds.has(t));
+  const missing = req.requiredTests.filter(t => !passedTestIds.has(t));
+  return { required: req.requiredTests, done, missing };
+}
+
+function personnelEventBadge(type) {
+  const t = String(type||"").toLowerCase();
+  if (t === "взыскание") return `<span style="background:var(--redbg);color:var(--red);font-size:11px;font-weight:700;padding:2px 8px;border-radius:99px">⚠ Взыскание</span>`;
+  if (t === "награда")   return `<span style="background:#FFFBEB;color:#B45309;font-size:11px;font-weight:700;padding:2px 8px;border-radius:99px">🏆 Награда</span>`;
+  return `<span style="background:var(--greenbg);color:var(--green);font-size:11px;font-weight:700;padding:2px 8px;border-radius:99px">✓ Поощрение</span>`;
+}
+
+function renderPersonnelList() {
+  const q = (document.getElementById("searchPersonnel")?.value || "").trim().toLowerCase();
+  const list = (DATA.employees||[]).filter(e => {
+    if (!q) return true;
+    return [e.name, e.position, e.id, e.site].some(v => String(v||"").toLowerCase().includes(q));
+  }).sort((a,b) => String(a.name||"").localeCompare(String(b.name||"")));
+
+  const el = document.getElementById("personnelList");
+  if (!el) return;
+
+  el.innerHTML = list.length ? list.map(e => `
+    <div onclick="selectPersonnelEmployee('${String(e.id).replace(/'/g,"\\'")}')"
+      style="cursor:pointer;padding:10px 12px;border:1px solid var(--border);border-radius:10px;
+        display:flex;justify-content:space-between;align-items:center;background:#fff"
+      onmouseover="this.style.background='var(--light)'" onmouseout="this.style.background='#fff'">
+      <div>
+        <div style="font-weight:700;color:var(--navy);font-size:13px">${e.name||"—"}</div>
+        <div style="font-size:11px;color:var(--gray)">${e.position||"—"} · ${e.site||""}</div>
+      </div>
+      <div style="font-size:11px;color:var(--gray);font-family:monospace">${e.id||""}</div>
+    </div>
+  `).join("") : `<div class="empty"><div class="empty-icon">🔍</div>Никого не нашлось</div>`;
+}
+
+function selectPersonnelEmployee(id) {
+  const emp = findEmpByAnyKey(id);
+  const el  = document.getElementById("personnelProfile");
+  if (!emp || !el) return;
+
+  const gap = competencyGap(emp);
+  const events = (DATA.personnelEvents||[]).filter(ev => String(ev.empId)===String(emp.id) || ev.empName===emp.name)
+    .sort((a,b) => new Date(b.date)-new Date(a.date));
+  const trainings = (DATA.training||[]).filter(t => String(t.empId)===String(emp.id) || t.empName===emp.name)
+    .sort((a,b) => new Date(b.date)-new Date(a.date));
+  const tests = (DATA.results||[]).filter(r => r.empName===emp.name)
+    .sort((a,b) => new Date(b.date)-new Date(a.date));
+
+  const accessStatus = statusOf(emp);
+
+  el.innerHTML = `
+    <div style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:20px">
+
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px">
+        <div>
+          <div style="font-size:20px;font-weight:800;color:var(--navy)">${emp.name||"—"}</div>
+          <div style="font-size:13px;color:var(--gray);margin-top:2px">${emp.position||"—"} · ${emp.site||"—"}</div>
+          <div style="font-size:11px;color:var(--gray);font-family:monospace;margin-top:4px">${emp.id||""}</div>
+        </div>
+        <button class="btn btn-ghost" onclick="openEventModal('${emp.id}','${(emp.name||"").replace(/'/g,"\\'")}')">+ Событие в личное дело</button>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;font-size:12px">
+        <div><span style="color:var(--gray)">ТОО (основное):</span> <b>${emp.tooPrimary||"—"}</b></div>
+        <div><span style="color:var(--gray)">ТОО (доп.):</span> <b>${emp.tooSecondary||"—"}</b></div>
+        <div><span style="color:var(--gray)">Дата приёма:</span> <b>${fmtDate(emp.hireDate)}</b></div>
+        <div><span style="color:var(--gray)">Телефон:</span> <b>${emp.phone||"—"}</b></div>
+        <div style="grid-column:1/-1"><span style="color:var(--gray)">Адрес:</span> <b>${emp.address||"—"}</b></div>
+      </div>
+
+      <div style="padding:10px 12px;background:var(--light);border-radius:10px;margin-bottom:16px;
+        display:flex;justify-content:space-between;align-items:center">
+        <span style="font-size:12px;color:var(--gray)">Допуск в карьер: до ${fmtDate(emp.validUntil)}</span>
+        ${statusBadge(accessStatus)}
+      </div>
+
+      <div style="margin-bottom:16px">
+        <div style="font-size:12px;font-weight:700;color:var(--navy);margin-bottom:8px">Компетенции по должности</div>
+        ${gap.required.length ? `
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            ${gap.done.map(t=>`<span style="background:var(--greenbg);color:var(--green);font-size:11px;font-weight:700;padding:3px 9px;border-radius:99px">✓ ${t}</span>`).join("")}
+            ${gap.missing.map(t=>`<span style="background:var(--redbg);color:var(--red);font-size:11px;font-weight:700;padding:3px 9px;border-radius:99px">✗ ${t}</span>`).join("")}
+          </div>
+        ` : `<div style="font-size:12px;color:var(--gray)">Для должности «${emp.position||"—"}» требования не заданы.</div>`}
+      </div>
+
+      <div style="margin-bottom:16px">
+        <div style="font-size:12px;font-weight:700;color:var(--navy);margin-bottom:8px">Обучение (${trainings.length})</div>
+        ${trainings.length ? trainings.map(t=>`
+          <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px">
+            <span>${t.course}</span>
+            <span style="color:var(--gray)">${fmtDate(t.date)}${t.validUntil?" → "+fmtDate(t.validUntil):""}</span>
+          </div>
+        `).join("") : `<div style="font-size:12px;color:var(--gray)">Пока нет записей.</div>`}
+      </div>
+
+      <div style="margin-bottom:16px">
+        <div style="font-size:12px;font-weight:700;color:var(--navy);margin-bottom:8px">Личное дело (${events.length})</div>
+        ${events.length ? events.map(ev=>`
+          <div style="padding:8px 0;border-bottom:1px solid var(--border);font-size:12px">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              ${personnelEventBadge(ev.type)}
+              <span style="color:var(--gray)">${fmtDate(ev.date)}</span>
+            </div>
+            <div style="margin-top:4px">${ev.description||""}</div>
+            ${ev.issuedBy?`<div style="color:var(--gray);font-size:11px;margin-top:2px">Оформил: ${ev.issuedBy}</div>`:""}
+          </div>
+        `).join("") : `<div style="font-size:12px;color:var(--gray)">Записей нет.</div>`}
+      </div>
+
+      <div>
+        <div style="font-size:12px;font-weight:700;color:var(--navy);margin-bottom:8px">Все тесты (${tests.length})</div>
+        ${tests.length ? tests.map(t=>`
+          <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px">
+            <span>${t.testTitle||t.testId}</span>
+            <span>${resultBadge(t.passed || t["Результат"])} <span style="color:var(--gray)">${fmtDate(t.date)}</span></span>
+          </div>
+        `).join("") : `<div style="font-size:12px;color:var(--gray)">Тестов пока нет.</div>`}
+      </div>
+
+    </div>
+  `;
+}
+
+// ── Модалки ──────────────────────────────────────────
+function openModal(html) {
+  document.getElementById("modalBox").innerHTML = html;
+  document.getElementById("modalOverlay").style.display = "flex";
+}
+function closeModal() {
+  document.getElementById("modalOverlay").style.display = "none";
+}
+
+function openHireModal() {
+  openModal(`
+    <div style="font-size:16px;font-weight:800;color:var(--navy);margin-bottom:16px">➕ Принять сотрудника</div>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <input id="hireName" placeholder="ФИО" style="padding:10px;border:1px solid var(--border);border-radius:8px">
+      <input id="hirePosition" placeholder="Должность" style="padding:10px;border:1px solid var(--border);border-radius:8px">
+      <select id="hireSite" style="padding:10px;border:1px solid var(--border);border-radius:8px">
+        <option value="Алмалы">Алмалы</option>
+        <option value="Ашыктас">Ашыктас</option>
+      </select>
+      <select id="hireToo" style="padding:10px;border:1px solid var(--border);border-radius:8px">
+        <option value="SRC">ТОО «Saryarka Resources Capital» (SRC)</option>
+        <option value="КУ">ТОО «Караван Улытау» (КУ)</option>
+        <option value="CL">ТОО «Караван Логистик» (CL)</option>
+      </select>
+      <select id="hireTooSecondary" style="padding:10px;border:1px solid var(--border);border-radius:8px">
+        <option value="">Второе ТОО — нет</option>
+        <option value="SRC">ТОО «Saryarka Resources Capital» (SRC)</option>
+        <option value="КУ">ТОО «Караван Улытау» (КУ)</option>
+        <option value="CL">ТОО «Караван Логистик» (CL)</option>
+      </select>
+      <input id="hirePhone" placeholder="Телефон" style="padding:10px;border:1px solid var(--border);border-radius:8px">
+      <input id="hireAddress" placeholder="Адрес" style="padding:10px;border:1px solid var(--border);border-radius:8px">
+      <label style="font-size:11px;color:var(--gray)">Дата приёма
+        <input id="hireDate" type="date" value="${today()}" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;margin-top:4px">
+      </label>
+    </div>
+    <div id="hireWarning" style="display:none;margin-top:12px;padding:10px;background:var(--yellowbg);
+      border:1px solid var(--yellow);border-radius:8px;font-size:12px"></div>
+    <div style="display:flex;gap:8px;margin-top:16px">
+      <button class="btn btn-ghost" onclick="closeModal()" style="flex:1">Отмена</button>
+      <button class="btn btn-gold" onclick="submitHire(false)" style="flex:1">Принять</button>
+    </div>
+  `);
+}
+
+async function submitHire(force) {
+  const name = document.getElementById("hireName").value.trim();
+  if (!name) { alert("Укажите ФИО"); return; }
+
+  const body = {
+    action: "hireEmployee",
+    name,
+    position: document.getElementById("hirePosition").value.trim(),
+    site: document.getElementById("hireSite").value,
+    too: document.getElementById("hireToo").value,
+    tooSecondary: document.getElementById("hireTooSecondary").value,
+    phone: document.getElementById("hirePhone").value.trim(),
+    address: document.getElementById("hireAddress").value.trim(),
+    hireDate: document.getElementById("hireDate").value,
+    force: !!force,
+  };
+
+  try {
+    const res = await fetch(CFG.SHEET_URL, { method:"POST", body: JSON.stringify(body) });
+    const data = await res.json();
+
+    if (data.warning) {
+      const w = document.getElementById("hireWarning");
+      w.style.display = "block";
+      w.innerHTML = `⚠ ${data.message}<br><br>` +
+        data.candidates.map(c=>`• ${c.name} (${c.id})`).join("<br>") +
+        `<br><br><button class="btn btn-gold" onclick="submitHire(true)" style="width:100%;margin-top:8px">Всё равно создать нового</button>`;
+      return;
+    }
+
+    if (data.ok) {
+      closeModal();
+      alert(`Принят: ${data.name}, табельный номер ${data.id}`);
+      await loadAll();
+    } else {
+      alert("Ошибка: " + (data.error||"неизвестная"));
+    }
+  } catch(e) {
+    alert("Ошибка сети: " + e);
+  }
+}
+
+function openEventModal(empId, empName) {
+  openModal(`
+    <div style="font-size:16px;font-weight:800;color:var(--navy);margin-bottom:16px">Событие в личное дело — ${empName}</div>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <select id="eventType" style="padding:10px;border:1px solid var(--border);border-radius:8px">
+        <option value="поощрение">Поощрение</option>
+        <option value="награда">Награда</option>
+        <option value="взыскание">Взыскание</option>
+      </select>
+      <textarea id="eventDescription" placeholder="Описание" rows="3"
+        style="padding:10px;border:1px solid var(--border);border-radius:8px;font-family:inherit;resize:vertical"></textarea>
+      <input id="eventIssuedBy" placeholder="Кем оформлено" style="padding:10px;border:1px solid var(--border);border-radius:8px">
+      <label style="font-size:11px;color:var(--gray)">Дата
+        <input id="eventDate" type="date" value="${today()}" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;margin-top:4px">
+      </label>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:16px">
+      <button class="btn btn-ghost" onclick="closeModal()" style="flex:1">Отмена</button>
+      <button class="btn btn-gold" onclick="submitPersonnelEvent('${empId}','${empName.replace(/'/g,"\\'")}')" style="flex:1">Сохранить</button>
+    </div>
+  `);
+}
+
+async function submitPersonnelEvent(empId, empName) {
+  const body = {
+    action: "savePersonnelEvent",
+    empId, empName,
+    type: document.getElementById("eventType").value,
+    description: document.getElementById("eventDescription").value.trim(),
+    issuedBy: document.getElementById("eventIssuedBy").value.trim(),
+    date: document.getElementById("eventDate").value,
+  };
+  try {
+    const res = await fetch(CFG.SHEET_URL, { method:"POST", body: JSON.stringify(body) });
+    const data = await res.json();
+    if (data.ok) {
+      closeModal();
+      await loadAll();
+      selectPersonnelEmployee(empId);
+    } else {
+      alert("Ошибка: " + (data.error||"неизвестная"));
+    }
+  } catch(e) {
+    alert("Ошибка сети: " + e);
+  }
+}
+
+// ══════════════════════════════════════════════════════
+// АНКЕТЫ НА ПРОВЕРКУ
+// ══════════════════════════════════════════════════════
+function renderSurveysList() {
+  const surveys = DATA.surveys || [];
+  const badge = document.getElementById("surveyBadge");
+  if (badge) {
+    if (surveys.length > 0) { badge.style.display = "inline"; badge.textContent = surveys.length; }
+    else { badge.style.display = "none"; }
+  }
+
+  const el = document.getElementById("surveysList");
+  if (!el) return;
+
+  if (!surveys.length) {
+    el.innerHTML = `<div class="empty"><div class="empty-icon">✓</div>Новых анкет нет</div>`;
+    return;
+  }
+
+  const tooNames = { "SRC": "Saryarka Resources Capital", "КУ": "Караван Улытау", "CL": "Караван Логистик" };
+
+  el.innerHTML = surveys.map(s => `
+    <div style="padding:14px;border:1px solid var(--border);border-radius:10px;margin-bottom:10px;background:#fff">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
+        <div>
+          <div style="font-weight:700;color:var(--navy);font-size:14px">${s.empName}</div>
+          <div style="font-size:11px;color:var(--gray)">
+            ${s.empId ? "Найден в базе: " + s.empId : "⚠ Новый профиль — не найден в базе"}
+            · подано ${s.submittedAt}
+          </div>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12px;margin-bottom:10px">
+        <div><span style="color:var(--gray)">ТОО:</span> <b>${tooNames[s.too]||s.too||"—"}</b></div>
+        <div><span style="color:var(--gray)">ТОО (доп.):</span> <b>${tooNames[s.tooSecondary]||s.tooSecondary||"—"}</b></div>
+        <div><span style="color:var(--gray)">Дата приёма:</span> <b>${fmtDate(s.hireDate)}</b></div>
+        <div><span style="color:var(--gray)">Телефон:</span> <b>${s.phone||"—"}</b></div>
+        <div style="grid-column:1/-1"><span style="color:var(--gray)">Адрес:</span> <b>${s.address||"—"}</b></div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-ghost" onclick="handleRejectSurvey(${s.__row})" style="flex:1">Отклонить</button>
+        <button class="btn btn-gold" onclick="handleApproveSurvey(${s.__row})" style="flex:1">Принять</button>
+      </div>
+    </div>
+  `).join("");
+}
+
+async function handleApproveSurvey(row) {
+  try {
+    const res = await fetch(CFG.SHEET_URL, { method:"POST", body: JSON.stringify({ action:"approveSurvey", row }) });
+    const data = await res.json();
+    if (data.ok) {
+      await loadAll();
+    } else {
+      alert("Ошибка: " + (data.error||"неизвестная"));
+    }
+  } catch(e) {
+    alert("Ошибка сети: " + e);
+  }
+}
+
+async function handleRejectSurvey(row) {
+  if (!confirm("Отклонить эту анкету?")) return;
+  try {
+    const res = await fetch(CFG.SHEET_URL, { method:"POST", body: JSON.stringify({ action:"rejectSurvey", row }) });
+    const data = await res.json();
+    if (data.ok) {
+      await loadAll();
+    } else {
+      alert("Ошибка: " + (data.error||"неизвестная"));
+    }
+  } catch(e) {
+    alert("Ошибка сети: " + e);
+  }
+}
+
 // Показать первый таб после логина
 showTab("dash");
 </script>
