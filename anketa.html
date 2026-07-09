@@ -87,6 +87,13 @@ input:focus, select:focus, textarea:focus { border-color:var(--gold); }
     <p>Caravan Resources · Department по горным работам</p>
   </div>
 
+  <div id="webviewWarning" style="display:none;background:#FEF2F2;border:1.5px solid #DC2626;
+    border-radius:10px;padding:12px;margin-bottom:14px;font-size:13px;color:#DC2626;line-height:1.5">
+    ⚠ Похоже, страница открыта прямо в мессенджере — в нём может не работать камера для фото.
+    Нажмите «⋮» или «Поделиться» вверху экрана и выберите <b>«Открыть в браузере»</b> (Chrome / Safari),
+    прежде чем загружать фото.
+  </div>
+
   <!-- ЭКРАН 1: найти себя в списке -->
   <div id="screenSearch" class="active">
     <div class="card">
@@ -104,17 +111,23 @@ input:focus, select:focus, textarea:focus { border-color:var(--gold); }
 
     <div class="card">
       <div class="card-title">Фото</div>
-      <div class="hint">Сфотографируйте себя прямо сейчас — анфас, без головного убора, при хорошем освещении. Не загружайте старое фото из галереи.</div>
+      <div class="hint">По возможности сфотографируйте себя сейчас — анфас, без головного убора, при хорошем освещении. Если камера не открывается, загрузите фото из галереи.</div>
       <div id="photoPreviewWrap" style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
         <div id="photoPreview" style="width:64px;height:64px;border-radius:50%;background:var(--light);
           display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0;
           border:1.5px solid var(--border)">
           <span style="font-size:24px">📷</span>
         </div>
-        <label style="flex:1">
-          <input type="file" accept="image/*" capture="user" style="display:none" onchange="handlePhotoSelect(event)">
-          <span class="btn btn-ghost" style="display:block" onclick="this.previousElementSibling.click()">📷 Сделать фото</span>
-        </label>
+        <div style="flex:1;display:flex;flex-direction:column;gap:6px">
+          <label>
+            <input type="file" accept="image/*" capture="user" style="display:none" onchange="handlePhotoSelect(event)">
+            <span class="btn btn-ghost" style="display:block" onclick="this.previousElementSibling.click()">📷 Сделать фото</span>
+          </label>
+          <label>
+            <input type="file" accept="image/*" style="display:none" onchange="handlePhotoSelect(event)">
+            <span class="btn btn-ghost" style="display:block;font-size:13px" onclick="this.previousElementSibling.click()">📁 Не работает камера? Загрузить из галереи</span>
+          </label>
+        </div>
       </div>
       <div id="photoStatus" style="font-size:12px;color:var(--gray)"></div>
     </div>
@@ -154,13 +167,6 @@ input:focus, select:focus, textarea:focus { border-color:var(--gold); }
         <option value="SRC">ТОО «Saryarka Resources Capital»</option>
         <option value="КУ">ТОО «Караван Улытау»</option>
         <option value="CL">ТОО «Караван Логистик»</option>
-      </select>
-
-      <label class="label">Участок</label>
-      <select id="fSite">
-        <option value="">— выберите —</option>
-        <option value="Алмалы">Алмалы</option>
-        <option value="Ашыктас">Ашыктас</option>
       </select>
 
       <label class="label">Дата приёма на работу</label>
@@ -421,8 +427,6 @@ function showForm() {
     posOther.style.display = "none";
     posOther.value = "";
   }
-
-  document.getElementById("fSite").value = selected.site || "";
 }
 
 function backToSearch() {
@@ -461,7 +465,6 @@ async function submitForm() {
     empId: selected && selected.id ? selected.id : "",
     empName: name,
     position,
-    site: document.getElementById("fSite").value,
     too,
     tooSecondary: document.getElementById("fTooSecondary").value,
     hireDate: document.getElementById("fHireDate").value,
@@ -494,6 +497,19 @@ async function submitForm() {
     btn.textContent = "Отправить анкету";
   }
 }
+
+// Детекция встроенного браузера мессенджера (WhatsApp/Instagram/FB) —
+// в них camera capture часто не работает без видимой ошибки, поэтому
+// предупреждаем заранее, а не оставляем человека гадать, почему кнопка
+// «Сделать фото» ничего не делает.
+(function detectInAppBrowser() {
+  const ua = navigator.userAgent || "";
+  const isInApp = /WhatsApp|Instagram|FBAN|FBAV|Line\//i.test(ua);
+  if (isInApp) {
+    const el = document.getElementById("webviewWarning");
+    if (el) el.style.display = "block";
+  }
+})();
 
 loadEmployees();
 </script>
