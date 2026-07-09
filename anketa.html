@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Анкета сотрудника — Caravan Resources</title>
+<style>
+:root {
+  --navy:#0B1A35; --navy2:#1B3B6F; --gold:#F4A52A;
+  --red:#DC2626; --redbg:#FEF2F2;
+  --green:#16A34A; --greenbg:#F0FDF4;
+  --gray:#64748B; --light:#F1F5F9; --border:#E2E8F0;
+}
+* { box-sizing:border-box; margin:0; padding:0; }
+body {
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+  background:var(--light); color:var(--navy); min-height:100vh;
+}
+.wrap { max-width:480px; margin:0 auto; padding:20px 16px 60px; }
+.header {
+  background:var(--navy); color:#fff; padding:20px 16px; margin:-20px -16px 20px;
+  text-align:center;
+}
+.header h1 { font-size:17px; font-weight:800; }
+.header p { font-size:12px; color:rgba(255,255,255,.6); margin-top:4px; }
+
+.card {
+  background:#fff; border-radius:14px; padding:18px; margin-bottom:14px;
+  box-shadow:0 2px 10px rgba(0,0,0,.06);
+}
+.card-title { font-size:14px; font-weight:800; color:var(--navy); margin-bottom:12px; }
+
+input, select, textarea {
+  width:100%; padding:13px 14px; border:1.5px solid var(--border); border-radius:10px;
+  font-size:15px; font-family:inherit; outline:none; margin-bottom:10px;
+}
+input:focus, select:focus, textarea:focus { border-color:var(--gold); }
+
+.btn {
+  width:100%; padding:14px; border:none; border-radius:10px;
+  font-size:15px; font-weight:800; cursor:pointer; font-family:inherit;
+}
+.btn-gold { background:var(--gold); color:var(--navy); }
+.btn-ghost { background:var(--light); color:var(--navy); }
+.btn:disabled { opacity:.5; cursor:not-allowed; }
+
+.emp-item {
+  display:flex; align-items:center; gap:10px; width:100%;
+  padding:12px; border:1.5px solid var(--border); border-radius:10px;
+  background:#fff; cursor:pointer; margin-bottom:8px; text-align:left;
+  font-family:inherit; font-size:14px;
+}
+.emp-item:active { background:var(--light); }
+.emp-avatar {
+  width:36px; height:36px; border-radius:50%; background:var(--navy2); color:#fff;
+  display:flex; align-items:center; justify-content:center; font-weight:800; font-size:13px;
+  flex-shrink:0;
+}
+.emp-name { font-weight:700; color:var(--navy); }
+.emp-pos { font-size:12px; color:var(--gray); margin-top:1px; }
+
+.selected-box {
+  display:flex; align-items:center; gap:10px; padding:12px;
+  background:var(--greenbg); border:1.5px solid var(--green); border-radius:10px;
+  margin-bottom:14px;
+}
+.selected-box .name { font-weight:700; color:var(--navy); }
+.selected-box .change { margin-left:auto; font-size:12px; color:var(--navy2); cursor:pointer; text-decoration:underline; }
+
+.hint { font-size:12px; color:var(--gray); margin-bottom:10px; line-height:1.5; }
+.label { font-size:12px; font-weight:700; color:var(--gray); margin-bottom:6px; display:block; }
+
+.success-box { text-align:center; padding:40px 16px; }
+.success-icon { font-size:48px; margin-bottom:16px; }
+.success-title { font-size:18px; font-weight:800; color:var(--navy); margin-bottom:8px; }
+.success-sub { font-size:13px; color:var(--gray); line-height:1.6; }
+
+#screenSearch, #screenForm, #screenSuccess { display:none; }
+#screenSearch.active, #screenForm.active, #screenSuccess.active { display:block; }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <div class="header">
+    <h1>Анкета сотрудника</h1>
+    <p>Caravan Resources · Department по горным работам</p>
+  </div>
+
+  <!-- ЭКРАН 1: найти себя в списке -->
+  <div id="screenSearch" class="active">
+    <div class="card">
+      <div class="card-title">Найдите себя в списке</div>
+      <div class="hint">Начните вводить фамилию или имя. Если вас нет в списке — нажмите «Меня здесь нет» внизу.</div>
+      <input type="text" id="empSearch" placeholder="🔍 Введите фамилию..." oninput="renderEmpList(this.value)">
+      <div id="empList"></div>
+    </div>
+    <button class="btn btn-ghost" onclick="showNotFound()">Меня здесь нет</button>
+  </div>
+
+  <!-- ЭКРАН 2: форма -->
+  <div id="screenForm">
+    <div id="selectedBoxWrap"></div>
+
+    <div class="card">
+      <div class="card-title">Ваши данные</div>
+
+      <label class="label">ФИО</label>
+      <input type="text" id="fName" placeholder="Фамилия Имя">
+
+      <label class="label">Основное ТОО</label>
+      <select id="fToo">
+        <option value="">— выберите —</option>
+        <option value="SRC">ТОО «Saryarka Resources Capital»</option>
+        <option value="КУ">ТОО «Караван Улытау»</option>
+        <option value="CL">ТОО «Караван Логистик»</option>
+      </select>
+
+      <label class="label">Также числюсь в (необязательно)</label>
+      <select id="fTooSecondary">
+        <option value="">— нет —</option>
+        <option value="SRC">ТОО «Saryarka Resources Capital»</option>
+        <option value="КУ">ТОО «Караван Улытау»</option>
+        <option value="CL">ТОО «Караван Логистик»</option>
+      </select>
+
+      <label class="label">Дата приёма на работу</label>
+      <input type="date" id="fHireDate">
+
+      <label class="label">Адрес проживания</label>
+      <textarea id="fAddress" rows="2" placeholder="Город, улица, дом"></textarea>
+
+      <label class="label">Телефон</label>
+      <input type="tel" id="fPhone" placeholder="+7 7XX XXX XX XX">
+    </div>
+
+    <div class="hint">
+      После отправки анкета попадёт на проверку инструктору. Данные появятся в системе после подтверждения.
+    </div>
+
+    <button class="btn btn-gold" id="submitBtn" onclick="submitForm()">Отправить анкету</button>
+  </div>
+
+  <!-- ЭКРАН 3: успех -->
+  <div id="screenSuccess">
+    <div class="card success-box">
+      <div class="success-icon">✅</div>
+      <div class="success-title">Анкета отправлена</div>
+      <div class="success-sub">Спасибо! Данные проверит инструктор и внесёт в систему.<br>Обычно это занимает не больше одного рабочего дня.</div>
+    </div>
+  </div>
+</div>
+
+<script>
+const CFG = {
+  SHEET_URL: "https://script.google.com/macros/s/AKfycbwhdMV20k8US2BXUz1Xk2XCXE9MEwpHpQaadTF9xEfzbU1--dHL-Zuj06K2qXW-rFtKGw/exec",
+};
+
+let EMPLOYEES = [];
+let selected = null; // { id, name, position, site } или { id:"", name:"..." } для "меня нет"
+
+function today() { return new Date().toISOString().split("T")[0]; }
+
+async function loadEmployees() {
+  try {
+    const r = await fetch(`${CFG.SHEET_URL}?action=list`);
+    const data = await r.json();
+    if (Array.isArray(data)) {
+      EMPLOYEES = data.map(e => ({ id:e.id, name:e.name, position:e.position, site:e.site }));
+    }
+  } catch(e) {
+    console.error("Не удалось загрузить список сотрудников:", e);
+  }
+}
+
+function initials(name) {
+  return String(name||"").trim().split(/\s+/).slice(0,2).map(w=>w[0]||"").join("").toUpperCase();
+}
+
+function renderEmpList(query) {
+  const list = document.getElementById("empList");
+  const q = String(query||"").trim().toLowerCase();
+  if (!q) { list.innerHTML = ""; return; }
+
+  const filtered = EMPLOYEES.filter(e => String(e.name||"").toLowerCase().includes(q)).slice(0, 8);
+
+  if (filtered.length === 0) {
+    list.innerHTML = `<div style="padding:12px;color:var(--gray);font-size:13px;text-align:center">Не найдено. Если вас точно нет — нажмите «Меня здесь нет» внизу.</div>`;
+    return;
+  }
+
+  list.innerHTML = filtered.map(e => `
+    <button type="button" class="emp-item" onclick='pickEmployee(${JSON.stringify(e)})'>
+      <div class="emp-avatar">${initials(e.name)}</div>
+      <div>
+        <div class="emp-name">${e.name}</div>
+        <div class="emp-pos">${e.position||"—"} · ${e.site||""}</div>
+      </div>
+    </button>
+  `).join("");
+}
+
+function pickEmployee(emp) {
+  selected = emp;
+  showForm();
+}
+
+function showNotFound() {
+  selected = { id: "", name: "" };
+  showForm();
+}
+
+function showForm() {
+  document.getElementById("screenSearch").classList.remove("active");
+  document.getElementById("screenForm").classList.add("active");
+
+  const wrap = document.getElementById("selectedBoxWrap");
+  const nameField = document.getElementById("fName");
+
+  if (selected.id) {
+    // Найден в списке — имя зафиксировано, менять нельзя (иначе смысл поиска теряется)
+    wrap.innerHTML = `
+      <div class="selected-box">
+        <div class="emp-avatar">${initials(selected.name)}</div>
+        <div>
+          <div class="name">${selected.name}</div>
+          <div style="font-size:11px;color:var(--gray)">${selected.position||"—"}</div>
+        </div>
+        <span class="change" onclick="backToSearch()">изменить</span>
+      </div>
+    `;
+    nameField.value = selected.name;
+    nameField.readOnly = true;
+    nameField.style.background = "var(--light)";
+  } else {
+    wrap.innerHTML = `
+      <div class="hint" style="margin-bottom:14px">Вас нет в списке — укажите ФИО полностью, анкета будет создана как заявка на новый профиль.</div>
+    `;
+    nameField.value = "";
+    nameField.readOnly = false;
+    nameField.style.background = "#fff";
+  }
+
+  document.getElementById("fHireDate").value = today();
+}
+
+function backToSearch() {
+  selected = null;
+  document.getElementById("screenForm").classList.remove("active");
+  document.getElementById("screenSearch").classList.add("active");
+  document.getElementById("empSearch").value = "";
+  document.getElementById("empList").innerHTML = "";
+}
+
+async function submitForm() {
+  const name = document.getElementById("fName").value.trim();
+  const too  = document.getElementById("fToo").value;
+
+  if (!name) { alert("Укажите ФИО"); return; }
+  if (!too)  { alert("Выберите основное ТОО"); return; }
+
+  const btn = document.getElementById("submitBtn");
+  btn.disabled = true;
+  btn.textContent = "Отправка...";
+
+  const body = {
+    action: "submitSurvey",
+    empId: selected && selected.id ? selected.id : "",
+    empName: name,
+    too,
+    tooSecondary: document.getElementById("fTooSecondary").value,
+    hireDate: document.getElementById("fHireDate").value,
+    address: document.getElementById("fAddress").value.trim(),
+    phone: document.getElementById("fPhone").value.trim(),
+  };
+
+  try {
+    const res = await fetch(CFG.SHEET_URL, { method:"POST", body: JSON.stringify(body) });
+    const data = await res.json();
+    if (data.ok) {
+      document.getElementById("screenForm").classList.remove("active");
+      document.getElementById("screenSuccess").classList.add("active");
+    } else {
+      alert("Ошибка: " + (data.error||"неизвестная"));
+      btn.disabled = false;
+      btn.textContent = "Отправить анкету";
+    }
+  } catch(e) {
+    alert("Ошибка сети. Проверьте интернет и попробуйте снова.");
+    btn.disabled = false;
+    btn.textContent = "Отправить анкету";
+  }
+}
+
+loadEmployees();
+</script>
+</body>
+</html>
