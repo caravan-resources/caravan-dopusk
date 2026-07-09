@@ -132,6 +132,22 @@ input:focus, select:focus, textarea:focus { border-color:var(--gold); }
 
       <label class="label">Телефон</label>
       <input type="tel" id="fPhone" placeholder="+7 7XX XXX XX XX">
+
+      <label class="label">Образование</label>
+      <select id="fEducation">
+        <option value="">— выберите —</option>
+        <option value="Среднее общее">Среднее общее</option>
+        <option value="Среднее специальное (ТиПО)">Среднее специальное (ТиПО)</option>
+        <option value="Незаконченное высшее">Незаконченное высшее</option>
+        <option value="Высшее техническое">Высшее техническое</option>
+        <option value="Высшее нетехническое">Высшее нетехническое</option>
+      </select>
+
+      <label class="label">Стаж работы по профессии (лет)</label>
+      <input type="number" id="fExperience" min="0" max="60" placeholder="Например: 7">
+
+      <label class="label">Имеющиеся специальности</label>
+      <textarea id="fSpecialties" rows="2" placeholder="Например: машинист экскаватора, водитель кат. C, сварщик"></textarea>
     </div>
 
     <div class="hint">
@@ -272,6 +288,9 @@ async function submitForm() {
     hireDate: document.getElementById("fHireDate").value,
     address: document.getElementById("fAddress").value.trim(),
     phone: document.getElementById("fPhone").value.trim(),
+    education: document.getElementById("fEducation").value,
+    experienceYears: document.getElementById("fExperience").value,
+    specialties: document.getElementById("fSpecialties").value.trim(),
   };
 
   try {
