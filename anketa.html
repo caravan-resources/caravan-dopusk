@@ -268,10 +268,36 @@ function handlePhotoSelect(event) {
   status.textContent = "Загрузка...";
   status.style.color = "var(--gray)";
 
+  // Таймаут-предохранитель: если ни одна ветка (успех/ошибка) не сработает
+  // за 20 секунд — считаем, что процесс завис (типичная причина — формат
+  // HEIC с iPhone, который браузер не смог декодировать через <img>),
+  // и показываем явную ошибку вместо бесконечной надписи "Загрузка...".
+  let settled = false;
+  const failSafe = setTimeout(() => {
+    if (settled) return;
+    settled = true;
+    status.textContent = "Не получилось обработать фото за отведённое время. Если снимали на iPhone — попробуйте выбрать «Настройки → Камера → Форматы → Совместимые» или пришлите фото в формате JPG.";
+    status.style.color = "var(--red)";
+  }, 20000);
+
   const MAX_SIZE = 800;
   const reader = new FileReader();
+  reader.onerror = () => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(failSafe);
+    status.textContent = "Не удалось прочитать файл. Попробуйте другое фото.";
+    status.style.color = "var(--red)";
+  };
   reader.onload = (e) => {
     const img = new Image();
+    img.onerror = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(failSafe);
+      status.textContent = "Браузер не смог обработать этот формат фото (часто бывает с HEIC на iPhone). Попробуйте выбрать другое фото или пересохранить его в JPG.";
+      status.style.color = "var(--red)";
+    };
     img.onload = async () => {
       const canvas = document.createElement("canvas");
       let w = img.width, h = img.height;
@@ -295,6 +321,9 @@ function handlePhotoSelect(event) {
           body: JSON.stringify({ action:"uploadPhoto", empId, empName, base64, mime:"image/jpeg" })
         });
         const data = await res.json();
+        if (settled) return;
+        settled = true;
+        clearTimeout(failSafe);
         if (data.ok && data.url) {
           uploadedPhotoUrl = data.url;
           status.textContent = "✓ Фото загружено";
@@ -304,6 +333,9 @@ function handlePhotoSelect(event) {
           status.style.color = "var(--red)";
         }
       } catch(err) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(failSafe);
         status.textContent = "Ошибка сети при загрузке фото";
         status.style.color = "var(--red)";
       }
