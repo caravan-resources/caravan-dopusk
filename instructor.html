@@ -1860,10 +1860,13 @@ function selectPersonnelEmployee(id) {
     <div style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:20px">
 
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px">
-        <div>
-          <div style="font-size:20px;font-weight:800;color:var(--navy)">${emp.name||"—"}</div>
-          <div style="font-size:13px;color:var(--gray);margin-top:2px">${emp.position||"—"} · ${emp.site||"—"}</div>
-          <div style="font-size:11px;color:var(--gray);font-family:monospace;margin-top:4px">${emp.id||""}</div>
+        <div style="display:flex;gap:12px;align-items:flex-start">
+          ${emp.photoUrl ? `<img src="${emp.photoUrl}" style="width:56px;height:56px;border-radius:50%;object-fit:cover;flex-shrink:0;border:1.5px solid var(--border)">` : ""}
+          <div>
+            <div style="font-size:20px;font-weight:800;color:var(--navy)">${emp.name||"—"}</div>
+            <div style="font-size:13px;color:var(--gray);margin-top:2px">${emp.position||"—"} · ${emp.site||"—"}</div>
+            <div style="font-size:11px;color:var(--gray);font-family:monospace;margin-top:4px">${emp.id||""}</div>
+          </div>
         </div>
         <button class="btn btn-ghost" onclick="openEventModal('${emp.id}','${(emp.name||"").replace(/'/g,"\\'")}')">+ Событие в личное дело</button>
       </div>
@@ -1877,6 +1880,10 @@ function selectPersonnelEmployee(id) {
         <div><span style="color:var(--gray)">Образование:</span> <b>${emp.education||"—"}</b></div>
         <div><span style="color:var(--gray)">Стаж по профессии:</span> <b>${emp.experienceYears?emp.experienceYears+" лет":"—"}</b></div>
         <div style="grid-column:1/-1"><span style="color:var(--gray)">Специальности:</span> <b>${emp.specialties||"—"}</b></div>
+        <div style="grid-column:1/-1"><span style="color:var(--gray)">Доп. компетенции:</span> <b>${emp.additionalSkills||"—"}</b></div>
+        <div><span style="color:var(--gray)">Почта:</span> <b>${emp.email||"—"}</b></div>
+        <div style="grid-column:1/-1"><span style="color:var(--gray)">Сертификаты:</span> <b>${emp.certificates||"—"}</b></div>
+        <div style="grid-column:1/-1"><span style="color:var(--gray)">Курсы:</span> <b>${emp.courses||"—"}</b></div>
       </div>
 
       <div style="padding:10px 12px;background:var(--light);border-radius:10px;margin-bottom:16px;
@@ -1942,12 +1949,37 @@ function closeModal() {
   document.getElementById("modalOverlay").style.display = "none";
 }
 
+function togglePositionOther(val, ctx) {
+  const other = document.getElementById(ctx + "PositionOther");
+  if (!other) return;
+  other.style.display = (val === "__other__") ? "block" : "none";
+  if (val !== "__other__") other.value = "";
+}
+
+function getPositionValue(prefix) {
+  const sel = document.getElementById(prefix + "Position").value;
+  if (sel === "__other__") return document.getElementById(prefix + "PositionOther").value.trim();
+  return sel;
+}
+
 function openHireModal() {
   openModal(`
     <div style="font-size:16px;font-weight:800;color:var(--navy);margin-bottom:16px">➕ Принять сотрудника</div>
     <div style="display:flex;flex-direction:column;gap:10px">
       <input id="hireName" placeholder="ФИО" style="padding:10px;border:1px solid var(--border);border-radius:8px">
-      <input id="hirePosition" placeholder="Должность" style="padding:10px;border:1px solid var(--border);border-radius:8px">
+      <select id="hirePosition" onchange="togglePositionOther(this.value,'hire')" style="padding:10px;border:1px solid var(--border);border-radius:8px">
+        <option value="">Должность — выберите</option>
+        <option value="Водитель самосвала">Водитель самосвала</option>
+        <option value="Машинист бульдозера">Машинист бульдозера</option>
+        <option value="Машинист гидравлического экскаватора">Машинист гидравлического экскаватора</option>
+        <option value="Машинист автогрейдера">Машинист автогрейдера</option>
+        <option value="Машинист грунтового катка">Машинист грунтового катка</option>
+        <option value="Машинист насосной установки">Машинист насосной установки</option>
+        <option value="Машинист буровой установки">Машинист буровой установки</option>
+        <option value="Водитель фронтального погрузчика">Водитель фронтального погрузчика</option>
+        <option value="__other__">Другое (указать)</option>
+      </select>
+      <input type="text" id="hirePositionOther" placeholder="Укажите должность" style="display:none;padding:10px;border:1px solid var(--border);border-radius:8px">
       <select id="hireSite" style="padding:10px;border:1px solid var(--border);border-radius:8px">
         <option value="Алмалы">Алмалы</option>
         <option value="Ашыктас">Ашыктас</option>
@@ -1964,6 +1996,7 @@ function openHireModal() {
         <option value="CL">ТОО «Караван Логистик» (CL)</option>
       </select>
       <input id="hirePhone" placeholder="Телефон" style="padding:10px;border:1px solid var(--border);border-radius:8px">
+      <input id="hireEmail" type="email" placeholder="Электронная почта" style="padding:10px;border:1px solid var(--border);border-radius:8px">
       <input id="hireAddress" placeholder="Адрес" style="padding:10px;border:1px solid var(--border);border-radius:8px">
       <select id="hireEducation" style="padding:10px;border:1px solid var(--border);border-radius:8px">
         <option value="">Образование — не указано</option>
@@ -1974,7 +2007,17 @@ function openHireModal() {
         <option value="Высшее нетехническое">Высшее нетехническое</option>
       </select>
       <input id="hireExperience" type="number" min="0" max="60" placeholder="Стаж по профессии (лет)" style="padding:10px;border:1px solid var(--border);border-radius:8px">
-      <textarea id="hireSpecialties" placeholder="Имеющиеся специальности" rows="2" style="padding:10px;border:1px solid var(--border);border-radius:8px;font-family:inherit;resize:vertical"></textarea>
+      <div style="font-size:11px;color:var(--gray);margin-top:4px">Имеющиеся специальности:</div>
+      <div id="hireSpecialtiesBox" style="border:1px solid var(--border);border-radius:8px;padding:10px;max-height:180px;overflow-y:auto">
+        ${["Водитель самосвала","Машинист бульдозера","Машинист гидравлического экскаватора","Машинист автогрейдера","Машинист грунтового катка","Машинист насосной установки","Машинист буровой установки","Водитель фронтального погрузчика"].map(s => `
+          <label style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px">
+            <input type="checkbox" class="hire-spec-check" value="${s}"> ${s}
+          </label>
+        `).join("")}
+      </div>
+      <textarea id="hireAdditionalSkills" placeholder="Доп. компетенции: тренер, инженер, кат. Б и т.п." rows="2" style="padding:10px;border:1px solid var(--border);border-radius:8px;font-family:inherit;resize:vertical"></textarea>
+      <textarea id="hireCertificates" placeholder="Сертификаты" rows="2" style="padding:10px;border:1px solid var(--border);border-radius:8px;font-family:inherit;resize:vertical"></textarea>
+      <textarea id="hireCourses" placeholder="Курсы" rows="2" style="padding:10px;border:1px solid var(--border);border-radius:8px;font-family:inherit;resize:vertical"></textarea>
       <label style="font-size:11px;color:var(--gray)">Дата приёма
         <input id="hireDate" type="date" value="${today()}" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;margin-top:4px">
       </label>
@@ -1995,16 +2038,20 @@ async function submitHire(force) {
   const body = {
     action: "hireEmployee",
     name,
-    position: document.getElementById("hirePosition").value.trim(),
+    position: getPositionValue("hire"),
     site: document.getElementById("hireSite").value,
     too: document.getElementById("hireToo").value,
     tooSecondary: document.getElementById("hireTooSecondary").value,
     phone: document.getElementById("hirePhone").value.trim(),
+    email: document.getElementById("hireEmail").value.trim(),
     address: document.getElementById("hireAddress").value.trim(),
     hireDate: document.getElementById("hireDate").value,
     education: document.getElementById("hireEducation").value,
     experienceYears: document.getElementById("hireExperience").value,
-    specialties: document.getElementById("hireSpecialties").value.trim(),
+    specialties: Array.from(document.querySelectorAll(".hire-spec-check:checked")).map(c=>c.value).join(", "),
+    additionalSkills: document.getElementById("hireAdditionalSkills").value.trim(),
+    certificates: document.getElementById("hireCertificates").value.trim(),
+    courses: document.getElementById("hireCourses").value.trim(),
     force: !!force,
   };
 
@@ -2104,15 +2151,20 @@ function renderSurveysList() {
   el.innerHTML = surveys.map(s => `
     <div style="padding:14px;border:1px solid var(--border);border-radius:10px;margin-bottom:10px;background:#fff">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
-        <div>
-          <div style="font-weight:700;color:var(--navy);font-size:14px">${s.empName}</div>
-          <div style="font-size:11px;color:var(--gray)">
-            ${s.empId ? "Найден в базе: " + s.empId : "⚠ Новый профиль — не найден в базе"}
-            · подано ${s.submittedAt}
+        <div style="display:flex;gap:10px;align-items:flex-start">
+          ${s.photoUrl ? `<img src="${s.photoUrl}" style="width:44px;height:44px;border-radius:50%;object-fit:cover;flex-shrink:0;border:1.5px solid var(--border)">` : ""}
+          <div>
+            <div style="font-weight:700;color:var(--navy);font-size:14px">${s.empName}</div>
+            <div style="font-size:11px;color:var(--gray)">
+              ${s.empId ? "Найден в базе: " + s.empId : "⚠ Новый профиль — не найден в базе"}
+              · подано ${s.submittedAt}
+            </div>
           </div>
         </div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12px;margin-bottom:10px">
+        <div><span style="color:var(--gray)">Должность:</span> <b>${s.position||"—"}</b></div>
+        <div><span style="color:var(--gray)">Участок:</span> <b>${s.site||"—"}</b></div>
         <div><span style="color:var(--gray)">ТОО:</span> <b>${tooNames[s.too]||s.too||"—"}</b></div>
         <div><span style="color:var(--gray)">ТОО (доп.):</span> <b>${tooNames[s.tooSecondary]||s.tooSecondary||"—"}</b></div>
         <div><span style="color:var(--gray)">Дата приёма:</span> <b>${fmtDate(s.hireDate)}</b></div>
@@ -2121,6 +2173,10 @@ function renderSurveysList() {
         <div><span style="color:var(--gray)">Образование:</span> <b>${s.education||"—"}</b></div>
         <div><span style="color:var(--gray)">Стаж:</span> <b>${s.experienceYears?s.experienceYears+" лет":"—"}</b></div>
         <div style="grid-column:1/-1"><span style="color:var(--gray)">Специальности:</span> <b>${s.specialties||"—"}</b></div>
+        <div style="grid-column:1/-1"><span style="color:var(--gray)">Доп. компетенции:</span> <b>${s.additionalSkills||"—"}</b></div>
+        <div><span style="color:var(--gray)">Почта:</span> <b>${s.email||"—"}</b></div>
+        <div style="grid-column:1/-1"><span style="color:var(--gray)">Сертификаты:</span> <b>${s.certificates||"—"}</b></div>
+        <div style="grid-column:1/-1"><span style="color:var(--gray)">Курсы:</span> <b>${s.courses||"—"}</b></div>
       </div>
       <div style="display:flex;gap:8px">
         <button class="btn btn-ghost" onclick="handleRejectSurvey(${s.__row})" style="flex:1">Отклонить</button>
@@ -2130,12 +2186,19 @@ function renderSurveysList() {
   `).join("");
 }
 
-async function handleApproveSurvey(row) {
+async function handleApproveSurvey(row, force) {
   try {
-    const res = await fetch(CFG.SHEET_URL, { method:"POST", body: JSON.stringify({ action:"approveSurvey", row }) });
+    const res = await fetch(CFG.SHEET_URL, { method:"POST", body: JSON.stringify({ action:"approveSurvey", row, force: !!force }) });
     const data = await res.json();
     if (data.ok) {
       await loadAll();
+    } else if (data.warning) {
+      const names = (data.candidates||[]).map(c=>`• ${c.name} (${c.id})`).join("\n");
+      const proceed = confirm(
+        `⚠ ${data.message}\n\nПохожие записи уже есть в базе:\n${names}\n\n` +
+        `Нажмите OK, чтобы всё равно создать нового человека, или Отмена, чтобы проверить вручную.`
+      );
+      if (proceed) await handleApproveSurvey(row, true);
     } else {
       alert("Ошибка: " + (data.error||"неизвестная"));
     }
