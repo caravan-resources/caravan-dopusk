@@ -103,10 +103,42 @@ input:focus, select:focus, textarea:focus { border-color:var(--gold); }
     <div id="selectedBoxWrap"></div>
 
     <div class="card">
+      <div class="card-title">Фото</div>
+      <div class="hint">Сфотографируйте себя прямо сейчас — анфас, без головного убора, при хорошем освещении. Не загружайте старое фото из галереи.</div>
+      <div id="photoPreviewWrap" style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
+        <div id="photoPreview" style="width:64px;height:64px;border-radius:50%;background:var(--light);
+          display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0;
+          border:1.5px solid var(--border)">
+          <span style="font-size:24px">📷</span>
+        </div>
+        <label style="flex:1">
+          <input type="file" accept="image/*" capture="user" style="display:none" onchange="handlePhotoSelect(event)">
+          <span class="btn btn-ghost" style="display:block" onclick="this.previousElementSibling.click()">📷 Сделать фото</span>
+        </label>
+      </div>
+      <div id="photoStatus" style="font-size:12px;color:var(--gray)"></div>
+    </div>
+
+    <div class="card">
       <div class="card-title">Ваши данные</div>
 
       <label class="label">ФИО</label>
       <input type="text" id="fName" placeholder="Фамилия Имя">
+
+      <label class="label">Должность</label>
+      <select id="fPosition" onchange="togglePositionOther(this.value,'anketa')">
+        <option value="">— выберите —</option>
+        <option value="Водитель самосвала">Водитель самосвала</option>
+        <option value="Машинист бульдозера">Машинист бульдозера</option>
+        <option value="Машинист гидравлического экскаватора">Машинист гидравлического экскаватора</option>
+        <option value="Машинист автогрейдера">Машинист автогрейдера</option>
+        <option value="Машинист грунтового катка">Машинист грунтового катка</option>
+        <option value="Машинист насосной установки">Машинист насосной установки</option>
+        <option value="Машинист буровой установки">Машинист буровой установки</option>
+        <option value="Водитель фронтального погрузчика">Водитель фронтального погрузчика</option>
+        <option value="__other__">Другое (указать)</option>
+      </select>
+      <input type="text" id="fPositionOther" placeholder="Укажите должность" style="display:none">
 
       <label class="label">Основное ТОО</label>
       <select id="fToo">
@@ -133,6 +165,9 @@ input:focus, select:focus, textarea:focus { border-color:var(--gold); }
       <label class="label">Телефон</label>
       <input type="tel" id="fPhone" placeholder="+7 7XX XXX XX XX">
 
+      <label class="label">Электронная почта (если есть)</label>
+      <input type="email" id="fEmail" placeholder="example@mail.com">
+
       <label class="label">Образование</label>
       <select id="fEducation">
         <option value="">— выберите —</option>
@@ -146,8 +181,44 @@ input:focus, select:focus, textarea:focus { border-color:var(--gold); }
       <label class="label">Стаж работы по профессии (лет)</label>
       <input type="number" id="fExperience" min="0" max="60" placeholder="Например: 7">
 
-      <label class="label">Имеющиеся специальности</label>
-      <textarea id="fSpecialties" rows="2" placeholder="Например: машинист экскаватора, водитель кат. C, сварщик"></textarea>
+      <label class="label">Имеющиеся специальности (можно несколько)</label>
+      <div id="specialtiesBox" style="border:1.5px solid var(--border);border-radius:10px;padding:12px;margin-bottom:10px">
+        <label style="display:flex;align-items:center;gap:8px;padding:6px 0;font-size:14px">
+          <input type="checkbox" class="spec-check" value="Водитель самосвала"> Водитель самосвала
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;padding:6px 0;font-size:14px">
+          <input type="checkbox" class="spec-check" value="Машинист бульдозера"> Машинист бульдозера
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;padding:6px 0;font-size:14px">
+          <input type="checkbox" class="spec-check" value="Машинист гидравлического экскаватора"> Машинист гидравлического экскаватора
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;padding:6px 0;font-size:14px">
+          <input type="checkbox" class="spec-check" value="Машинист автогрейдера"> Машинист автогрейдера
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;padding:6px 0;font-size:14px">
+          <input type="checkbox" class="spec-check" value="Машинист грунтового катка"> Машинист грунтового катка
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;padding:6px 0;font-size:14px">
+          <input type="checkbox" class="spec-check" value="Машинист насосной установки"> Машинист насосной установки
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;padding:6px 0;font-size:14px">
+          <input type="checkbox" class="spec-check" value="Машинист буровой установки"> Машинист буровой установки
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;padding:6px 0;font-size:14px">
+          <input type="checkbox" class="spec-check" value="Водитель фронтального погрузчика"> Водитель фронтального погрузчика
+        </label>
+      </div>
+
+      <label class="label">Дополнительные компетенции</label>
+      <div class="hint" style="margin-top:-6px">Например: тренер, горный инженер, водитель категории Б, пользователь компьютера, аналитика данных</div>
+      <textarea id="fAdditionalSkills" rows="2" placeholder="Перечислите через запятую"></textarea>
+
+      <label class="label">Сертификаты</label>
+      <div class="hint" style="margin-top:-6px">Внешние сертификаты — не пройденные через это приложение</div>
+      <textarea id="fCertificates" rows="2" placeholder="Например: сертификат сварщика 4 разряда, 2022"></textarea>
+
+      <label class="label">Курсы</label>
+      <textarea id="fCourses" rows="2" placeholder="Например: курсы повышения квалификации, 2023"></textarea>
     </div>
 
     <div class="hint">
@@ -174,6 +245,74 @@ const CFG = {
 
 let EMPLOYEES = [];
 let selected = null; // { id, name, position, site } или { id:"", name:"..." } для "меня нет"
+let uploadedPhotoUrl = "";
+
+function handlePhotoSelect(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  const status = document.getElementById("photoStatus");
+  status.textContent = "Загрузка...";
+  status.style.color = "var(--gray)";
+
+  const MAX_SIZE = 800;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const img = new Image();
+    img.onload = async () => {
+      const canvas = document.createElement("canvas");
+      let w = img.width, h = img.height;
+      if (w > MAX_SIZE || h > MAX_SIZE) {
+        if (w > h) { h = Math.round(h * MAX_SIZE/w); w = MAX_SIZE; }
+        else        { w = Math.round(w * MAX_SIZE/h); h = MAX_SIZE; }
+      }
+      canvas.width = w; canvas.height = h;
+      canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+      const base64 = canvas.toDataURL("image/jpeg", 0.85).split(",")[1];
+
+      document.getElementById("photoPreview").innerHTML =
+        `<img src="${canvas.toDataURL("image/jpeg",0.85)}" style="width:100%;height:100%;object-fit:cover">`;
+
+      const empId   = selected && selected.id ? selected.id : "";
+      const empName = document.getElementById("fName").value.trim() || (selected ? selected.name : "");
+
+      try {
+        const res = await fetch(CFG.SHEET_URL, {
+          method: "POST",
+          body: JSON.stringify({ action:"uploadPhoto", empId, empName, base64, mime:"image/jpeg" })
+        });
+        const data = await res.json();
+        if (data.ok && data.url) {
+          uploadedPhotoUrl = data.url;
+          status.textContent = "✓ Фото загружено";
+          status.style.color = "var(--green)";
+        } else {
+          status.textContent = "Не удалось загрузить фото, но анкету можно отправить и без него";
+          status.style.color = "var(--red)";
+        }
+      } catch(err) {
+        status.textContent = "Ошибка сети при загрузке фото";
+        status.style.color = "var(--red)";
+      }
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+function togglePositionOther(val, ctx) {
+  const suffix = ctx === "hire" ? "hire" : "f";
+  const other = document.getElementById(suffix === "hire" ? "hirePositionOther" : "fPositionOther");
+  if (!other) return;
+  other.style.display = (val === "__other__") ? "block" : "none";
+  if (val !== "__other__") other.value = "";
+}
+
+function getPositionValue(prefix) {
+  const sel = document.getElementById(prefix + "Position").value;
+  if (sel === "__other__") return document.getElementById(prefix + "PositionOther").value.trim();
+  return sel;
+}
 
 function today() { return new Date().toISOString().split("T")[0]; }
 
@@ -258,6 +397,23 @@ function showForm() {
   }
 
   document.getElementById("fHireDate").value = today();
+
+  // Предзаполняем должность, если уже известна (выбран из списка)
+  const posSelect = document.getElementById("fPosition");
+  const posOther  = document.getElementById("fPositionOther");
+  const knownPositions = Array.from(posSelect.options).map(o=>o.value);
+  if (selected.position && knownPositions.includes(selected.position)) {
+    posSelect.value = selected.position;
+    posOther.style.display = "none";
+  } else if (selected.position) {
+    posSelect.value = "__other__";
+    posOther.style.display = "block";
+    posOther.value = selected.position;
+  } else {
+    posSelect.value = "";
+    posOther.style.display = "none";
+    posOther.value = "";
+  }
 }
 
 function backToSearch() {
@@ -283,14 +439,20 @@ async function submitForm() {
     action: "submitSurvey",
     empId: selected && selected.id ? selected.id : "",
     empName: name,
+    position: getPositionValue("f"),
     too,
     tooSecondary: document.getElementById("fTooSecondary").value,
     hireDate: document.getElementById("fHireDate").value,
     address: document.getElementById("fAddress").value.trim(),
     phone: document.getElementById("fPhone").value.trim(),
+    email: document.getElementById("fEmail").value.trim(),
     education: document.getElementById("fEducation").value,
     experienceYears: document.getElementById("fExperience").value,
-    specialties: document.getElementById("fSpecialties").value.trim(),
+    specialties: Array.from(document.querySelectorAll(".spec-check:checked")).map(c=>c.value).join(", "),
+    additionalSkills: document.getElementById("fAdditionalSkills").value.trim(),
+    certificates: document.getElementById("fCertificates").value.trim(),
+    courses: document.getElementById("fCourses").value.trim(),
+    photoUrl: uploadedPhotoUrl,
   };
 
   try {
