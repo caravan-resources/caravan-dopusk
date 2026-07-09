@@ -336,15 +336,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
     <div id="empList" class="emp-list" style="max-height:240px;overflow-y:auto"></div>
 
-    <div style="display:flex;align-items:center;gap:10px;margin:12px 0 8px">
-      <div style="flex:1;height:1px;background:var(--border)"></div>
-      <span style="font-size:11px;color:var(--gray);white-space:nowrap">или введите вручную</span>
-      <div style="flex:1;height:1px;background:var(--border)"></div>
-    </div>
-
-    <div class="field">
-      <input type="text" id="manualName" placeholder="ФИО сотрудника..."
-        oninput="onManualName(this.value)">
+    <div style="margin-top:16px;padding:14px;background:var(--light);border-radius:10px;
+      font-size:12.5px;color:var(--gray);line-height:1.6;text-align:center">
+      Не нашли себя в списке? Значит, вас ещё нет в базе.<br>
+      Обратитесь к инструктору или <a href="anketa.html" style="color:var(--navy2);font-weight:700">заполните анкету</a> — после этого возвращайтесь сюда для сдачи теста.
     </div>
 
     <!-- Выбранный -->
@@ -523,6 +518,14 @@ document.addEventListener("DOMContentLoaded", () => {
         margin-bottom:16px;font-size:13px;color:var(--yellow);font-weight:700">
         Для допуска необходимо <span id="failPassScore"></span>%.
         Обратитесь к инструктору для повторного прохождения.
+      </div>
+
+      <div id="notFoundWarning" style="display:none;background:var(--redbg);
+        border:1px solid var(--red);border-radius:10px;padding:12px;
+        margin-bottom:16px;font-size:13px;color:var(--red);font-weight:700;text-align:left">
+        ⚠ Результат теста НЕ записан в систему допуска.<br>
+        <span style="font-weight:400">Вас нет в базе сотрудников. Обратитесь к инструктору или заполните
+        <a href="anketa.html" style="color:var(--red)">анкету</a>, затем пройдите тест повторно.</span>
       </div>
 
       <!-- Разбор -->
@@ -755,22 +758,8 @@ function filterEmployees(val) { renderEmployees(val); }
 function selectEmployee(emp) {
   state.selectedEmp = emp;
   document.getElementById("empSearch").value = "";
-  document.getElementById("manualName").value = "";
   renderEmployees("");
   showSelectedEmp(emp.name, emp.pos);
-}
-
-function onManualName(val) {
-  if (val.trim().length > 2) {
-    state.selectedEmp = {id:"manual", name:val.trim(), pos:"", site:""};
-    document.getElementById("empSearch").value = "";
-    renderEmployees("");
-    showSelectedEmp(val.trim(), "");
-  } else {
-    state.selectedEmp = null;
-    hideSelectedEmp();
-  }
-  updateStartBtn();
 }
 
 function showSelectedEmp(name, pos) {
@@ -810,7 +799,6 @@ function hideSelectedEmp() {
 function clearEmployee() {
   state.selectedEmp = null;
   state.selectedTest = null;
-  document.getElementById("manualName").value = "";
   document.getElementById("empSearch").value = "";
   hideSelectedEmp();
   renderTests();
@@ -1045,6 +1033,8 @@ async function saveResultToSheets(result) {
       const test = TESTS.find(t => t.id === result.testId) || {};
       const testType = test.testType || "dopusk"; // "dopusk" или "profession"
 
+      let accessResponse; // ответ updateAccess — проверяем на notFound ниже
+
       if (testType === "profession") {
         // Профессиональное обучение — пишем в лист «Обучение», бессрочно
         const dateStr = today.toLocaleDateString("ru-RU", {day:"2-digit",month:"2-digit",year:"numeric"});
@@ -1059,15 +1049,17 @@ async function saveResultToSheets(result) {
           })
         });
         // Также обновляем должность/участок если нужно
-        await fetch(CFG.SHEET_URL, {
+        const r = await fetch(CFG.SHEET_URL, {
           method:"POST",
           body: JSON.stringify({
             action: "updateAccess",
             empName: result.empName,
             passDate: "", validUntil: "",
             position, site,
+            empId: state.selectedEmp?.id || "",
           })
         });
+        accessResponse = await r.json();
         console.log("Обучение записано:", result.empName, result.testTitle);
       } else if (testType === "instruktazh") {
         // Ежегодный инструктаж (напр. безопасное вождение) — пишем в лист
@@ -1089,31 +1081,44 @@ async function saveResultToSheets(result) {
             validUntil: validUntilStr,
           })
         });
-        await fetch(CFG.SHEET_URL, {
+        const r = await fetch(CFG.SHEET_URL, {
           method:"POST",
           body: JSON.stringify({
             action: "updateAccess",
             empName: result.empName,
             passDate: "", validUntil: "",
             position, site,
+            empId: state.selectedEmp?.id || "",
           })
         });
+        accessResponse = await r.json();
         console.log("Инструктаж записан:", result.empName, result.testTitle, "до", validUntilStr);
       } else {
         // Допуск в карьер — обновляем даты
         const validDate = new Date(today);
         validDate.setFullYear(validDate.getFullYear() + 1);
         const validUntil = validDate.toISOString().split("T")[0];
-        await fetch(CFG.SHEET_URL, {
+        const r = await fetch(CFG.SHEET_URL, {
           method:"POST",
           body: JSON.stringify({
             action: "updateAccess",
             empName: result.empName,
             passDate: todayStr, validUntil,
             position, site,
+            empId: state.selectedEmp?.id || "",
           })
         });
+        accessResponse = await r.json();
         console.log("Допуск обновлён:", result.empName, todayStr, "→", validUntil);
+      }
+
+      // Сервер отказал (сотрудника нет в базе) — результат теста НЕ записан
+      // как допуск/обучение. Экран результата уже показан синхронно,
+      // поэтому предупреждение встраиваем постфактум, как только известен
+      // реальный статус, а не притворяемся, что всё прошло успешно.
+      if (accessResponse && accessResponse.notFound) {
+        const warn = document.getElementById("notFoundWarning");
+        if (warn) warn.style.display = "block";
       }
     }
   } catch(e) { console.log("Ошибка сохранения:", e); }
@@ -1146,6 +1151,10 @@ function showResult(result) {
   const fw = document.getElementById("failWarning");
   fw.style.display = result.passed?"none":"block";
   document.getElementById("failPassScore").textContent = result.passingScore;
+
+  // Сбрасываем предупреждение "не найден в базе" — актуальный статус
+  // придёт асинхронно из saveResultToSheets, когда ответит сервер.
+  document.getElementById("notFoundWarning").style.display = "none";
 
   // Кнопка повтора
   document.getElementById("retryBtn").style.display = result.passed?"none":"block";
