@@ -406,6 +406,16 @@ function pickEmployee(emp) {
 }
 
 function showNotFound() {
+  const query = document.getElementById("empSearch").value.trim();
+  const hint = query
+    ? `Вы искали «${query}» и не нашли себя? Проверьте, нет ли опечатки, попробуйте ввести только фамилию.\n\n`
+    : "";
+  const confirmed = confirm(
+    hint + "Вы точно не работали здесь раньше и не сдавали тесты в этом приложении?\n\n" +
+    "Если вы уже есть в системе, но не нашли себя поиском — нажмите «Отмена» и попробуйте ещё раз.\n" +
+    "Если вы новый человек — нажмите «ОК»."
+  );
+  if (!confirmed) return;
   selected = { id: "", name: "" };
   showForm();
 }
