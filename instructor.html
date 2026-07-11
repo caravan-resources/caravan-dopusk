@@ -161,6 +161,7 @@ tr:hover td { background:#FAFBFD; }
   th, td { padding:8px 8px; font-size:12px; }
 }
 </style>
+<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
 </head>
 <body>
 
@@ -2293,11 +2294,16 @@ function renderEquipmentList() {
       <div style="font-weight:700;color:var(--navy);font-size:14px">${e.equipmentId}</div>
       <div style="font-size:12px;color:var(--gray);margin-top:2px">${e.model||"—"}${e.type?" · "+e.type:""}</div>
       <div style="font-size:11px;color:var(--gray);margin-top:4px">${e.site||"—"} · ${e.status||"—"}</div>
+      <div style="font-size:11px;color:${e.templateId?"var(--green)":"var(--red)"};margin-top:4px">
+        ${e.templateId?"✓ шаблон: "+e.templateId:"⚠ шаблон не выбран"}
+      </div>
+      <button class="btn btn-ghost" style="margin-top:8px;font-size:12px;padding:6px" onclick="showEquipmentQR('${e.equipmentId}')">🔗 Показать QR</button>
     </div>
   `).join("") : `<div class="empty"><div class="empty-icon">🚜</div>Техника ещё не зарегистрирована</div>`;
 }
 
 function openEquipmentModal() {
+  const templates = DATA.checklistTemplates || [];
   openModal(`
     <div style="font-size:16px;font-weight:800;color:var(--navy);margin-bottom:16px">➕ Зарегистрировать технику</div>
     <div style="display:flex;flex-direction:column;gap:10px">
@@ -2310,6 +2316,11 @@ function openEquipmentModal() {
         <option value="Ашыктас">Ашыктас</option>
       </select>
       <input id="eqInventory" placeholder="Инвентарный/гос. номер (необязательно)" style="padding:10px;border:1px solid var(--border);border-radius:8px">
+      <select id="eqTemplateId" style="padding:10px;border:1px solid var(--border);border-radius:8px">
+        <option value="">Шаблон чек-листа — не выбран</option>
+        ${templates.map(t => `<option value="${t.id}">${t.title} (${t.id})</option>`).join("")}
+      </select>
+      ${templates.length === 0 ? `<div style="font-size:12px;color:var(--red)">Сначала загрузите хотя бы один шаблон чек-листа ниже на этой же вкладке.</div>` : ""}
     </div>
     <div id="eqStatus" style="margin-top:10px;font-size:13px"></div>
     <div style="display:flex;gap:8px;margin-top:16px">
@@ -2334,6 +2345,7 @@ async function submitEquipmentRegister() {
     type: document.getElementById("eqType").value.trim(),
     site: document.getElementById("eqSite").value,
     inventoryNumber: document.getElementById("eqInventory").value.trim(),
+    templateId: document.getElementById("eqTemplateId").value,
   };
   try {
     const res = await fetch(CFG.SHEET_URL, { method:"POST", body: JSON.stringify(body) });
@@ -2349,6 +2361,31 @@ async function submitEquipmentRegister() {
     status.style.color = "var(--red)";
     status.textContent = "Ошибка сети: " + e;
   }
+}
+
+function showEquipmentQR(equipmentId) {
+  const url = `${location.origin}${location.pathname.replace(/instructor\.html$/, "")}checklist.html?eq=${encodeURIComponent(equipmentId)}`;
+  openModal(`
+    <div style="font-size:16px;font-weight:800;color:var(--navy);margin-bottom:16px;text-align:center">QR для «${equipmentId}»</div>
+    <div style="display:flex;justify-content:center;margin-bottom:14px">
+      <canvas id="qrCanvas"></canvas>
+    </div>
+    <div style="font-size:11px;color:var(--gray);word-break:break-all;text-align:center;margin-bottom:14px">${url}</div>
+    <div class="hint" style="text-align:center;margin-bottom:14px">
+      Распечатайте и наклейте в кабине техники. Оператор сканирует камерой телефона —
+      сразу открывается чек-лист именно этой машины.
+    </div>
+    <button class="btn btn-gold" onclick="window.print()">🖨 Печать</button>
+    <button class="btn btn-ghost" style="margin-top:8px" onclick="closeModal()">Закрыть</button>
+  `);
+  setTimeout(() => {
+    const canvas = document.getElementById("qrCanvas");
+    if (canvas && window.QRCode) {
+      QRCode.toCanvas(canvas, url, { width: 220, margin: 2 }, (err) => {
+        if (err) console.error("Ошибка генерации QR:", err);
+      });
+    }
+  }, 50);
 }
 
 function renderChecklistTemplatesList() {
