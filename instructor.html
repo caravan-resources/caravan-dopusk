@@ -2301,6 +2301,7 @@ function renderEquipmentList() {
         ${e.templateId?"✓ шаблон: "+e.templateId:"⚠ шаблон не выбран"}
       </div>
       <button class="btn btn-ghost" style="margin-top:8px;font-size:12px;padding:6px" onclick="showEquipmentQR('${e.equipmentId}')">🔗 Показать QR</button>
+      <button class="btn btn-ghost" style="margin-top:6px;font-size:12px;padding:6px;color:var(--red)" onclick="deleteEquipmentUnit('${e.equipmentId}')">🗑 Удалить</button>
     </div>
   `).join("") : `<div class="empty"><div class="empty-icon">🚜</div>Техника ещё не зарегистрирована</div>`;
 }
@@ -2419,6 +2420,21 @@ async function submitEquipmentRegister() {
   } catch(e) {
     status.style.color = "var(--red)";
     status.textContent = "Ошибка сети: " + e;
+  }
+}
+
+async function deleteEquipmentUnit(equipmentId) {
+  if (!confirm(`Удалить «${equipmentId}» из реестра техники? Это действие нельзя отменить.`)) return;
+  try {
+    const res = await fetch(CFG.SHEET_URL, { method:"POST", body: JSON.stringify({ action:"deleteEquipment", equipmentId }) });
+    const data = await res.json();
+    if (data.ok) {
+      await loadAll();
+    } else {
+      alert("Ошибка: " + (data.error||"неизвестная"));
+    }
+  } catch(e) {
+    alert("Ошибка сети: " + e);
   }
 }
 
