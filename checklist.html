@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Чек-лист осмотра — Caravan Resources</title>
+<style>
+:root {
+  --navy:#0B1A35; --navy2:#1B3B6F; --gold:#F4A52A;
+  --red:#DC2626; --redbg:#FEF2F2;
+  --green:#16A34A; --greenbg:#F0FDF4;
+  --gray:#64748B; --light:#F1F5F9; --border:#E2E8F0;
+}
+* { box-sizing:border-box; margin:0; padding:0; }
+body {
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+  background:var(--light); color:var(--navy); min-height:100vh;
+}
+.wrap { max-width:520px; margin:0 auto; padding:20px 16px 60px; }
+.header {
+  background:var(--navy); color:#fff; padding:20px 16px; margin:-20px -16px 20px;
+  text-align:center;
+}
+.header h1 { font-size:17px; font-weight:800; }
+.header p { font-size:12px; color:rgba(255,255,255,.6); margin-top:4px; }
+
+.card {
+  background:#fff; border-radius:14px; padding:18px; margin-bottom:14px;
+  box-shadow:0 2px 10px rgba(0,0,0,.06);
+}
+.card-title { font-size:15px; font-weight:800; color:var(--navy); margin-bottom:12px; }
+
+input, select, textarea {
+  width:100%; padding:13px 14px; border:1.5px solid var(--border); border-radius:10px;
+  font-size:15px; font-family:inherit; outline:none; margin-bottom:10px;
+}
+input:focus, select:focus, textarea:focus { border-color:var(--gold); }
+
+.btn {
+  width:100%; padding:14px; border:none; border-radius:10px;
+  font-size:15px; font-weight:800; cursor:pointer; font-family:inherit;
+}
+.btn-gold { background:var(--gold); color:var(--navy); }
+.btn-ghost { background:var(--light); color:var(--navy); }
+.btn:disabled { opacity:.5; cursor:not-allowed; }
+
+.emp-item {
+  display:flex; align-items:center; gap:10px; width:100%;
+  padding:12px; border:1.5px solid var(--border); border-radius:10px;
+  background:#fff; cursor:pointer; margin-bottom:8px; text-align:left;
+  font-family:inherit; font-size:14px;
+}
+.emp-avatar {
+  width:36px; height:36px; border-radius:50%; background:var(--navy2); color:#fff;
+  display:flex; align-items:center; justify-content:center; font-weight:800; font-size:13px;
+  flex-shrink:0;
+}
+.emp-name { font-weight:700; color:var(--navy); }
+.emp-pos { font-size:12px; color:var(--gray); margin-top:1px; }
+
+.selected-box {
+  display:flex; align-items:center; gap:10px; padding:12px;
+  background:var(--greenbg); border:1.5px solid var(--green); border-radius:10px;
+  margin-bottom:14px;
+}
+.selected-box .name { font-weight:700; color:var(--navy); }
+.selected-box .change { margin-left:auto; font-size:12px; color:var(--navy2); cursor:pointer; text-decoration:underline; }
+
+.hint { font-size:12px; color:var(--gray); margin-bottom:10px; line-height:1.5; }
+
+.section-title {
+  font-size:13px; font-weight:800; color:var(--navy2); text-transform:uppercase;
+  letter-spacing:.03em; margin:18px 0 10px; padding-bottom:6px; border-bottom:2px solid var(--border);
+}
+.section-title:first-child { margin-top:0; }
+
+.item-row {
+  padding:12px 0; border-bottom:1px solid var(--border);
+}
+.item-row:last-child { border-bottom:none; }
+.item-text { font-size:14px; color:var(--navy); margin-bottom:8px; line-height:1.4; }
+.item-toggle { display:flex; gap:8px; }
+.item-btn {
+  flex:1; padding:10px; border-radius:8px; border:1.5px solid var(--border);
+  background:#fff; font-size:13px; font-weight:700; cursor:pointer; text-align:center;
+  color:var(--gray);
+}
+.item-btn.ok.active { background:var(--greenbg); border-color:var(--green); color:var(--green); }
+.item-btn.defect.active { background:var(--redbg); border-color:var(--red); color:var(--red); }
+.item-comment { display:none; margin-top:8px; }
+.item-comment.show { display:block; }
+
+.success-box { text-align:center; padding:40px 16px; }
+.success-icon { font-size:48px; margin-bottom:16px; }
+.success-title { font-size:18px; font-weight:800; color:var(--navy); margin-bottom:8px; }
+.success-sub { font-size:13px; color:var(--gray); line-height:1.6; }
+
+.error-box { text-align:center; padding:40px 16px; }
+.error-icon { font-size:48px; margin-bottom:16px; }
+.error-title { font-size:16px; font-weight:800; color:var(--red); margin-bottom:8px; }
+.error-sub { font-size:13px; color:var(--gray); line-height:1.6; }
+
+#screenLoading, #screenSearch, #screenForm, #screenSuccess, #screenError { display:none; }
+#screenLoading.active, #screenSearch.active, #screenForm.active, #screenSuccess.active, #screenError.active { display:block; }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <div class="header">
+    <h1 id="pageTitle">Чек-лист осмотра</h1>
+    <p id="pageSubtitle">Caravan Resources</p>
+  </div>
+
+  <div id="screenLoading" class="active">
+    <div class="card" style="text-align:center;color:var(--gray)">Загрузка...</div>
+  </div>
+
+  <div id="screenError">
+    <div class="card error-box">
+      <div class="error-icon">⚠</div>
+      <div class="error-title" id="errorTitle">Ошибка</div>
+      <div class="error-sub" id="errorSub"></div>
+    </div>
+  </div>
+
+  <!-- ЭКРАН: найти себя -->
+  <div id="screenSearch">
+    <div class="card">
+      <div class="card-title">Кто проводит осмотр?</div>
+      <div class="hint">Начните вводить фамилию.</div>
+      <input type="text" id="empSearch" placeholder="🔍 Введите фамилию..." oninput="renderEmpList(this.value)">
+      <div id="empList"></div>
+    </div>
+  </div>
+
+  <!-- ЭКРАН: форма чек-листа -->
+  <div id="screenForm">
+    <div id="selectedBoxWrap"></div>
+
+    <div class="card">
+      <div class="card-title" id="equipmentTitle"></div>
+      <div class="hint" id="equipmentSubtitle"></div>
+    </div>
+
+    <div class="card" id="fuelCard" style="display:none">
+      <div class="card-title">Уровень топлива (%)</div>
+      <input type="number" id="fuelLevel" min="0" max="100" placeholder="Например: 75">
+    </div>
+
+    <div class="card" id="itemsCard"></div>
+
+    <div id="submitHint" class="hint" style="text-align:center"></div>
+    <button class="btn btn-gold" id="submitBtn" onclick="submitChecklist()">Отправить чек-лист</button>
+  </div>
+
+  <!-- ЭКРАН: успех -->
+  <div id="screenSuccess">
+    <div class="card success-box">
+      <div class="success-icon">✅</div>
+      <div class="success-title">Чек-лист отправлен</div>
+      <div class="success-sub">Спасибо! Осмотр зафиксирован.</div>
+    </div>
+  </div>
+</div>
+
+<script>
+const CFG = {
+  SHEET_URL: "https://script.google.com/macros/s/AKfycbwhdMV20k8US2BXUz1Xk2XCXE9MEwpHpQaadTF9xEfzbU1--dHL-Zuj06K2qXW-rFtKGw/exec",
+};
+
+let EMPLOYEES = [];
+let equipment = null;
+let template = null;
+let selected = null;
+let itemStates = {}; // itemKey -> {status: "ok"|"defect", comment: ""}
+
+function showScreen(name) {
+  ["Loading","Error","Search","Form","Success"].forEach(s => {
+    document.getElementById("screen"+s).classList.remove("active");
+  });
+  document.getElementById("screen"+name).classList.add("active");
+}
+
+function showError(title, sub) {
+  document.getElementById("errorTitle").textContent = title;
+  document.getElementById("errorSub").textContent = sub;
+  showScreen("Error");
+}
+
+function initials(name) {
+  return String(name||"").trim().split(/\s+/).slice(0,2).map(w=>w[0]||"").join("").toUpperCase();
+}
+
+async function init() {
+  const params = new URLSearchParams(location.search);
+  const equipmentId = params.get("eq");
+
+  if (!equipmentId) {
+    showError("Не указана техника", "Ссылка должна содержать номер техники (QR-код с наклейки на кабине). Обратитесь к инструктору.");
+    return;
+  }
+
+  try {
+    const [eqRes, tplRes, empRes] = await Promise.all([
+      fetch(`${CFG.SHEET_URL}?action=getEquipment`).then(r=>r.json()),
+      fetch(`${CFG.SHEET_URL}?action=getChecklistTemplates`).then(r=>r.json()),
+      fetch(`${CFG.SHEET_URL}?action=list`).then(r=>r.json()),
+    ]);
+
+    equipment = (eqRes||[]).find(e => String(e.equipmentId) === String(equipmentId));
+    if (!equipment) {
+      showError("Техника не найдена", `Единица «${equipmentId}» не зарегистрирована в системе. Обратитесь к инструктору.`);
+      return;
+    }
+
+    if (!equipment.templateId) {
+      showError("Шаблон не назначен", `Для техники «${equipmentId}» ещё не выбран шаблон чек-листа. Обратитесь к инструктору.`);
+      return;
+    }
+
+    template = (tplRes||[]).find(t => t.id === equipment.templateId);
+    if (!template) {
+      showError("Шаблон не найден", `Шаблон «${equipment.templateId}» не найден на сервере. Обратитесь к инструктору.`);
+      return;
+    }
+
+    EMPLOYEES = (empRes||[]).map(e => ({ id:e.id, name:e.name, position:e.position }));
+
+    document.getElementById("pageTitle").textContent = template.title;
+    document.getElementById("pageSubtitle").textContent = "Caravan Resources · " + equipment.equipmentId;
+
+    showScreen("Search");
+  } catch(e) {
+    showError("Ошибка соединения", "Не удалось загрузить данные. Проверьте интернет и обновите страницу.");
+  }
+}
+
+function renderEmpList(query) {
+  const list = document.getElementById("empList");
+  const q = String(query||"").trim().toLowerCase();
+  if (!q) { list.innerHTML = ""; return; }
+  const filtered = EMPLOYEES.filter(e => String(e.name||"").toLowerCase().includes(q)).slice(0, 8);
+  if (filtered.length === 0) {
+    list.innerHTML = `<div style="padding:12px;color:var(--gray);font-size:13px;text-align:center">Не найдено. Обратитесь к инструктору, если вас нет в списке.</div>`;
+    return;
+  }
+  list.innerHTML = filtered.map(e => `
+    <button type="button" class="emp-item" onclick='pickEmployee(${JSON.stringify(e)})'>
+      <div class="emp-avatar">${initials(e.name)}</div>
+      <div>
+        <div class="emp-name">${e.name}</div>
+        <div class="emp-pos">${e.position||"—"}</div>
+      </div>
+    </button>
+  `).join("");
+}
+
+function pickEmployee(emp) {
+  selected = emp;
+  showForm();
+}
+
+function showForm() {
+  document.getElementById("selectedBoxWrap").innerHTML = `
+    <div class="selected-box">
+      <div class="emp-avatar">${initials(selected.name)}</div>
+      <div>
+        <div class="name">${selected.name}</div>
+        <div style="font-size:11px;color:var(--gray)">${selected.position||"—"}</div>
+      </div>
+      <span class="change" onclick="showScreen('Search')">изменить</span>
+    </div>
+  `;
+
+  document.getElementById("equipmentTitle").textContent = equipment.equipmentId + " — " + equipment.model;
+  document.getElementById("equipmentSubtitle").textContent = (equipment.type||"") + (equipment.site?" · "+equipment.site:"");
+
+  if (template.fuelLevelField) {
+    document.getElementById("fuelCard").style.display = "block";
+  }
+
+  itemStates = {};
+  const itemsCard = document.getElementById("itemsCard");
+  let html = "";
+  Object.keys(template.sections).forEach(sectionName => {
+    html += `<div class="section-title">${sectionName}</div>`;
+    template.sections[sectionName].forEach(item => {
+      const key = sectionName + "::" + item.id;
+      itemStates[key] = { section: sectionName, itemText: item.text, status: "", comment: "" };
+      html += `
+        <div class="item-row">
+          <div class="item-text">${item.text}</div>
+          <div class="item-toggle">
+            <button type="button" class="item-btn ok" data-key="${key}" onclick="setItemStatus('${key}','ok')">✓ Исправно</button>
+            <button type="button" class="item-btn defect" data-key="${key}" onclick="setItemStatus('${key}','defect')">✗ Неисправно</button>
+          </div>
+          <textarea class="item-comment" id="comment_${key}" placeholder="Опишите неисправность"
+            oninput="itemStates['${key}'].comment = this.value"></textarea>
+        </div>
+      `;
+    });
+  });
+  itemsCard.innerHTML = html;
+
+  showScreen("Form");
+}
+
+function setItemStatus(key, status) {
+  itemStates[key].status = status;
+  document.querySelectorAll(`[data-key="${key}"]`).forEach(btn => btn.classList.remove("active"));
+  document.querySelector(`.item-btn.${status}[data-key="${key}"]`).classList.add("active");
+  const commentEl = document.getElementById("comment_"+key);
+  commentEl.classList.toggle("show", status === "defect");
+}
+
+async function submitChecklist() {
+  const unanswered = Object.values(itemStates).filter(v => !v.status);
+  const hint = document.getElementById("submitHint");
+  if (unanswered.length > 0) {
+    hint.style.color = "var(--red)";
+    hint.textContent = `Осталось отметить пунктов: ${unanswered.length}`;
+    return;
+  }
+
+  const items = Object.values(itemStates).map(v => ({
+    section: v.section, itemText: v.itemText, status: v.status, comment: v.comment,
+  }));
+
+  if (template.fuelLevelField) {
+    const fuelVal = document.getElementById("fuelLevel").value;
+    items.push({ section: "Общее", itemText: template.fuelLevelField.label, status: fuelVal || "", comment: "" });
+  }
+
+  const btn = document.getElementById("submitBtn");
+  btn.disabled = true;
+  btn.textContent = "Отправка...";
+
+  try {
+    const res = await fetch(CFG.SHEET_URL, {
+      method: "POST",
+      body: JSON.stringify({
+        action: "submitChecklistRecord",
+        equipmentId: equipment.equipmentId,
+        templateId: template.id,
+        empId: selected.id,
+        empName: selected.name,
+        items,
+      })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      showScreen("Success");
+    } else {
+      hint.style.color = "var(--red)";
+      hint.textContent = "Ошибка: " + (data.error||"неизвестная");
+      btn.disabled = false;
+      btn.textContent = "Отправить чек-лист";
+    }
+  } catch(e) {
+    hint.style.color = "var(--red)";
+    hint.textContent = "Ошибка сети. Проверьте интернет.";
+    btn.disabled = false;
+    btn.textContent = "Отправить чек-лист";
+  }
+}
+
+init();
+</script>
+</body>
+</html>
