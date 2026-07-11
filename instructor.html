@@ -205,6 +205,7 @@ tr:hover td { background:#FAFBFD; }
     <button id="navTraining" onclick="showTab('training')">🎓 Обучение</button>
     <button id="navPersonnel" onclick="showTab('personnel')">👥 Сотрудники</button>
     <button id="navSurveys" onclick="showTab('surveys')">📋 Анкеты <span id="surveyBadge" style="display:none;background:var(--red);color:#fff;border-radius:99px;padding:1px 7px;font-size:11px;margin-left:4px"></span></button>
+    <button id="navEquipment" onclick="showTab('equipment')">🚜 Техника</button>
     <button id="navImport"   onclick="showTab('import')">➕ Импорт теста</button>
   </nav>
 
@@ -353,6 +354,42 @@ tr:hover td { background:#FAFBFD; }
     </div>
 
     <!-- ══ ИМПОРТ ТЕСТА ══ -->
+    <!-- ══ ТЕХНИКА И ЧЕК-ЛИСТЫ ══ -->
+    <div id="tabEquipment" class="screen">
+      <div class="panel">
+        <div class="panel-title">
+          Реестр техники
+          <button class="btn btn-gold" onclick="openEquipmentModal()">➕ Зарегистрировать единицу</button>
+        </div>
+        <div id="equipmentList" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">Шаблоны чек-листов осмотра</div>
+        <p style="font-size:13px;color:var(--gray);margin-bottom:12px;line-height:1.5">
+          Вставьте JSON шаблона (его готовит Клод по вашему запросу) и нажмите «Добавить».
+          Если шаблон с таким <code>templateId</code> уже существует — он будет полностью заменён.
+        </p>
+        <textarea id="importChecklistJson" placeholder='{
+  "action": "importChecklistTemplate",
+  "templateId": "samosval",
+  "title": "Предпусковой осмотр — Самосвал",
+  "sections": {
+    "Кабина": ["Сиденья и ремни безопасности", "Огнетушитель на месте"]
+  }
+}'
+          style="width:100%;min-height:220px;font-family:monospace;font-size:12px;
+            padding:14px;border:1.5px solid var(--border);border-radius:10px;
+            resize:vertical;box-sizing:border-box"></textarea>
+        <div style="display:flex;gap:10px;margin-top:12px;align-items:center">
+          <button class="btn btn-gold" onclick="submitChecklistImport()">➕ Добавить шаблон</button>
+          <span id="importChecklistStatus" style="font-size:13px"></span>
+        </div>
+
+        <div id="checklistTemplatesList" style="margin-top:20px"></div>
+      </div>
+    </div>
+
     <div id="tabImport" class="screen">
       <div class="panel">
         <div class="panel-title">Добавить новый тест</div>
@@ -523,7 +560,7 @@ const CFG = {
 // ══════════════════════════════════════════════════════
 // ДАННЫЕ
 // ══════════════════════════════════════════════════════
-let DATA = { employees: [], results: [], training: [], requirements: [], personnelEvents: [], surveys: [] };
+let DATA = { employees: [], results: [], training: [], requirements: [], personnelEvents: [], surveys: [], equipment: [], checklistTemplates: [] };
 
 // ══════════════════════════════════════════════════════
 // УТИЛИТЫ
@@ -695,6 +732,24 @@ async function loadAll() {
     DATA.surveys = [];
   }
 
+  // Реестр техники
+  try {
+    const d = await jsonpFetch(`${CFG.SHEET_URL}?action=getEquipment`, "cb_equipment");
+    DATA.equipment = Array.isArray(d) ? d : [];
+  } catch(e) {
+    console.error("Техника:", e);
+    DATA.equipment = [];
+  }
+
+  // Шаблоны чек-листов
+  try {
+    const d = await jsonpFetch(`${CFG.SHEET_URL}?action=getChecklistTemplates`, "cb_checklist_templates");
+    DATA.checklistTemplates = Array.isArray(d) ? d : [];
+  } catch(e) {
+    console.error("Шаблоны чек-листов:", e);
+    DATA.checklistTemplates = [];
+  }
+
   document.getElementById("loadingMsg").style.display = "none";
   renderAll();
 }
@@ -709,13 +764,15 @@ function renderAll() {
   renderTrainingTable();
   renderPersonnelList();
   renderSurveysList();
+  renderEquipmentList();
+  renderChecklistTemplatesList();
 }
 
 // ══════════════════════════════════════════════════════
 // НАВИГАЦИЯ
 // ══════════════════════════════════════════════════════
 function showTab(name) {
-  ["dash","tests","access","alerts","print","certPrint","training","personnel","surveys","import"].forEach(t => {
+  ["dash","tests","access","alerts","print","certPrint","training","personnel","surveys","equipment","import"].forEach(t => {
     document.getElementById("tab"+cap(t)).classList.remove("active");
     document.getElementById("nav"+cap(t)).classList.remove("active");
   });
@@ -2223,6 +2280,140 @@ async function handleRejectSurvey(row) {
 }
 
 // Показать первый таб после логина
+// ══════════════════════════════════════════════════════
+// ТЕХНИКА И ЧЕК-ЛИСТЫ
+// ══════════════════════════════════════════════════════
+function renderEquipmentList() {
+  const el = document.getElementById("equipmentList");
+  if (!el) return;
+  const list = DATA.equipment || [];
+
+  el.innerHTML = list.length ? list.map(e => `
+    <div style="padding:12px;border:1px solid var(--border);border-radius:10px;background:#fff">
+      <div style="font-weight:700;color:var(--navy);font-size:14px">${e.equipmentId}</div>
+      <div style="font-size:12px;color:var(--gray);margin-top:2px">${e.model||"—"}${e.type?" · "+e.type:""}</div>
+      <div style="font-size:11px;color:var(--gray);margin-top:4px">${e.site||"—"} · ${e.status||"—"}</div>
+    </div>
+  `).join("") : `<div class="empty"><div class="empty-icon">🚜</div>Техника ещё не зарегистрирована</div>`;
+}
+
+function openEquipmentModal() {
+  openModal(`
+    <div style="font-size:16px;font-weight:800;color:var(--navy);margin-bottom:16px">➕ Зарегистрировать технику</div>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <input id="eqId" placeholder="Номер техники (свой, уникальный)" style="padding:10px;border:1px solid var(--border);border-radius:8px">
+      <input id="eqModel" placeholder="Модель (напр. SANY SKT115S)" style="padding:10px;border:1px solid var(--border);border-radius:8px">
+      <input id="eqType" placeholder="Тип (Самосвал, Экскаватор...)" style="padding:10px;border:1px solid var(--border);border-radius:8px">
+      <select id="eqSite" style="padding:10px;border:1px solid var(--border);border-radius:8px">
+        <option value="">Участок — не указан</option>
+        <option value="Алмалы">Алмалы</option>
+        <option value="Ашыктас">Ашыктас</option>
+      </select>
+      <input id="eqInventory" placeholder="Инвентарный/гос. номер (необязательно)" style="padding:10px;border:1px solid var(--border);border-radius:8px">
+    </div>
+    <div id="eqStatus" style="margin-top:10px;font-size:13px"></div>
+    <div style="display:flex;gap:8px;margin-top:16px">
+      <button class="btn btn-ghost" onclick="closeModal()" style="flex:1">Отмена</button>
+      <button class="btn btn-gold" onclick="submitEquipmentRegister()" style="flex:1">Зарегистрировать</button>
+    </div>
+  `);
+}
+
+async function submitEquipmentRegister() {
+  const equipmentId = document.getElementById("eqId").value.trim();
+  const model = document.getElementById("eqModel").value.trim();
+  const status = document.getElementById("eqStatus");
+  if (!equipmentId || !model) {
+    status.style.color = "var(--red)";
+    status.textContent = "Укажите номер техники и модель";
+    return;
+  }
+  const body = {
+    action: "registerEquipment",
+    equipmentId, model,
+    type: document.getElementById("eqType").value.trim(),
+    site: document.getElementById("eqSite").value,
+    inventoryNumber: document.getElementById("eqInventory").value.trim(),
+  };
+  try {
+    const res = await fetch(CFG.SHEET_URL, { method:"POST", body: JSON.stringify(body) });
+    const data = await res.json();
+    if (data.ok) {
+      closeModal();
+      await loadAll();
+    } else {
+      status.style.color = "var(--red)";
+      status.textContent = "Ошибка: " + (data.error||"неизвестная");
+    }
+  } catch(e) {
+    status.style.color = "var(--red)";
+    status.textContent = "Ошибка сети: " + e;
+  }
+}
+
+function renderChecklistTemplatesList() {
+  const el = document.getElementById("checklistTemplatesList");
+  if (!el) return;
+  const list = DATA.checklistTemplates || [];
+  if (!list.length) {
+    el.innerHTML = `<div class="empty"><div class="empty-icon">📋</div>Шаблонов пока нет</div>`;
+    return;
+  }
+  el.innerHTML = list.map(t => {
+    const sectionNames = Object.keys(t.sections||{});
+    const total = sectionNames.reduce((n,s)=>n+t.sections[s].length,0);
+    return `
+      <div style="padding:12px;border:1px solid var(--border);border-radius:10px;margin-bottom:8px;background:#fff">
+        <div style="font-weight:700;color:var(--navy)">${t.title} <span style="font-family:monospace;font-size:11px;color:var(--gray)">(${t.id})</span></div>
+        <div style="font-size:12px;color:var(--gray);margin-top:2px">${sectionNames.length} разделов · ${total} пунктов</div>
+      </div>
+    `;
+  }).join("");
+}
+
+async function submitChecklistImport() {
+  const ta     = document.getElementById("importChecklistJson");
+  const status = document.getElementById("importChecklistStatus");
+  status.textContent = "";
+  status.style.color = "var(--gray)";
+
+  let body;
+  try {
+    body = JSON.parse(ta.value);
+  } catch(err) {
+    status.style.color = "var(--red)";
+    status.textContent = "❌ Ошибка в JSON: " + err.message;
+    return;
+  }
+
+  if (!body.templateId || !body.title || !body.sections) {
+    status.style.color = "var(--red)";
+    status.textContent = "❌ Нужны как минимум templateId, title и sections.";
+    return;
+  }
+  body.action = "importChecklistTemplate";
+
+  status.style.color = "var(--gray)";
+  status.textContent = "⏳ Отправка...";
+
+  try {
+    const res = await fetch(CFG.SHEET_URL, { method:"POST", body: JSON.stringify(body) });
+    const data = await res.json();
+    if (data.ok) {
+      status.style.color = "var(--green)";
+      status.textContent = `✅ Шаблон «${body.title}» сохранён как ${data.templateId} — ${data.items} пунктов.`;
+      ta.value = "";
+      await loadAll();
+    } else {
+      status.style.color = "var(--red)";
+      status.textContent = "❌ Ошибка сервера: " + (data.error || "неизвестная ошибка");
+    }
+  } catch(err) {
+    status.style.color = "var(--red)";
+    status.textContent = "❌ Ошибка соединения: " + err.message;
+  }
+}
+
 showTab("dash");
 </script>
 </body>
