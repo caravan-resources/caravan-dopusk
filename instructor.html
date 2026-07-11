@@ -360,7 +360,10 @@ tr:hover td { background:#FAFBFD; }
       <div class="panel">
         <div class="panel-title">
           Реестр техники
-          <button class="btn btn-gold" onclick="openEquipmentModal()">➕ Зарегистрировать единицу</button>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-ghost" onclick="openBulkEquipmentModal()">📋 Массовая загрузка</button>
+            <button class="btn btn-gold" onclick="openEquipmentModal()">➕ Зарегистрировать единицу</button>
+          </div>
         </div>
         <div id="equipmentList" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px"></div>
       </div>
@@ -2300,6 +2303,62 @@ function renderEquipmentList() {
       <button class="btn btn-ghost" style="margin-top:8px;font-size:12px;padding:6px" onclick="showEquipmentQR('${e.equipmentId}')">🔗 Показать QR</button>
     </div>
   `).join("") : `<div class="empty"><div class="empty-icon">🚜</div>Техника ещё не зарегистрирована</div>`;
+}
+
+function openBulkEquipmentModal() {
+  const templates = DATA.checklistTemplates || [];
+  openModal(`
+    <div style="font-size:16px;font-weight:800;color:var(--navy);margin-bottom:16px">📋 Массовая загрузка техники</div>
+    <p style="font-size:12px;color:var(--gray);margin-bottom:10px;line-height:1.5">
+      Вставьте JSON-массив (его готовит Клод по вашему списку). Единицы с уже существующим
+      номером пропускаются, дублей не будет. Доступные шаблоны: ${templates.map(t=>t.id).join(", ") || "нет ни одного"}.
+    </p>
+    <textarea id="bulkEquipmentJson" placeholder='[
+  {"equipmentId":"HT151","model":"SANY SKT115S","type":"Самосвал","templateId":"samosval"}
+]' style="width:100%;min-height:200px;font-family:monospace;font-size:12px;
+      padding:14px;border:1.5px solid var(--border);border-radius:10px;
+      resize:vertical;box-sizing:border-box"></textarea>
+    <div id="bulkEquipmentStatus" style="margin-top:10px;font-size:13px"></div>
+    <div style="display:flex;gap:8px;margin-top:16px">
+      <button class="btn btn-ghost" onclick="closeModal()" style="flex:1">Отмена</button>
+      <button class="btn btn-gold" onclick="submitBulkEquipment()" style="flex:1">Загрузить</button>
+    </div>
+  `);
+}
+
+async function submitBulkEquipment() {
+  const ta = document.getElementById("bulkEquipmentJson");
+  const status = document.getElementById("bulkEquipmentStatus");
+  let items;
+  try {
+    items = JSON.parse(ta.value);
+  } catch(err) {
+    status.style.color = "var(--red)";
+    status.textContent = "❌ Ошибка в JSON: " + err.message;
+    return;
+  }
+  if (!Array.isArray(items) || items.length === 0) {
+    status.style.color = "var(--red)";
+    status.textContent = "❌ Нужен непустой список.";
+    return;
+  }
+  status.style.color = "var(--gray)";
+  status.textContent = "⏳ Загрузка...";
+  try {
+    const res = await fetch(CFG.SHEET_URL, { method:"POST", body: JSON.stringify({ action:"bulkRegisterEquipment", items }) });
+    const data = await res.json();
+    if (data.ok) {
+      status.style.color = "var(--green)";
+      status.textContent = `✅ Добавлено: ${data.added}. Пропущено (уже были): ${data.skipped}.`;
+      await loadAll();
+    } else {
+      status.style.color = "var(--red)";
+      status.textContent = "❌ " + (data.error||"неизвестная ошибка");
+    }
+  } catch(err) {
+    status.style.color = "var(--red)";
+    status.textContent = "❌ Ошибка сети: " + err.message;
+  }
 }
 
 function openEquipmentModal() {
