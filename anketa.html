@@ -258,20 +258,25 @@ const CFG = {
 
 let EMPLOYEES = [];
 let selected = null; // { id, name, position, site } или { id:"", name:"..." } для "меня нет"
-let uploadedPhotoUrl = "";
+
+// Фото НЕ загружается сразу при выборе — только сжимается и хранится
+// в памяти (pendingPhotoBase64) до момента отправки всей анкеты. Раньше
+// загрузка происходила немедленно, а ссылка на неё жила в отдельной
+// переменной до нажатия "Отправить" — если между этими двумя моментами
+// вкладка перезагружалась (частое поведение мобильных браузеров после
+// вызова родного приложения камеры), ссылка терялась, а файл на Drive
+// оставался сиротой. Теперь между "загрузить" и "отправить" нет разрыва
+// вообще — они происходят одним действием.
+let pendingPhotoBase64 = null;
 
 function handlePhotoSelect(event) {
   const file = event.target.files[0];
   if (!file) return;
 
   const status = document.getElementById("photoStatus");
-  status.textContent = "Загрузка...";
+  status.textContent = "Обработка фото...";
   status.style.color = "var(--gray)";
 
-  // Таймаут-предохранитель: если ни одна ветка (успех/ошибка) не сработает
-  // за 20 секунд — считаем, что процесс завис (типичная причина — формат
-  // HEIC с iPhone, который браузер не смог декодировать через <img>),
-  // и показываем явную ошибку вместо бесконечной надписи "Загрузка...".
   let settled = false;
   const failSafe = setTimeout(() => {
     if (settled) return;
@@ -298,7 +303,11 @@ function handlePhotoSelect(event) {
       status.textContent = "Браузер не смог обработать этот формат фото (часто бывает с HEIC на iPhone). Попробуйте выбрать другое фото или пересохранить его в JPG.";
       status.style.color = "var(--red)";
     };
-    img.onload = async () => {
+    img.onload = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(failSafe);
+
       const canvas = document.createElement("canvas");
       let w = img.width, h = img.height;
       if (w > MAX_SIZE || h > MAX_SIZE) {
@@ -307,38 +316,14 @@ function handlePhotoSelect(event) {
       }
       canvas.width = w; canvas.height = h;
       canvas.getContext("2d").drawImage(img, 0, 0, w, h);
-      const base64 = canvas.toDataURL("image/jpeg", 0.85).split(",")[1];
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
+      pendingPhotoBase64 = dataUrl.split(",")[1];
 
       document.getElementById("photoPreview").innerHTML =
-        `<img src="${canvas.toDataURL("image/jpeg",0.85)}" style="width:100%;height:100%;object-fit:cover">`;
+        `<img src="${dataUrl}" style="width:100%;height:100%;object-fit:cover">`;
 
-      const empId   = selected && selected.id ? selected.id : "";
-      const empName = document.getElementById("fName").value.trim() || (selected ? selected.name : "");
-
-      try {
-        const res = await fetch(CFG.SHEET_URL, {
-          method: "POST",
-          body: JSON.stringify({ action:"uploadPhoto", empId, empName, base64, mime:"image/jpeg" })
-        });
-        const data = await res.json();
-        if (settled) return;
-        settled = true;
-        clearTimeout(failSafe);
-        if (data.ok && data.url) {
-          uploadedPhotoUrl = data.url;
-          status.textContent = "✓ Фото загружено";
-          status.style.color = "var(--green)";
-        } else {
-          status.textContent = "Не удалось загрузить фото, но анкету можно отправить и без него";
-          status.style.color = "var(--red)";
-        }
-      } catch(err) {
-        if (settled) return;
-        settled = true;
-        clearTimeout(failSafe);
-        status.textContent = "Ошибка сети при загрузке фото";
-        status.style.color = "var(--red)";
-      }
+      status.textContent = "✓ Фото готово (загрузится вместе с анкетой)";
+      status.style.color = "var(--green)";
     };
     img.src = e.target.result;
   };
@@ -502,6 +487,33 @@ async function submitForm() {
   btn.disabled = true;
   btn.textContent = "Отправка...";
 
+  // Фото грузим прямо здесь, тем же действием, что и саму анкету — не
+  // раньше. empId к этому моменту точно известен (найден в списке, либо
+  // "" для нового человека), а имя точно заполнено (форма не пропустила
+  // бы валидацию выше) — то есть матчинг на бэкенде получит настоящие
+  // данные, а не пустышку.
+  let photoUrl = "";
+  if (pendingPhotoBase64) {
+    btn.textContent = "Загрузка фото...";
+    try {
+      const photoRes = await fetch(CFG.SHEET_URL, {
+        method: "POST",
+        body: JSON.stringify({
+          action: "uploadPhoto",
+          empId: selected && selected.id ? selected.id : "",
+          empName: name,
+          base64: pendingPhotoBase64,
+          mime: "image/jpeg",
+        })
+      });
+      const photoData = await photoRes.json();
+      if (photoData.ok && photoData.url) photoUrl = photoData.url;
+    } catch(e) {
+      // Не блокируем отправку анкеты из-за сбоя фото — просто отправится без него.
+    }
+    btn.textContent = "Отправка...";
+  }
+
   const body = {
     action: "submitSurvey",
     empId: selected && selected.id ? selected.id : "",
@@ -519,7 +531,7 @@ async function submitForm() {
     additionalSkills: document.getElementById("fAdditionalSkills").value.trim(),
     certificates: document.getElementById("fCertificates").value.trim(),
     courses: document.getElementById("fCourses").value.trim(),
-    photoUrl: uploadedPhotoUrl,
+    photoUrl,
   };
 
   try {
