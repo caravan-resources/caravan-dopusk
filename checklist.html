@@ -150,6 +150,12 @@ input:focus, select:focus, textarea:focus { border-color:var(--gold); }
 
     <div class="card" id="itemsCard"></div>
 
+    <div class="card">
+      <div class="card-title">Общие замечания</div>
+      <div class="hint">Необязательно — что-то, что не относится к конкретному пункту выше.</div>
+      <textarea id="generalComment" rows="3" placeholder="Например: техника чистая, вопросов нет"></textarea>
+    </div>
+
     <div id="submitHint" class="hint" style="text-align:center"></div>
     <button class="btn btn-gold" id="submitBtn" onclick="submitChecklist()">Отправить чек-лист</button>
   </div>
@@ -330,6 +336,11 @@ async function submitChecklist() {
   if (template.fuelLevelField) {
     const fuelVal = document.getElementById("fuelLevel").value;
     items.push({ section: "Общее", itemText: template.fuelLevelField.label, status: fuelVal || "", comment: "" });
+  }
+
+  const generalComment = document.getElementById("generalComment").value.trim();
+  if (generalComment) {
+    items.push({ section: "Общее", itemText: "Общие замечания", status: "", comment: generalComment });
   }
 
   const btn = document.getElementById("submitBtn");
