@@ -162,6 +162,18 @@ tr:hover td { background:#FAFBFD; }
 }
 </style>
 <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+<style>
+@media print {
+  body * { visibility: hidden; }
+  #modalOverlay, #modalOverlay * { visibility: visible; }
+  #modalOverlay {
+    position: absolute; inset: 0; background: #fff !important;
+    display: block !important; padding: 40px;
+  }
+  #modalBox { box-shadow: none !important; margin: 0 auto; }
+  #modalBox button { display: none !important; }
+}
+</style>
 </head>
 <body>
 
@@ -215,9 +227,10 @@ tr:hover td { background:#FAFBFD; }
 
     <!-- ══ ДАШБОРД ══ -->
     <div id="tabDash" class="screen">
-      <div class="stats-grid" id="statsGrid"></div>
+      <div style="font-size:15px;font-weight:800;color:var(--navy);margin-bottom:12px">👥 Кадры и допуск</div>
+      <div class="stats-grid" id="statsGridPersonnel"></div>
 
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px">
         <!-- Просроченные допуски -->
         <div class="panel">
           <div class="panel-title">
@@ -243,6 +256,17 @@ tr:hover td { background:#FAFBFD; }
           <span id="warnCount" style="font-size:12px;color:var(--yellow)"></span>
         </div>
         <div id="warnList"></div>
+      </div>
+
+      <div style="font-size:15px;font-weight:800;color:var(--navy);margin:28px 0 12px;padding-top:20px;border-top:2px solid var(--border)">🚜 Техника и осмотры</div>
+      <div class="stats-grid" id="statsGridEquipment"></div>
+
+      <div class="panel" style="margin-top:16px">
+        <div class="panel-title">
+          ⚠ Свежие неисправности
+          <span id="defectsCount" style="font-size:12px;color:var(--red)"></span>
+        </div>
+        <div id="defectsList"></div>
       </div>
     </div>
 
@@ -391,6 +415,14 @@ tr:hover td { background:#FAFBFD; }
         </div>
 
         <div id="checklistTemplatesList" style="margin-top:20px"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">
+          Проведённые осмотры
+          <button class="btn btn-ghost" onclick="loadAll()">🔄 Обновить</button>
+        </div>
+        <div id="checklistRecordsList"></div>
       </div>
     </div>
 
@@ -564,7 +596,7 @@ const CFG = {
 // ══════════════════════════════════════════════════════
 // ДАННЫЕ
 // ══════════════════════════════════════════════════════
-let DATA = { employees: [], results: [], training: [], requirements: [], personnelEvents: [], surveys: [], equipment: [], checklistTemplates: [] };
+let DATA = { employees: [], results: [], training: [], requirements: [], personnelEvents: [], surveys: [], equipment: [], checklistTemplates: [], checklistRecords: [] };
 
 // ══════════════════════════════════════════════════════
 // УТИЛИТЫ
@@ -754,6 +786,15 @@ async function loadAll() {
     DATA.checklistTemplates = [];
   }
 
+  // Проведённые осмотры техники
+  try {
+    const d = await jsonpFetch(`${CFG.SHEET_URL}?action=getChecklistRecords`, "cb_checklist_records");
+    DATA.checklistRecords = Array.isArray(d) ? d : [];
+  } catch(e) {
+    console.error("Осмотры техники:", e);
+    DATA.checklistRecords = [];
+  }
+
   document.getElementById("loadingMsg").style.display = "none";
   renderAll();
 }
@@ -770,6 +811,7 @@ function renderAll() {
   renderSurveysList();
   renderEquipmentList();
   renderChecklistTemplatesList();
+  renderChecklistRecordsList();
 }
 
 // ══════════════════════════════════════════════════════
@@ -811,12 +853,12 @@ function renderDashboard() {
   const passed  = results.filter(r=>isPassed(r));
   const failed  = results.filter(r=>r.passed==="Не сдал ✗"||r.passed===false||r.passed==="FALSE");
 
-  // Статистика
-  document.getElementById("statsGrid").innerHTML = [
+  // Статистика — кадры и допуск
+  document.getElementById("statsGridPersonnel").innerHTML = [
     {lbl:"Сотрудников в базе", val:emps.length,    acc:"var(--gold)"},
     {lbl:"Просроченных допусков", val:expired.length, acc:"var(--red)"},
     {lbl:"Истекает в 30 дней",  val:warning.length, acc:"var(--yellow)"},
-    {lbl:"Тестов сдано",        val:passed.length,  acc:"var(--green)"},
+    {lbl:"Анкет в очереди",     val:(DATA.surveys||[]).length, acc:"var(--navy2)"},
   ].map(s=>`
     <div class="stat-card" style="border-left-color:${s.acc}">
       <div class="stat-val" style="color:${s.acc}">${s.val}</div>
@@ -884,6 +926,57 @@ function renderDashboard() {
       `).join("")}
     </div>`
     : `<div class="empty"><div class="empty-icon">✓</div>Все допуски в порядке</div>`;
+
+  // ══ Зона техники и осмотров ══
+  const equipment = DATA.equipment || [];
+  const records   = DATA.checklistRecords || [];
+  const noTemplate = equipment.filter(e => !e.templateId);
+
+  // Дата в записях осмотра хранится как "dd.MM.yyyy HH:mm" — парсим вручную
+  function parseRecordDate(s) {
+    const m = String(s||"").match(/(\d{2})\.(\d{2})\.(\d{4})/);
+    if (!m) return null;
+    return new Date(+m[3], +m[2]-1, +m[1]);
+  }
+  const weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate()-7);
+  const recordsWithDefects = records.filter(r => r.items.some(it => it.status==="defect"));
+  const recentDefects = recordsWithDefects.filter(r => {
+    const d = parseRecordDate(r.date);
+    return d && d >= weekAgo;
+  });
+
+  document.getElementById("statsGridEquipment").innerHTML = [
+    {lbl:"Единиц техники",        val:equipment.length,      acc:"var(--navy2)"},
+    {lbl:"Без шаблона чек-листа", val:noTemplate.length,     acc:"var(--yellow)"},
+    {lbl:"Осмотров проведено",    val:records.length,        acc:"var(--gold)"},
+    {lbl:"Неисправностей за 7 дней", val:recentDefects.length, acc:"var(--red)"},
+  ].map(s=>`
+    <div class="stat-card" style="border-left-color:${s.acc}">
+      <div class="stat-val" style="color:${s.acc}">${s.val}</div>
+      <div class="stat-lbl">${s.lbl}</div>
+    </div>
+  `).join("");
+
+  document.getElementById("defectsCount").textContent = recordsWithDefects.length ? `${recordsWithDefects.length} осмотр(ов)` : "";
+  document.getElementById("defectsList").innerHTML = recordsWithDefects.length
+    ? recordsWithDefects.slice(0,8).map(r => {
+        const defects = r.items.filter(it=>it.status==="defect");
+        const eq = equipment.find(e => String(e.equipmentId)===String(r.equipmentId));
+        const eqLabel = eq ? `${eq.equipmentId} — ${eq.model}` : r.equipmentId;
+        return `
+          <div style="padding:10px 0;border-bottom:1px solid var(--border)">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <div>
+                <div style="font-size:13px;font-weight:700;color:var(--navy)">${eqLabel}</div>
+                <div style="font-size:11px;color:var(--gray)">${r.empName} · ${r.date}</div>
+              </div>
+              <span style="background:var(--redbg);color:var(--red);font-size:12px;font-weight:700;padding:3px 10px;border-radius:99px">⚠ ${defects.length}</span>
+            </div>
+            <div style="font-size:11px;color:var(--red);margin-top:4px">${defects.map(d=>d.itemText).join(", ")}</div>
+          </div>
+        `;
+      }).join("")
+    : `<div class="empty"><div class="empty-icon">✓</div>Неисправностей не найдено</div>`;
 }
 
 // ══════════════════════════════════════════════════════
@@ -1929,7 +2022,10 @@ function selectPersonnelEmployee(id) {
             <div style="font-size:11px;color:var(--gray);font-family:monospace;margin-top:4px">${emp.id||""}</div>
           </div>
         </div>
-        <button class="btn btn-ghost" onclick="openEventModal('${emp.id}','${(emp.name||"").replace(/'/g,"\\'")}')">+ Событие в личное дело</button>
+        <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
+          <button class="btn btn-ghost" onclick="openEventModal('${emp.id}','${(emp.name||"").replace(/'/g,"\\'")}')">+ Событие в личное дело</button>
+          <button class="btn btn-ghost" style="color:var(--red);font-size:12px" onclick="deleteEmployeeProfile('${emp.id}','${(emp.name||"").replace(/'/g,"\\'")}')">🗑 Удалить профиль</button>
+        </div>
       </div>
 
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;font-size:12px">
@@ -2241,13 +2337,14 @@ function renderSurveysList() {
       </div>
       <div style="display:flex;gap:8px">
         <button class="btn btn-ghost" onclick="handleRejectSurvey(${s.__row})" style="flex:1">Отклонить</button>
-        <button class="btn btn-gold" onclick="handleApproveSurvey(${s.__row})" style="flex:1">Принять</button>
+        <button class="btn btn-gold" onclick="handleApproveSurvey(${s.__row}, false, this)" style="flex:1">Принять</button>
       </div>
     </div>
   `).join("");
 }
 
-async function handleApproveSurvey(row, force) {
+async function handleApproveSurvey(row, force, btn) {
+  if (btn) { if (btn.disabled) return; btn.disabled = true; btn.textContent = "Обработка..."; }
   try {
     const res = await fetch(CFG.SHEET_URL, { method:"POST", body: JSON.stringify({ action:"approveSurvey", row, force: !!force }) });
     const data = await res.json();
@@ -2259,12 +2356,18 @@ async function handleApproveSurvey(row, force) {
         `⚠ ${data.message}\n\nПохожие записи уже есть в базе:\n${names}\n\n` +
         `Нажмите OK, чтобы всё равно создать нового человека, или Отмена, чтобы проверить вручную.`
       );
-      if (proceed) await handleApproveSurvey(row, true);
+      if (proceed) {
+        await handleApproveSurvey(row, true, btn);
+        return;
+      }
+      if (btn) { btn.disabled = false; btn.textContent = "Принять"; }
     } else {
       alert("Ошибка: " + (data.error||"неизвестная"));
+      if (btn) { btn.disabled = false; btn.textContent = "Принять"; }
     }
   } catch(e) {
     alert("Ошибка сети: " + e);
+    if (btn) { btn.disabled = false; btn.textContent = "Принять"; }
   }
 }
 
@@ -2423,6 +2526,23 @@ async function submitEquipmentRegister() {
   }
 }
 
+async function deleteEmployeeProfile(id, name) {
+  if (!confirm(`Удалить профиль «${name}» (${id})? Это действие нельзя отменить. История тестов и обучения останется в своих листах, но перестанет быть видна в профиле.`)) return;
+  try {
+    const res = await fetch(CFG.SHEET_URL, { method:"POST", body: JSON.stringify({ action:"deleteEmployee", id }) });
+    const data = await res.json();
+    if (data.ok) {
+      await loadAll();
+      document.getElementById("personnelProfile").innerHTML =
+        `<div class="empty"><div class="empty-icon">👤</div>Выберите сотрудника из списка слева</div>`;
+    } else {
+      alert("Ошибка: " + (data.error||"неизвестная"));
+    }
+  } catch(e) {
+    alert("Ошибка сети: " + e);
+  }
+}
+
 async function deleteEquipmentUnit(equipmentId) {
   if (!confirm(`Удалить «${equipmentId}» из реестра техники? Это действие нельзя отменить.`)) return;
   try {
@@ -2477,6 +2597,51 @@ function renderChecklistTemplatesList() {
       </div>
     `;
   }).join("");
+}
+
+function renderChecklistRecordsList() {
+  const el = document.getElementById("checklistRecordsList");
+  if (!el) return;
+  const list = DATA.checklistRecords || [];
+  if (!list.length) {
+    el.innerHTML = `<div class="empty"><div class="empty-icon">📋</div>Осмотров пока нет</div>`;
+    return;
+  }
+
+  el.innerHTML = list.map((r, idx) => {
+    const defects = r.items.filter(it => it.status === "defect");
+    const eq = (DATA.equipment||[]).find(e => String(e.equipmentId)===String(r.equipmentId));
+    const eqLabel = eq ? `${eq.equipmentId} — ${eq.model}` : r.equipmentId;
+
+    return `
+      <div style="padding:12px;border:1px solid var(--border);border-radius:10px;margin-bottom:8px;background:#fff">
+        <div style="display:flex;justify-content:space-between;align-items:center;cursor:pointer" onclick="toggleChecklistRecord(${idx})">
+          <div>
+            <div style="font-weight:700;color:var(--navy)">${eqLabel}</div>
+            <div style="font-size:12px;color:var(--gray)">${r.empName} · ${r.date}</div>
+          </div>
+          ${defects.length > 0
+            ? `<span style="background:var(--redbg);color:var(--red);font-size:12px;font-weight:700;padding:3px 10px;border-radius:99px">⚠ ${defects.length} неисправност${defects.length===1?'ь':defects.length<5?'и':'ей'}</span>`
+            : `<span style="background:var(--greenbg);color:var(--green);font-size:12px;font-weight:700;padding:3px 10px;border-radius:99px">✓ Без замечаний</span>`
+          }
+        </div>
+        <div id="checklistRecordDetail${idx}" style="display:none;margin-top:12px;border-top:1px solid var(--border);padding-top:10px">
+          ${r.items.map(it => `
+            <div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px;gap:10px">
+              <span style="color:${it.status==='defect'?'var(--red)':'var(--navy)'}">${it.itemText}</span>
+              <span style="color:var(--gray);white-space:nowrap">${it.status==='defect'?'✗ неисправно':it.status==='ok'?'✓ исправно':it.status}</span>
+            </div>
+            ${it.comment ? `<div style="font-size:11px;color:var(--gray);margin-bottom:4px">${it.comment}</div>` : ""}
+          `).join("")}
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+function toggleChecklistRecord(idx) {
+  const el = document.getElementById("checklistRecordDetail"+idx);
+  if (el) el.style.display = el.style.display === "none" ? "block" : "none";
 }
 
 async function submitChecklistImport() {
