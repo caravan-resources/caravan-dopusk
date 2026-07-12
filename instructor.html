@@ -162,18 +162,6 @@ tr:hover td { background:#FAFBFD; }
 }
 </style>
 <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
-<style>
-@media print {
-  body * { visibility: hidden; }
-  #modalOverlay, #modalOverlay * { visibility: visible; }
-  #modalOverlay {
-    position: absolute; inset: 0; background: #fff !important;
-    display: block !important; padding: 40px;
-  }
-  #modalBox { box-shadow: none !important; margin: 0 auto; }
-  #modalBox button { display: none !important; }
-}
-</style>
 </head>
 <body>
 
@@ -568,7 +556,7 @@ tr:hover td { background:#FAFBFD; }
 <!-- СТИЛИ ПЕЧАТИ -->
 <style>
 @media print {
-  body > *:not(#printArea) { display:none !important; }
+  body > *:not(#printArea):not(#modalOverlay) { display:none !important; }
   #printArea {
     display:grid !important;
     grid-template-columns:85.6mm 85.6mm;
@@ -578,6 +566,13 @@ tr:hover td { background:#FAFBFD; }
     -webkit-print-color-adjust:exact;
     print-color-adjust:exact;
   }
+  #modalOverlay {
+    position: fixed; inset: 0; background: #fff !important;
+    display: flex !important; align-items: flex-start; justify-content: center;
+    padding: 40px;
+  }
+  #modalBox { box-shadow: none !important; }
+  #modalBox button { display: none !important; }
   .no-print { display:none !important; }
   @page { size:A4 portrait; margin:0; }
 }
