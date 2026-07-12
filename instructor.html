@@ -406,6 +406,20 @@ tr:hover td { background:#FAFBFD; }
       </div>
 
       <div class="panel">
+        <div class="panel-title">📊 Аналитика по осмотрам</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+          <div>
+            <div style="font-size:13px;font-weight:700;color:var(--navy2);margin-bottom:8px">По технике — где чаще всего неисправности</div>
+            <div id="analyticsByEquipment"></div>
+          </div>
+          <div>
+            <div style="font-size:13px;font-weight:700;color:var(--navy2);margin-bottom:8px">Топ повторяющихся неисправностей</div>
+            <div id="analyticsByItem"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
         <div class="panel-title">
           Проведённые осмотры
           <button class="btn btn-ghost" onclick="loadAll()">🔄 Обновить</button>
@@ -807,6 +821,7 @@ function renderAll() {
   renderEquipmentList();
   renderChecklistTemplatesList();
   renderChecklistRecordsList();
+  renderChecklistAnalytics();
 }
 
 // ══════════════════════════════════════════════════════
@@ -2636,6 +2651,73 @@ function loadTemplateForEdit(idx) {
   document.getElementById("importChecklistJson").value = JSON.stringify(payload, null, 2);
   document.getElementById("importChecklistStatus").textContent = "";
   document.getElementById("importChecklistJson").scrollIntoView({ behavior:"smooth", block:"center" });
+}
+
+function renderChecklistAnalytics() {
+  const records = DATA.checklistRecords || [];
+  const equipment = DATA.equipment || [];
+
+  const byEqEl = document.getElementById("analyticsByEquipment");
+  const byItemEl = document.getElementById("analyticsByItem");
+  if (!byEqEl || !byItemEl) return;
+
+  if (!records.length) {
+    byEqEl.innerHTML = `<div class="empty" style="padding:16px"><div class="empty-icon">📊</div>Пока нет данных</div>`;
+    byItemEl.innerHTML = `<div class="empty" style="padding:16px"><div class="empty-icon">📊</div>Пока нет данных</div>`;
+    return;
+  }
+
+  // ── По технике: сколько осмотров и сколько неисправностей у каждой единицы ──
+  const eqStats = {};
+  records.forEach(r => {
+    const id = r.equipmentId;
+    if (!eqStats[id]) eqStats[id] = { inspections: 0, defects: 0 };
+    eqStats[id].inspections += 1;
+    eqStats[id].defects += r.items.filter(it => it.status === "defect").length;
+  });
+
+  const eqRows = Object.keys(eqStats)
+    .map(id => ({ id, ...eqStats[id] }))
+    .sort((a,b) => b.defects - a.defects || b.inspections - a.inspections);
+
+  byEqEl.innerHTML = eqRows.map(row => {
+    const eq = equipment.find(e => String(e.equipmentId)===String(row.id));
+    const label = eq ? `${eq.equipmentId} — ${eq.model}` : row.id;
+    return `
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border);font-size:13px">
+        <div>
+          <div style="font-weight:700;color:var(--navy)">${label}</div>
+          <div style="font-size:11px;color:var(--gray)">${row.inspections} осмотр(ов)</div>
+        </div>
+        ${row.defects > 0
+          ? `<span style="background:var(--redbg);color:var(--red);font-size:12px;font-weight:700;padding:3px 10px;border-radius:99px">${row.defects}</span>`
+          : `<span style="color:var(--green);font-size:12px">✓ чисто</span>`
+        }
+      </div>
+    `;
+  }).join("");
+
+  // ── Топ пунктов, чаще всего отмечаемых как неисправность, по всей технике ──
+  const itemStats = {};
+  records.forEach(r => {
+    r.items.forEach(it => {
+      if (it.status !== "defect") return;
+      if (!itemStats[it.itemText]) itemStats[it.itemText] = 0;
+      itemStats[it.itemText] += 1;
+    });
+  });
+
+  const itemRows = Object.keys(itemStats)
+    .map(text => ({ text, count: itemStats[text] }))
+    .sort((a,b) => b.count - a.count)
+    .slice(0, 10);
+
+  byItemEl.innerHTML = itemRows.length ? itemRows.map(row => `
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border);font-size:13px">
+      <span style="color:var(--navy)">${row.text}</span>
+      <span style="background:var(--redbg);color:var(--red);font-size:12px;font-weight:700;padding:3px 10px;border-radius:99px;flex-shrink:0;margin-left:10px">${row.count}</span>
+    </div>
+  `).join("") : `<div class="empty" style="padding:16px"><div class="empty-icon">✓</div>Неисправностей не найдено</div>`;
 }
 
 function renderChecklistRecordsList() {
