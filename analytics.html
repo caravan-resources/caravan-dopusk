@@ -88,6 +88,10 @@ body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans
           <div id="analyticsByItem"></div>
         </div>
       </div>
+      <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
+        <div style="font-size:13px;font-weight:700;color:var(--navy2);margin-bottom:8px">💬 Свежие комментарии</div>
+        <div id="analyticsComments"></div>
+      </div>
     </div>
 
     <div class="panel">
@@ -245,6 +249,36 @@ function renderAnalytics() {
       <span style="background:var(--redbg);color:var(--red);font-size:12px;font-weight:700;padding:3px 10px;border-radius:99px;flex-shrink:0;margin-left:10px">${row.count}</span>
     </div>
   `).join("") : `<div class="empty" style="padding:16px"><div class="empty-icon">✓</div>Неисправностей не найдено</div>`;
+
+  const commentsEl = document.getElementById("analyticsComments");
+  if (commentsEl) {
+    const allComments = [];
+    records.forEach(r => {
+      r.items.forEach(it => {
+        if (!it.comment) return;
+        allComments.push({
+          equipmentId: r.equipmentId, empName: r.empName, date: r.date,
+          itemText: it.itemText, status: it.status, comment: it.comment,
+        });
+      });
+    });
+    allComments.sort((a,b) => (parseRecordDate(b.date)||0) - (parseRecordDate(a.date)||0));
+
+    commentsEl.innerHTML = allComments.length ? allComments.slice(0,15).map(c => {
+      const eq = equipment.find(e => String(e.equipmentId)===String(c.equipmentId));
+      const eqLabel = eq ? `${eq.equipmentId} — ${eq.model}` : c.equipmentId;
+      return `
+        <div style="padding:8px 0;border-bottom:1px solid var(--border);font-size:13px">
+          <div style="display:flex;justify-content:space-between;align-items:baseline">
+            <span style="font-weight:700;color:var(--navy)">${eqLabel}</span>
+            <span style="font-size:11px;color:var(--gray)">${c.empName} · ${fmtRecordDateTime(c.date)}</span>
+          </div>
+          <div style="font-size:11px;color:var(--gray);margin-top:2px">${c.itemText}${c.status==='defect'?' (неисправно)':''}</div>
+          <div style="margin-top:2px">${c.comment}</div>
+        </div>
+      `;
+    }).join("") : `<div class="empty" style="padding:16px"><div class="empty-icon">💬</div>Комментариев нет</div>`;
+  }
 }
 
 function renderEquipmentList() {
