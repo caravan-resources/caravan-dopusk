@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Осмотры техники — Caravan Resources</title>
+<style>
+:root {
+  --navy:#0B1A35; --navy2:#1B3B6F; --gold:#F4A52A;
+  --red:#DC2626; --redbg:#FEF2F2;
+  --green:#16A34A; --greenbg:#F0FDF4;
+  --yellow:#B45309; --yellowbg:#FFFBEB;
+  --gray:#64748B; --light:#F1F5F9; --border:#E2E8F0;
+}
+* { box-sizing:border-box; }
+body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+  background:var(--light); color:var(--navy); margin:0; min-height:100vh; }
+
+#loginScreen { display:flex; align-items:center; justify-content:center; min-height:100vh; }
+.login-box { background:#fff; border-radius:16px; padding:36px; width:320px; text-align:center;
+  box-shadow:0 10px 40px rgba(0,0,0,.1); }
+.login-logo { font-size:36px; margin-bottom:10px; }
+.login-title { font-size:17px; font-weight:800; color:var(--navy); }
+.login-sub { font-size:12px; color:var(--gray); margin:4px 0 20px; }
+.login-box input { width:100%; padding:12px; border:1.5px solid var(--border); border-radius:10px;
+  font-size:15px; margin-bottom:12px; text-align:center; }
+.login-box button { width:100%; padding:12px; border:none; border-radius:10px; background:var(--gold);
+  color:var(--navy); font-weight:800; font-size:15px; cursor:pointer; }
+.login-err { display:none; color:var(--red); font-size:12px; margin-top:10px; }
+
+#app { display:none; }
+.header { background:var(--navy); color:#fff; padding:16px 24px; display:flex; justify-content:space-between; align-items:center; }
+.header h1 { font-size:16px; font-weight:800; margin:0; }
+.header p { font-size:11px; color:rgba(255,255,255,.6); margin:2px 0 0; }
+.header button { background:rgba(255,255,255,.1); color:#fff; border:none; padding:8px 14px;
+  border-radius:8px; cursor:pointer; font-size:13px; }
+
+.wrap { max-width:1100px; margin:0 auto; padding:20px; }
+.stats-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; margin-bottom:20px; }
+.stat-card { background:#fff; border-radius:12px; padding:16px; border-left:4px solid var(--gold); }
+.stat-val { font-size:26px; font-weight:800; }
+.stat-lbl { font-size:12px; color:var(--gray); margin-top:2px; }
+
+.panel { background:#fff; border-radius:14px; padding:18px; margin-bottom:16px; }
+.panel-title { font-size:14px; font-weight:800; color:var(--navy); margin-bottom:12px;
+  display:flex; justify-content:space-between; align-items:center; }
+.empty { text-align:center; padding:24px; color:var(--gray); font-size:13px; }
+.empty-icon { font-size:28px; margin-bottom:8px; }
+.btn-ghost { background:var(--light); color:var(--navy); border:none; padding:8px 12px;
+  border-radius:8px; cursor:pointer; font-size:13px; }
+</style>
+</head>
+<body>
+
+<div id="loginScreen">
+  <div class="login-box">
+    <div class="login-logo">📊</div>
+    <div class="login-title">Осмотры техники</div>
+    <div class="login-sub">Caravan Resources · только просмотр</div>
+    <input type="password" id="pinInput" placeholder="Введите PIN-код"
+      onkeydown="if(event.key==='Enter')checkPin()">
+    <button onclick="checkPin()">Войти</button>
+    <div class="login-err" id="loginErr">Неверный PIN-код</div>
+  </div>
+</div>
+
+<div id="app">
+  <div class="header">
+    <div>
+      <h1>Осмотры техники</h1>
+      <p>Caravan Resources · только чтение, без личных данных сотрудников</p>
+    </div>
+    <button onclick="logout()">Выйти</button>
+  </div>
+
+  <div class="wrap">
+    <div class="stats-grid" id="statsGrid"></div>
+
+    <div class="panel">
+      <div class="panel-title">📊 Аналитика по осмотрам</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+        <div>
+          <div style="font-size:13px;font-weight:700;color:var(--navy2);margin-bottom:8px">По технике — где чаще всего неисправности</div>
+          <div id="analyticsByEquipment"></div>
+        </div>
+        <div>
+          <div style="font-size:13px;font-weight:700;color:var(--navy2);margin-bottom:8px">Топ повторяющихся неисправностей</div>
+          <div id="analyticsByItem"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">
+        Реестр техники
+        <button class="btn-ghost" onclick="loadAll()">🔄 Обновить</button>
+      </div>
+      <div id="equipmentList" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px"></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">Проведённые осмотры</div>
+      <div id="recordsList"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const CFG = {
+  PIN: "1234",
+  SHEET_URL: "https://script.google.com/macros/s/AKfycbwhdMV20k8US2BXUz1Xk2XCXE9MEwpHpQaadTF9xEfzbU1--dHL-Zuj06K2qXW-rFtKGw/exec",
+};
+
+let DATA = { equipment: [], checklistRecords: [] };
+
+function checkPin() {
+  const val = document.getElementById("pinInput").value;
+  if (val === CFG.PIN) {
+    document.getElementById("loginScreen").style.display = "none";
+    document.getElementById("app").style.display = "block";
+    loadAll();
+  } else {
+    document.getElementById("loginErr").style.display = "block";
+    document.getElementById("pinInput").value = "";
+    document.getElementById("pinInput").focus();
+  }
+}
+function logout() {
+  document.getElementById("loginScreen").style.display = "flex";
+  document.getElementById("app").style.display = "none";
+  document.getElementById("pinInput").value = "";
+}
+
+async function loadAll() {
+  try {
+    const [eq, records] = await Promise.all([
+      fetch(`${CFG.SHEET_URL}?action=getEquipment`).then(r=>r.json()),
+      fetch(`${CFG.SHEET_URL}?action=getChecklistRecords`).then(r=>r.json()),
+    ]);
+    DATA.equipment = Array.isArray(eq) ? eq : [];
+    DATA.checklistRecords = Array.isArray(records) ? records : [];
+  } catch(e) {
+    console.error("Ошибка загрузки:", e);
+  }
+  renderAll();
+}
+
+function renderAll() {
+  renderStats();
+  renderAnalytics();
+  renderEquipmentList();
+  renderRecordsList();
+}
+
+function parseRecordDate(s) {
+  const iso = new Date(s);
+  if (!isNaN(iso.getTime())) return iso;
+  const m = String(s||"").match(/(\d{2})\.(\d{2})\.(\d{4})/);
+  if (!m) return null;
+  return new Date(+m[3], +m[2]-1, +m[1]);
+}
+function fmtRecordDateTime(s) {
+  const d = parseRecordDate(s);
+  if (!d) return String(s||"—");
+  const dd = String(d.getDate()).padStart(2,"0");
+  const mm = String(d.getMonth()+1).padStart(2,"0");
+  const yy = d.getFullYear();
+  const hh = String(d.getHours()).padStart(2,"0");
+  const min = String(d.getMinutes()).padStart(2,"0");
+  return `${dd}.${mm}.${yy} ${hh}:${min}`;
+}
+
+function renderStats() {
+  const equipment = DATA.equipment || [];
+  const records = DATA.checklistRecords || [];
+  const noTemplate = equipment.filter(e => !e.templateId);
+  const weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate()-7);
+  const recordsWithDefects = records.filter(r => r.items.some(it => it.status==="defect"));
+  const recentDefects = recordsWithDefects.filter(r => {
+    const d = parseRecordDate(r.date);
+    return d && d >= weekAgo;
+  });
+
+  document.getElementById("statsGrid").innerHTML = [
+    {lbl:"Единиц техники", val:equipment.length, acc:"var(--navy2)"},
+    {lbl:"Без шаблона чек-листа", val:noTemplate.length, acc:"var(--yellow)"},
+    {lbl:"Осмотров проведено", val:records.length, acc:"var(--gold)"},
+    {lbl:"Неисправностей за 7 дней", val:recentDefects.length, acc:"var(--red)"},
+  ].map(s=>`
+    <div class="stat-card" style="border-left-color:${s.acc}">
+      <div class="stat-val" style="color:${s.acc}">${s.val}</div>
+      <div class="stat-lbl">${s.lbl}</div>
+    </div>
+  `).join("");
+}
+
+function renderAnalytics() {
+  const records = DATA.checklistRecords || [];
+  const equipment = DATA.equipment || [];
+  const byEqEl = document.getElementById("analyticsByEquipment");
+  const byItemEl = document.getElementById("analyticsByItem");
+
+  if (!records.length) {
+    byEqEl.innerHTML = `<div class="empty" style="padding:16px"><div class="empty-icon">📊</div>Пока нет данных</div>`;
+    byItemEl.innerHTML = `<div class="empty" style="padding:16px"><div class="empty-icon">📊</div>Пока нет данных</div>`;
+    return;
+  }
+
+  const eqStats = {};
+  records.forEach(r => {
+    const id = r.equipmentId;
+    if (!eqStats[id]) eqStats[id] = { inspections: 0, defects: 0 };
+    eqStats[id].inspections += 1;
+    eqStats[id].defects += r.items.filter(it => it.status === "defect").length;
+  });
+  const eqRows = Object.keys(eqStats).map(id => ({ id, ...eqStats[id] }))
+    .sort((a,b) => b.defects - a.defects || b.inspections - a.inspections);
+
+  byEqEl.innerHTML = eqRows.map(row => {
+    const eq = equipment.find(e => String(e.equipmentId)===String(row.id));
+    const label = eq ? `${eq.equipmentId} — ${eq.model}` : row.id;
+    return `
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border);font-size:13px">
+        <div>
+          <div style="font-weight:700;color:var(--navy)">${label}</div>
+          <div style="font-size:11px;color:var(--gray)">${row.inspections} осмотр(ов)</div>
+        </div>
+        ${row.defects > 0
+          ? `<span style="background:var(--redbg);color:var(--red);font-size:12px;font-weight:700;padding:3px 10px;border-radius:99px">${row.defects}</span>`
+          : `<span style="color:var(--green);font-size:12px">✓ чисто</span>`}
+      </div>`;
+  }).join("");
+
+  const itemStats = {};
+  records.forEach(r => r.items.forEach(it => {
+    if (it.status !== "defect") return;
+    itemStats[it.itemText] = (itemStats[it.itemText]||0) + 1;
+  }));
+  const itemRows = Object.keys(itemStats).map(text => ({ text, count: itemStats[text] }))
+    .sort((a,b) => b.count - a.count).slice(0, 10);
+
+  byItemEl.innerHTML = itemRows.length ? itemRows.map(row => `
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border);font-size:13px">
+      <span style="color:var(--navy)">${row.text}</span>
+      <span style="background:var(--redbg);color:var(--red);font-size:12px;font-weight:700;padding:3px 10px;border-radius:99px;flex-shrink:0;margin-left:10px">${row.count}</span>
+    </div>
+  `).join("") : `<div class="empty" style="padding:16px"><div class="empty-icon">✓</div>Неисправностей не найдено</div>`;
+}
+
+function renderEquipmentList() {
+  const el = document.getElementById("equipmentList");
+  const list = DATA.equipment || [];
+  el.innerHTML = list.length ? list.map(e => `
+    <div style="padding:12px;border:1px solid var(--border);border-radius:10px;background:#fff">
+      <div style="font-weight:700;color:var(--navy);font-size:14px">${e.equipmentId}</div>
+      <div style="font-size:12px;color:var(--gray);margin-top:2px">${e.model||"—"}${e.type?" · "+e.type:""}</div>
+      <div style="font-size:11px;color:var(--gray);margin-top:4px">${e.site||"—"} · ${e.status||"—"}</div>
+      <div style="font-size:11px;color:${e.templateId?"var(--green)":"var(--red)"};margin-top:4px">
+        ${e.templateId?"✓ шаблон: "+e.templateId:"⚠ шаблон не выбран"}
+      </div>
+    </div>
+  `).join("") : `<div class="empty"><div class="empty-icon">🚜</div>Техника ещё не зарегистрирована</div>`;
+}
+
+function renderRecordsList() {
+  const el = document.getElementById("recordsList");
+  const list = DATA.checklistRecords || [];
+  if (!list.length) {
+    el.innerHTML = `<div class="empty"><div class="empty-icon">📋</div>Осмотров пока нет</div>`;
+    return;
+  }
+  el.innerHTML = list.map((r, idx) => {
+    const defects = r.items.filter(it => it.status === "defect");
+    const eq = (DATA.equipment||[]).find(e => String(e.equipmentId)===String(r.equipmentId));
+    const eqLabel = eq ? `${eq.equipmentId} — ${eq.model}` : r.equipmentId;
+    return `
+      <div style="padding:12px;border:1px solid var(--border);border-radius:10px;margin-bottom:8px;background:#fff">
+        <div style="display:flex;justify-content:space-between;align-items:center;cursor:pointer" onclick="toggleRecord(${idx})">
+          <div>
+            <div style="font-weight:700;color:var(--navy)">${eqLabel}</div>
+            <div style="font-size:12px;color:var(--gray)">${r.empName} · ${fmtRecordDateTime(r.date)}</div>
+          </div>
+          ${defects.length > 0
+            ? `<span style="background:var(--redbg);color:var(--red);font-size:12px;font-weight:700;padding:3px 10px;border-radius:99px">⚠ ${defects.length}</span>`
+            : `<span style="background:var(--greenbg);color:var(--green);font-size:12px;font-weight:700;padding:3px 10px;border-radius:99px">✓ Без замечаний</span>`}
+        </div>
+        <div id="recordDetail${idx}" style="display:none;margin-top:12px;border-top:1px solid var(--border);padding-top:10px">
+          ${r.items.map(it => `
+            <div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px;gap:10px">
+              <span style="color:${it.status==='defect'?'var(--red)':'var(--navy)'}">${it.itemText}</span>
+              <span style="color:var(--gray);white-space:nowrap">${it.status==='defect'?'✗ неисправно':it.status==='ok'?'✓ исправно':it.status}</span>
+            </div>
+            ${it.comment ? `<div style="font-size:11px;color:var(--gray);margin-bottom:4px">${it.comment}</div>` : ""}
+          `).join("")}
+        </div>
+      </div>`;
+  }).join("");
+}
+
+function toggleRecord(idx) {
+  const el = document.getElementById("recordDetail"+idx);
+  if (el) el.style.display = el.style.display === "none" ? "block" : "none";
+}
+</script>
+</body>
+</html>
