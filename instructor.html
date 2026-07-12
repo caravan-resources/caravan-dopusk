@@ -837,6 +837,29 @@ function instruktazhAsAccessLike() {
     }));
 }
 
+// Google Sheets иногда сам распознаёт текст как дату и хранит как
+// настоящий datetime — тогда на выходе ISO-строка ("2026-07-12T08:02...")
+// вместо записанного текста ("12.07.2026 08:02"). Пробуем оба формата.
+// Общая функция — нужна и на дашборде, и в списке осмотров.
+function parseRecordDate(s) {
+  const iso = new Date(s);
+  if (!isNaN(iso.getTime())) return iso;
+  const m = String(s||"").match(/(\d{2})\.(\d{2})\.(\d{4})/);
+  if (!m) return null;
+  return new Date(+m[3], +m[2]-1, +m[1]);
+}
+
+function fmtRecordDateTime(s) {
+  const d = parseRecordDate(s);
+  if (!d) return String(s||"—");
+  const dd = String(d.getDate()).padStart(2,"0");
+  const mm = String(d.getMonth()+1).padStart(2,"0");
+  const yy = d.getFullYear();
+  const hh = String(d.getHours()).padStart(2,"0");
+  const min = String(d.getMinutes()).padStart(2,"0");
+  return `${dd}.${mm}.${yy} ${hh}:${min}`;
+}
+
 function renderDashboard() {
   const emps = DATA.employees;
   const instr = instruktazhAsAccessLike();
@@ -927,12 +950,6 @@ function renderDashboard() {
   const records   = DATA.checklistRecords || [];
   const noTemplate = equipment.filter(e => !e.templateId);
 
-  // Дата в записях осмотра хранится как "dd.MM.yyyy HH:mm" — парсим вручную
-  function parseRecordDate(s) {
-    const m = String(s||"").match(/(\d{2})\.(\d{2})\.(\d{4})/);
-    if (!m) return null;
-    return new Date(+m[3], +m[2]-1, +m[1]);
-  }
   const weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate()-7);
   const recordsWithDefects = records.filter(r => r.items.some(it => it.status==="defect"));
   const recentDefects = recordsWithDefects.filter(r => {
@@ -963,7 +980,7 @@ function renderDashboard() {
             <div style="display:flex;justify-content:space-between;align-items:center">
               <div>
                 <div style="font-size:13px;font-weight:700;color:var(--navy)">${eqLabel}</div>
-                <div style="font-size:11px;color:var(--gray)">${r.empName} · ${r.date}</div>
+                <div style="font-size:11px;color:var(--gray)">${r.empName} · ${fmtRecordDateTime(r.date)}</div>
               </div>
               <span style="background:var(--redbg);color:var(--red);font-size:12px;font-weight:700;padding:3px 10px;border-radius:99px">⚠ ${defects.length}</span>
             </div>
@@ -2582,16 +2599,43 @@ function renderChecklistTemplatesList() {
     el.innerHTML = `<div class="empty"><div class="empty-icon">📋</div>Шаблонов пока нет</div>`;
     return;
   }
-  el.innerHTML = list.map(t => {
+  el.innerHTML = list.map((t, idx) => {
     const sectionNames = Object.keys(t.sections||{});
     const total = sectionNames.reduce((n,s)=>n+t.sections[s].length,0);
     return `
-      <div style="padding:12px;border:1px solid var(--border);border-radius:10px;margin-bottom:8px;background:#fff">
+      <div style="padding:12px;border:1px solid var(--border);border-radius:10px;margin-bottom:8px;background:#fff;cursor:pointer"
+        onclick="loadTemplateForEdit(${idx})" onmouseover="this.style.background='var(--light)'" onmouseout="this.style.background='#fff'">
         <div style="font-weight:700;color:var(--navy)">${t.title} <span style="font-family:monospace;font-size:11px;color:var(--gray)">(${t.id})</span></div>
-        <div style="font-size:12px;color:var(--gray);margin-top:2px">${sectionNames.length} разделов · ${total} пунктов</div>
+        <div style="font-size:12px;color:var(--gray);margin-top:2px">${sectionNames.length} разделов · ${total} пунктов · ✏️ нажмите, чтобы редактировать</div>
       </div>
     `;
   }).join("");
+}
+
+// Подставляет текущее содержимое шаблона в поле импорта — правишь текст
+// (добавил строку — новый пункт, убрал — пункт исчез) и жмёшь «Добавить»,
+// импорт заменит шаблон целиком тем же templateId. Без этого добавить
+// шаблон можно было только через готовый JSON, ничего не редактируя.
+function loadTemplateForEdit(idx) {
+  const t = (DATA.checklistTemplates||[])[idx];
+  if (!t) return;
+
+  const sections = {};
+  Object.keys(t.sections).forEach(sec => {
+    sections[sec] = t.sections[sec].map(item => item.text);
+  });
+
+  const payload = {
+    action: "importChecklistTemplate",
+    templateId: t.id,
+    title: t.title,
+    sections,
+  };
+  if (t.fuelLevelField) payload.fuelLevelField = t.fuelLevelField;
+
+  document.getElementById("importChecklistJson").value = JSON.stringify(payload, null, 2);
+  document.getElementById("importChecklistStatus").textContent = "";
+  document.getElementById("importChecklistJson").scrollIntoView({ behavior:"smooth", block:"center" });
 }
 
 function renderChecklistRecordsList() {
@@ -2613,7 +2657,7 @@ function renderChecklistRecordsList() {
         <div style="display:flex;justify-content:space-between;align-items:center;cursor:pointer" onclick="toggleChecklistRecord(${idx})">
           <div>
             <div style="font-weight:700;color:var(--navy)">${eqLabel}</div>
-            <div style="font-size:12px;color:var(--gray)">${r.empName} · ${r.date}</div>
+            <div style="font-size:12px;color:var(--gray)">${r.empName} · ${fmtRecordDateTime(r.date)}</div>
           </div>
           ${defects.length > 0
             ? `<span style="background:var(--redbg);color:var(--red);font-size:12px;font-weight:700;padding:3px 10px;border-radius:99px">⚠ ${defects.length} неисправност${defects.length===1?'ь':defects.length<5?'и':'ей'}</span>`
