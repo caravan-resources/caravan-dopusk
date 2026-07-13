@@ -207,6 +207,7 @@ tr:hover td { background:#FAFBFD; }
     <button id="navPersonnel" onclick="showTab('personnel')">👥 Сотрудники</button>
     <button id="navSurveys" onclick="showTab('surveys')">📋 Анкеты <span id="surveyBadge" style="display:none;background:var(--red);color:#fff;border-radius:99px;padding:1px 7px;font-size:11px;margin-left:4px"></span></button>
     <button id="navEquipment" onclick="showTab('equipment')">🚜 Техника</button>
+    <button id="navFuel"     onclick="showTab('fuel')">⛽ Топливо</button>
     <button id="navImport"   onclick="showTab('import')">➕ Импорт теста</button>
   </nav>
 
@@ -429,6 +430,46 @@ tr:hover td { background:#FAFBFD; }
           <button class="btn btn-ghost" onclick="loadAll()">🔄 Обновить</button>
         </div>
         <div id="checklistRecordsList"></div>
+      </div>
+    </div>
+
+    <!-- ══ ТОПЛИВО ══ -->
+    <div id="tabFuel" class="screen">
+      <div class="panel">
+        <div class="panel-title">
+          ⛽ Аналитика по топливу
+          <div style="display:flex;gap:6px" id="fuelPeriodButtons"></div>
+        </div>
+        <div class="stats-grid" id="statsGridFuel" style="margin-bottom:0"></div>
+      </div>
+
+      <div class="panel">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+          <div>
+            <div style="font-size:13px;font-weight:700;color:var(--navy2);margin-bottom:8px">По технике — литров за период</div>
+            <div id="fuelByEquipment"></div>
+          </div>
+          <div>
+            <div style="font-size:13px;font-weight:700;color:var(--navy2);margin-bottom:8px">По сменам (день 07:00–19:00 / ночь 19:00–07:00)</div>
+            <div id="fuelByShift"></div>
+            <div style="font-size:11px;color:var(--gray);margin-top:10px;line-height:1.5">
+              Смена определяется по времени записи заправки на устройстве, которое её сделало.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div style="font-size:13px;font-weight:700;color:var(--navy2);margin-bottom:8px">По дням</div>
+        <div id="fuelByDay"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">
+          Записи заправок
+          <button class="btn btn-ghost" onclick="loadAll()">🔄 Обновить</button>
+        </div>
+        <div id="fuelRecordsList"></div>
       </div>
     </div>
 
@@ -808,6 +849,15 @@ async function loadAll() {
     DATA.checklistRecords = [];
   }
 
+  // Заправки
+  try {
+    const d = await jsonpFetch(`${CFG.SHEET_URL}?action=getFuelRecords`, "cb_fuel_records");
+    DATA.fuel = Array.isArray(d) ? d : [];
+  } catch(e) {
+    console.error("Заправки:", e);
+    DATA.fuel = [];
+  }
+
   document.getElementById("loadingMsg").style.display = "none";
   renderAll();
 }
@@ -826,13 +876,15 @@ function renderAll() {
   renderChecklistTemplatesList();
   renderChecklistRecordsList();
   renderChecklistAnalytics();
+  renderFuelAnalytics();
+  renderFuelRecordsList();
 }
 
 // ══════════════════════════════════════════════════════
 // НАВИГАЦИЯ
 // ══════════════════════════════════════════════════════
 function showTab(name) {
-  ["dash","tests","access","alerts","print","certPrint","training","personnel","surveys","equipment","import"].forEach(t => {
+  ["dash","tests","access","alerts","print","certPrint","training","personnel","surveys","equipment","fuel","import"].forEach(t => {
     document.getElementById("tab"+cap(t)).classList.remove("active");
     document.getElementById("nav"+cap(t)).classList.remove("active");
   });
@@ -976,11 +1028,16 @@ function renderDashboard() {
     return d && d >= weekAgo;
   });
 
+  const fuelRecords = DATA.fuel || [];
+  const fuelWeek = fuelRecords.filter(f => { const d = parseRecordDate(f.date); return d && d >= weekAgo; });
+  const fuelWeekLiters = fuelWeek.reduce((s,f) => s + (Number(f.amountLiters)||0), 0);
+
   document.getElementById("statsGridEquipment").innerHTML = [
     {lbl:"Единиц техники",        val:equipment.length,      acc:"var(--navy2)"},
     {lbl:"Без шаблона чек-листа", val:noTemplate.length,     acc:"var(--yellow)"},
     {lbl:"Осмотров проведено",    val:records.length,        acc:"var(--gold)"},
     {lbl:"Неисправностей за 7 дней", val:recentDefects.length, acc:"var(--red)"},
+    {lbl:"Топливо за 7 дней, л",  val:fuelWeekLiters.toLocaleString("ru-RU"), acc:"var(--navy2)"},
   ].map(s=>`
     <div class="stat-card" style="border-left-color:${s.acc}">
       <div class="stat-val" style="color:${s.acc}">${s.val}</div>
@@ -2800,6 +2857,176 @@ function renderChecklistRecordsList() {
 function toggleChecklistRecord(idx) {
   const el = document.getElementById("checklistRecordDetail"+idx);
   if (el) el.style.display = el.style.display === "none" ? "block" : "none";
+}
+
+// ══════════════════════════════════════════════════════
+// ТОПЛИВО — аналитика и записи
+// ══════════════════════════════════════════════════════
+let FUEL_PERIOD = "week"; // "day" | "week" | "month" | "all"
+
+function fuelPeriodStart(period) {
+  const now = new Date();
+  if (period === "day")   { const d = new Date(now); d.setHours(0,0,0,0); return d; }
+  if (period === "week")  { const d = new Date(now); d.setDate(d.getDate()-7); return d; }
+  if (period === "month") { const d = new Date(now); d.setDate(d.getDate()-30); return d; }
+  return null; // "all"
+}
+
+// Смена по фактическому времени записи: день 07:00–19:00, ночь 19:00–07:00
+function fuelShiftOf(date) {
+  const h = date.getHours();
+  return (h >= 7 && h < 19) ? "День" : "Ночь";
+}
+
+function setFuelPeriod(p) {
+  FUEL_PERIOD = p;
+  renderFuelAnalytics();
+}
+
+function renderFuelAnalytics() {
+  const btnsEl = document.getElementById("fuelPeriodButtons");
+  if (!btnsEl) return; // вкладка ещё не отрисована
+
+  const periods = [["day","Сутки"],["week","Неделя"],["month","Месяц"],["all","Всё время"]];
+  btnsEl.innerHTML = periods.map(([key,label]) => `
+    <button class="btn ${FUEL_PERIOD===key?'btn-gold':'btn-ghost'}" style="width:auto;padding:8px 12px;font-size:12px"
+      onclick="setFuelPeriod('${key}')">${label}</button>
+  `).join("");
+
+  const all = DATA.fuel || [];
+  const start = fuelPeriodStart(FUEL_PERIOD);
+  const records = all.filter(f => {
+    const d = parseRecordDate(f.date);
+    return d && (!start || d >= start);
+  });
+
+  const totalLiters = records.reduce((s,f) => s + (Number(f.amountLiters)||0), 0);
+  const equipmentTouched = new Set(records.map(f=>f.equipmentId)).size;
+
+  document.getElementById("statsGridFuel").innerHTML = [
+    {lbl:"Заправок за период",  val:records.length, acc:"var(--gold)"},
+    {lbl:"Литров всего",        val:totalLiters.toLocaleString("ru-RU"), acc:"var(--navy2)"},
+    {lbl:"В среднем за заправку, л", val: records.length ? Math.round(totalLiters/records.length) : 0, acc:"var(--navy2)"},
+    {lbl:"Единиц техники заправлялось", val:equipmentTouched, acc:"var(--gray)"},
+  ].map(s=>`
+    <div class="stat-card" style="border-left-color:${s.acc}">
+      <div class="stat-val" style="color:${s.acc}">${s.val}</div>
+      <div class="stat-lbl">${s.lbl}</div>
+    </div>
+  `).join("");
+
+  // ── По технике ──
+  const byEqEl = document.getElementById("fuelByEquipment");
+  if (byEqEl) {
+    if (!records.length) {
+      byEqEl.innerHTML = `<div class="empty" style="padding:16px"><div class="empty-icon">⛽</div>Заправок за период нет</div>`;
+    } else {
+      const eqStats = {};
+      records.forEach(f => {
+        const id = f.equipmentId;
+        if (!eqStats[id]) eqStats[id] = { liters: 0, count: 0 };
+        eqStats[id].liters += Number(f.amountLiters)||0;
+        eqStats[id].count += 1;
+      });
+      const rows = Object.keys(eqStats).map(id => ({ id, ...eqStats[id] }))
+        .sort((a,b) => b.liters - a.liters);
+      byEqEl.innerHTML = rows.map(row => {
+        const eq = (DATA.equipment||[]).find(e => String(e.equipmentId)===String(row.id));
+        const label = eq ? `${eq.equipmentId} — ${eq.model}` : row.id;
+        return `
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border);font-size:13px">
+            <div>
+              <div style="font-weight:700;color:var(--navy)">${label}</div>
+              <div style="font-size:11px;color:var(--gray)">${row.count} заправк${row.count===1?'а':row.count<5?'и':'и'}</div>
+            </div>
+            <span style="font-weight:800;color:var(--navy2)">${row.liters.toLocaleString("ru-RU")} л</span>
+          </div>
+        `;
+      }).join("");
+    }
+  }
+
+  // ── По сменам ──
+  const byShiftEl = document.getElementById("fuelByShift");
+  if (byShiftEl) {
+    if (!records.length) {
+      byShiftEl.innerHTML = `<div class="empty" style="padding:16px"><div class="empty-icon">⛽</div>Заправок за период нет</div>`;
+    } else {
+      const shiftStats = { "День": {liters:0,count:0}, "Ночь": {liters:0,count:0} };
+      records.forEach(f => {
+        const d = parseRecordDate(f.date);
+        if (!d) return;
+        const s = fuelShiftOf(d);
+        shiftStats[s].liters += Number(f.amountLiters)||0;
+        shiftStats[s].count += 1;
+      });
+      byShiftEl.innerHTML = Object.keys(shiftStats).map(s => `
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border);font-size:13px">
+          <div>
+            <div style="font-weight:700;color:var(--navy)">${s === "День" ? "☀ День" : "🌙 Ночь"}</div>
+            <div style="font-size:11px;color:var(--gray)">${shiftStats[s].count} заправк${shiftStats[s].count===1?'а':shiftStats[s].count<5?'и':'и'}</div>
+          </div>
+          <span style="font-weight:800;color:var(--navy2)">${shiftStats[s].liters.toLocaleString("ru-RU")} л</span>
+        </div>
+      `).join("");
+    }
+  }
+
+  // ── По дням ──
+  const byDayEl = document.getElementById("fuelByDay");
+  if (byDayEl) {
+    if (!records.length) {
+      byDayEl.innerHTML = `<div class="empty" style="padding:16px"><div class="empty-icon">⛽</div>Заправок за период нет</div>`;
+    } else {
+      const dayStats = {};
+      records.forEach(f => {
+        const d = parseRecordDate(f.date);
+        if (!d) return;
+        const key = `${String(d.getDate()).padStart(2,"0")}.${String(d.getMonth()+1).padStart(2,"0")}.${d.getFullYear()}`;
+        if (!dayStats[key]) dayStats[key] = { liters:0, count:0, sortKey: new Date(d.getFullYear(),d.getMonth(),d.getDate()).getTime() };
+        dayStats[key].liters += Number(f.amountLiters)||0;
+        dayStats[key].count += 1;
+      });
+      const rows = Object.keys(dayStats).map(k => ({ day:k, ...dayStats[k] })).sort((a,b) => b.sortKey - a.sortKey);
+      const maxLiters = Math.max(...rows.map(r=>r.liters), 1);
+      byDayEl.innerHTML = rows.map(row => `
+        <div style="padding:6px 0;border-bottom:1px solid var(--border)">
+          <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px">
+            <span style="color:var(--navy)">${row.day}</span>
+            <span style="font-weight:700;color:var(--navy2)">${row.liters.toLocaleString("ru-RU")} л · ${row.count} заправ.</span>
+          </div>
+          <div style="background:var(--light);border-radius:6px;height:6px;overflow:hidden">
+            <div style="background:var(--gold);height:100%;width:${Math.round(row.liters/maxLiters*100)}%"></div>
+          </div>
+        </div>
+      `).join("");
+    }
+  }
+}
+
+function renderFuelRecordsList() {
+  const el = document.getElementById("fuelRecordsList");
+  if (!el) return;
+  const list = (DATA.fuel || []).slice().sort((a,b) => (parseRecordDate(b.date)||0) - (parseRecordDate(a.date)||0));
+  if (!list.length) {
+    el.innerHTML = `<div class="empty"><div class="empty-icon">⛽</div>Заправок пока нет</div>`;
+    return;
+  }
+  el.innerHTML = list.map(f => {
+    const eq = (DATA.equipment||[]).find(e => String(e.equipmentId)===String(f.equipmentId));
+    const eqLabel = eq ? `${eq.equipmentId} — ${eq.model}` : f.equipmentId;
+    const d = parseRecordDate(f.date);
+    const shift = d ? fuelShiftOf(d) : "—";
+    return `
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);font-size:13px">
+        <div>
+          <div style="font-weight:700;color:var(--navy)">${eqLabel}</div>
+          <div style="font-size:11px;color:var(--gray)">${f.empName||"—"} · ${fmtRecordDateTime(f.date)} · ${shift === "День" ? "☀ день" : "🌙 ночь"}</div>
+        </div>
+        <span style="font-weight:800;color:var(--navy2)">${Number(f.amountLiters)||0} л</span>
+      </div>
+    `;
+  }).join("");
 }
 
 async function submitChecklistImport() {
