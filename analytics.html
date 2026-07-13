@@ -96,6 +96,24 @@ body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans
 
     <div class="panel">
       <div class="panel-title">
+        ⛽ Топливо
+        <div style="display:flex;gap:6px" id="fuelPeriodButtons"></div>
+      </div>
+      <div class="stats-grid" id="statsGridFuel" style="margin-bottom:0"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px">
+        <div>
+          <div style="font-size:13px;font-weight:700;color:var(--navy2);margin-bottom:8px">По технике — литров за период</div>
+          <div id="fuelByEquipment"></div>
+        </div>
+        <div>
+          <div style="font-size:13px;font-weight:700;color:var(--navy2);margin-bottom:8px">По сменам (день 07:00–19:00 / ночь 19:00–07:00)</div>
+          <div id="fuelByShift"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">
         Реестр техники
         <button class="btn-ghost" onclick="loadAll()">🔄 Обновить</button>
       </div>
@@ -115,7 +133,7 @@ const CFG = {
   SHEET_URL: "https://script.google.com/macros/s/AKfycbwhdMV20k8US2BXUz1Xk2XCXE9MEwpHpQaadTF9xEfzbU1--dHL-Zuj06K2qXW-rFtKGw/exec",
 };
 
-let DATA = { equipment: [], checklistRecords: [] };
+let DATA = { equipment: [], checklistRecords: [], fuel: [] };
 
 function checkPin() {
   const val = document.getElementById("pinInput").value;
@@ -137,12 +155,14 @@ function logout() {
 
 async function loadAll() {
   try {
-    const [eq, records] = await Promise.all([
+    const [eq, records, fuel] = await Promise.all([
       fetch(`${CFG.SHEET_URL}?action=getEquipment`).then(r=>r.json()),
       fetch(`${CFG.SHEET_URL}?action=getChecklistRecords`).then(r=>r.json()),
+      fetch(`${CFG.SHEET_URL}?action=getFuelRecords`).then(r=>r.json()),
     ]);
     DATA.equipment = Array.isArray(eq) ? eq : [];
     DATA.checklistRecords = Array.isArray(records) ? records : [];
+    DATA.fuel = Array.isArray(fuel) ? fuel : [];
   } catch(e) {
     console.error("Ошибка загрузки:", e);
   }
@@ -154,6 +174,7 @@ function renderAll() {
   renderAnalytics();
   renderEquipmentList();
   renderRecordsList();
+  renderFuelAnalytics();
 }
 
 function parseRecordDate(s) {
@@ -334,6 +355,110 @@ function renderRecordsList() {
 function toggleRecord(idx) {
   const el = document.getElementById("recordDetail"+idx);
   if (el) el.style.display = el.style.display === "none" ? "block" : "none";
+}
+
+// ══ ТОПЛИВО ══
+let FUEL_PERIOD = "week";
+
+function fuelPeriodStart(period) {
+  const now = new Date();
+  if (period === "day")   { const d = new Date(now); d.setHours(0,0,0,0); return d; }
+  if (period === "week")  { const d = new Date(now); d.setDate(d.getDate()-7); return d; }
+  if (period === "month") { const d = new Date(now); d.setDate(d.getDate()-30); return d; }
+  return null;
+}
+
+function fuelShiftOf(date) {
+  const h = date.getHours();
+  return (h >= 7 && h < 19) ? "День" : "Ночь";
+}
+
+function setFuelPeriod(p) {
+  FUEL_PERIOD = p;
+  renderFuelAnalytics();
+}
+
+function renderFuelAnalytics() {
+  const btnsEl = document.getElementById("fuelPeriodButtons");
+  if (!btnsEl) return;
+
+  const periods = [["day","Сутки"],["week","Неделя"],["month","Месяц"],["all","Всё время"]];
+  btnsEl.innerHTML = periods.map(([key,label]) => `
+    <button class="btn-ghost" style="${FUEL_PERIOD===key?'background:var(--gold);color:var(--navy);font-weight:800;':''}"
+      onclick="setFuelPeriod('${key}')">${label}</button>
+  `).join("");
+
+  const all = DATA.fuel || [];
+  const start = fuelPeriodStart(FUEL_PERIOD);
+  const records = all.filter(f => { const d = parseRecordDate(f.date); return d && (!start || d >= start); });
+
+  const totalLiters = records.reduce((s,f) => s + (Number(f.amountLiters)||0), 0);
+  const equipmentTouched = new Set(records.map(f=>f.equipmentId)).size;
+
+  document.getElementById("statsGridFuel").innerHTML = [
+    {lbl:"Заправок за период", val:records.length, acc:"var(--gold)"},
+    {lbl:"Литров всего", val:totalLiters.toLocaleString("ru-RU"), acc:"var(--navy2)"},
+    {lbl:"В среднем за заправку, л", val: records.length ? Math.round(totalLiters/records.length) : 0, acc:"var(--navy2)"},
+    {lbl:"Единиц техники заправлялось", val:equipmentTouched, acc:"var(--gray)"},
+  ].map(s=>`
+    <div class="stat-card" style="border-left-color:${s.acc}">
+      <div class="stat-val" style="color:${s.acc}">${s.val}</div>
+      <div class="stat-lbl">${s.lbl}</div>
+    </div>
+  `).join("");
+
+  const byEqEl = document.getElementById("fuelByEquipment");
+  if (byEqEl) {
+    if (!records.length) {
+      byEqEl.innerHTML = `<div class="empty" style="padding:16px"><div class="empty-icon">⛽</div>Заправок за период нет</div>`;
+    } else {
+      const eqStats = {};
+      records.forEach(f => {
+        const id = f.equipmentId;
+        if (!eqStats[id]) eqStats[id] = { liters: 0, count: 0 };
+        eqStats[id].liters += Number(f.amountLiters)||0;
+        eqStats[id].count += 1;
+      });
+      const rows = Object.keys(eqStats).map(id => ({ id, ...eqStats[id] })).sort((a,b) => b.liters - a.liters);
+      byEqEl.innerHTML = rows.map(row => {
+        const eq = (DATA.equipment||[]).find(e => String(e.equipmentId)===String(row.id));
+        const label = eq ? `${eq.equipmentId} — ${eq.model}` : row.id;
+        return `
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border);font-size:13px">
+            <div>
+              <div style="font-weight:700;color:var(--navy)">${label}</div>
+              <div style="font-size:11px;color:var(--gray)">${row.count} заправк${row.count===1?'а':row.count<5?'и':'и'}</div>
+            </div>
+            <span style="font-weight:800;color:var(--navy2)">${row.liters.toLocaleString("ru-RU")} л</span>
+          </div>`;
+      }).join("");
+    }
+  }
+
+  const byShiftEl = document.getElementById("fuelByShift");
+  if (byShiftEl) {
+    if (!records.length) {
+      byShiftEl.innerHTML = `<div class="empty" style="padding:16px"><div class="empty-icon">⛽</div>Заправок за период нет</div>`;
+    } else {
+      const shiftStats = { "День": {liters:0,count:0}, "Ночь": {liters:0,count:0} };
+      records.forEach(f => {
+        const d = parseRecordDate(f.date);
+        if (!d) return;
+        const s = fuelShiftOf(d);
+        shiftStats[s].liters += Number(f.amountLiters)||0;
+        shiftStats[s].count += 1;
+      });
+      byShiftEl.innerHTML = Object.keys(shiftStats).map(s => `
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border);font-size:13px">
+          <div>
+            <div style="font-weight:700;color:var(--navy)">${s === "День" ? "☀ День" : "🌙 Ночь"}</div>
+            <div style="font-size:11px;color:var(--gray)">${shiftStats[s].count} заправк${shiftStats[s].count===1?'а':shiftStats[s].count<5?'и':'и'}</div>
+          </div>
+          <span style="font-weight:800;color:var(--navy2)">${shiftStats[s].liters.toLocaleString("ru-RU")} л</span>
+        </div>
+      `).join("");
+    }
+  }
 }
 </script>
 </body>
