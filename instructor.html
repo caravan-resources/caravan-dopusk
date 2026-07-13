@@ -141,6 +141,9 @@ tr:hover td { background:#FAFBFD; }
 }
 .btn-gold  { background:var(--gold); color:var(--navy); }
 .btn-ghost { background:transparent; color:var(--gray); border:1px solid var(--border); }
+.btn-icon { width:24px; height:24px; padding:0; border:1px solid var(--border); border-radius:6px; background:#fff;
+  color:var(--gray); font-size:12px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; }
+.btn-icon:hover { background:var(--light); }
 .btn-red   { background:var(--red); color:#fff; }
 
 /* ── СВЕТОФОР СТРОКИ ── */
@@ -1371,6 +1374,9 @@ async function uploadPhoto(event, empId, empName) {
           if (emp) emp.photoUrl = data.url;
           renderAccessTable();
           renderPrintSelect();
+          if (CURRENT_PROFILE_ID && String(CURRENT_PROFILE_ID) === String(empId)) {
+            selectPersonnelEmployee(CURRENT_PROFILE_ID);
+          }
           alert("✅ Фото загружено успешно!");
         } else {
           console.error("uploadPhoto error:", data);
@@ -2083,7 +2089,10 @@ function renderPersonnelList() {
   `).join("") : `<div class="empty"><div class="empty-icon">🔍</div>Никого не нашлось</div>`;
 }
 
+let CURRENT_PROFILE_ID = null;
+
 function selectPersonnelEmployee(id) {
+  CURRENT_PROFILE_ID = id;
   const emp = findEmpByAnyKey(id);
   const el  = document.getElementById("personnelProfile");
   if (!emp || !el) return;
@@ -2103,7 +2112,14 @@ function selectPersonnelEmployee(id) {
 
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px">
         <div style="display:flex;gap:12px;align-items:flex-start">
-          ${emp.photoUrl ? `<img src="${emp.photoUrl}" style="width:56px;height:56px;border-radius:50%;object-fit:cover;flex-shrink:0;border:1.5px solid var(--border)">` : ""}
+          <label style="position:relative;cursor:pointer;flex-shrink:0" title="Нажмите, чтобы сменить фото">
+            ${emp.photoUrl
+              ? `<img src="${emp.photoUrl}" style="width:56px;height:56px;border-radius:50%;object-fit:cover;border:1.5px solid var(--border)">`
+              : `<div style="width:56px;height:56px;border-radius:50%;background:var(--light);border:1.5px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--gray)">фото</div>`}
+            <span style="position:absolute;bottom:-2px;right:-2px;background:var(--navy);color:#fff;font-size:10px;
+              width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center">✏</span>
+            <input type="file" accept="image/*" style="display:none" onchange="uploadPhoto(event,'${emp.id}','${(emp.name||"").replace(/'/g,"\\'")}')">
+          </label>
           <div>
             <div style="font-size:20px;font-weight:800;color:var(--navy)">${emp.name||"—"}</div>
             <div style="font-size:13px;color:var(--gray);margin-top:2px">${emp.position||"—"} · ${emp.site||"—"}</div>
@@ -2111,6 +2127,7 @@ function selectPersonnelEmployee(id) {
           </div>
         </div>
         <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
+          <button class="btn btn-ghost" onclick="openEditEmployeeModal('${emp.id}')">✏ Редактировать карточку</button>
           <button class="btn btn-ghost" onclick="openEventModal('${emp.id}','${(emp.name||"").replace(/'/g,"\\'")}')">+ Событие в личное дело</button>
           <button class="btn btn-ghost" style="color:var(--red);font-size:12px" onclick="deleteEmployeeProfile('${emp.id}','${(emp.name||"").replace(/'/g,"\\'")}')">🗑 Удалить профиль</button>
         </div>
@@ -2162,8 +2179,14 @@ function selectPersonnelEmployee(id) {
         ${events.length ? events.map(ev=>`
           <div style="padding:8px 0;border-bottom:1px solid var(--border);font-size:12px">
             <div style="display:flex;justify-content:space-between;align-items:center">
-              ${personnelEventBadge(ev.type)}
-              <span style="color:var(--gray)">${fmtDate(ev.date)}</span>
+              <div style="display:flex;gap:8px;align-items:center">
+                ${personnelEventBadge(ev.type)}
+                <span style="color:var(--gray)">${fmtDate(ev.date)}</span>
+              </div>
+              <div style="display:flex;gap:4px">
+                <button class="btn-icon" title="Редактировать" onclick="openEditEventModal(${ev.__row})">✏</button>
+                <button class="btn-icon" title="Удалить" style="color:var(--red)" onclick="deletePersonnelEventConfirm(${ev.__row},'${emp.id}')">🗑</button>
+              </div>
             </div>
             <div style="margin-top:4px">${ev.description||""}</div>
             ${ev.issuedBy?`<div style="color:var(--gray);font-size:11px;margin-top:2px">Оформил: ${ev.issuedBy}</div>`:""}
@@ -2370,6 +2393,201 @@ async function submitPersonnelEvent(empId, empName) {
   } catch(e) {
     alert("Ошибка сети: " + e);
   }
+}
+
+// ══════════════════════════════════════════════════════
+// РЕДАКТИРОВАНИЕ КАРТОЧКИ СОТРУДНИКА
+// ══════════════════════════════════════════════════════
+const EDIT_POSITIONS = ["Водитель самосвала","Машинист бульдозера","Машинист гидравлического экскаватора",
+  "Машинист автогрейдера","Машинист грунтового катка","Машинист насосной установки",
+  "Машинист буровой установки","Водитель фронтального погрузчика"];
+
+function openEditEmployeeModal(id) {
+  const emp = DATA.employees.find(e => String(e.id) === String(id));
+  if (!emp) { alert("Сотрудник не найден — обновите список"); return; }
+
+  const isPreset = EDIT_POSITIONS.includes(emp.position);
+  const specList = (emp.specialties||"").split(",").map(s=>s.trim()).filter(Boolean);
+  const esc = s => String(s||"").replace(/"/g,"&quot;");
+
+  openModal(`
+    <div style="font-size:16px;font-weight:800;color:var(--navy);margin-bottom:16px">✏ Редактировать — ${emp.name||""}</div>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <input id="editName" placeholder="ФИО" value="${esc(emp.name)}" style="padding:10px;border:1px solid var(--border);border-radius:8px">
+      <select id="editPosition" onchange="togglePositionOther(this.value,'edit')" style="padding:10px;border:1px solid var(--border);border-radius:8px">
+        <option value="">Должность — выберите</option>
+        ${EDIT_POSITIONS.map(p=>`<option value="${p}" ${emp.position===p?"selected":""}>${p}</option>`).join("")}
+        <option value="__other__" ${!isPreset && emp.position ? "selected" : ""}>Другое (указать)</option>
+      </select>
+      <input type="text" id="editPositionOther" placeholder="Укажите должность"
+        value="${!isPreset ? esc(emp.position) : ""}"
+        style="display:${!isPreset && emp.position ? "block" : "none"};padding:10px;border:1px solid var(--border);border-radius:8px">
+      <select id="editSite" style="padding:10px;border:1px solid var(--border);border-radius:8px">
+        <option value="Алмалы" ${emp.site==="Алмалы"?"selected":""}>Алмалы</option>
+        <option value="Ашыктас" ${emp.site==="Ашыктас"?"selected":""}>Ашыктас</option>
+      </select>
+      <select id="editToo" style="padding:10px;border:1px solid var(--border);border-radius:8px">
+        <option value="SRC" ${emp.tooPrimary==="SRC"?"selected":""}>ТОО «Saryarka Resources Capital» (SRC)</option>
+        <option value="КУ" ${emp.tooPrimary==="КУ"?"selected":""}>ТОО «Караван Улытау» (КУ)</option>
+        <option value="CL" ${emp.tooPrimary==="CL"?"selected":""}>ТОО «Караван Логистик» (CL)</option>
+      </select>
+      <select id="editTooSecondary" style="padding:10px;border:1px solid var(--border);border-radius:8px">
+        <option value="" ${!emp.tooSecondary?"selected":""}>Второе ТОО — нет</option>
+        <option value="SRC" ${emp.tooSecondary==="SRC"?"selected":""}>ТОО «Saryarka Resources Capital» (SRC)</option>
+        <option value="КУ" ${emp.tooSecondary==="КУ"?"selected":""}>ТОО «Караван Улытау» (КУ)</option>
+        <option value="CL" ${emp.tooSecondary==="CL"?"selected":""}>ТОО «Караван Логистик» (CL)</option>
+      </select>
+      <input id="editPhone" placeholder="Телефон" value="${esc(emp.phone)}" style="padding:10px;border:1px solid var(--border);border-radius:8px">
+      <input id="editEmail" type="email" placeholder="Электронная почта" value="${esc(emp.email)}" style="padding:10px;border:1px solid var(--border);border-radius:8px">
+      <input id="editAddress" placeholder="Адрес" value="${esc(emp.address)}" style="padding:10px;border:1px solid var(--border);border-radius:8px">
+      <select id="editEducation" style="padding:10px;border:1px solid var(--border);border-radius:8px">
+        <option value="" ${!emp.education?"selected":""}>Образование — не указано</option>
+        <option value="Среднее общее" ${emp.education==="Среднее общее"?"selected":""}>Среднее общее</option>
+        <option value="Среднее специальное (ТиПО)" ${emp.education==="Среднее специальное (ТиПО)"?"selected":""}>Среднее специальное (ТиПО)</option>
+        <option value="Незаконченное высшее" ${emp.education==="Незаконченное высшее"?"selected":""}>Незаконченное высшее</option>
+        <option value="Высшее техническое" ${emp.education==="Высшее техническое"?"selected":""}>Высшее техническое</option>
+        <option value="Высшее нетехническое" ${emp.education==="Высшее нетехническое"?"selected":""}>Высшее нетехническое</option>
+      </select>
+      <input id="editExperience" type="number" min="0" max="60" placeholder="Стаж по профессии (лет)" value="${esc(emp.experienceYears)}" style="padding:10px;border:1px solid var(--border);border-radius:8px">
+      <div style="font-size:11px;color:var(--gray);margin-top:4px">Имеющиеся специальности:</div>
+      <div id="editSpecialtiesBox" style="border:1px solid var(--border);border-radius:8px;padding:10px;max-height:180px;overflow-y:auto">
+        ${EDIT_POSITIONS.map(s => `
+          <label style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px">
+            <input type="checkbox" class="edit-spec-check" value="${s}" ${specList.includes(s)?"checked":""}> ${s}
+          </label>
+        `).join("")}
+      </div>
+      <textarea id="editAdditionalSkills" placeholder="Доп. компетенции: тренер, инженер, кат. Б и т.п." rows="2" style="padding:10px;border:1px solid var(--border);border-radius:8px;font-family:inherit;resize:vertical">${emp.additionalSkills||""}</textarea>
+      <textarea id="editCertificates" placeholder="Сертификаты" rows="2" style="padding:10px;border:1px solid var(--border);border-radius:8px;font-family:inherit;resize:vertical">${emp.certificates||""}</textarea>
+      <textarea id="editCourses" placeholder="Курсы" rows="2" style="padding:10px;border:1px solid var(--border);border-radius:8px;font-family:inherit;resize:vertical">${emp.courses||""}</textarea>
+      <label style="font-size:11px;color:var(--gray)">Дата приёма
+        <input id="editHireDate" type="date" value="${toDateInputValue(emp.hireDate)}" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;margin-top:4px">
+      </label>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:16px">
+      <button class="btn btn-ghost" onclick="closeModal()" style="flex:1">Отмена</button>
+      <button class="btn btn-gold" onclick="submitEditEmployee('${emp.id}')" style="flex:1">💾 Сохранить</button>
+    </div>
+  `);
+}
+
+async function submitEditEmployee(id) {
+  const name = document.getElementById("editName").value.trim();
+  if (!name) { alert("Укажите ФИО"); return; }
+
+  const body = {
+    action: "updateEmployee",
+    id,
+    name,
+    position: getPositionValue("edit"),
+    site: document.getElementById("editSite").value,
+    tooPrimary: document.getElementById("editToo").value,
+    tooSecondary: document.getElementById("editTooSecondary").value,
+    phone: document.getElementById("editPhone").value.trim(),
+    email: document.getElementById("editEmail").value.trim(),
+    address: document.getElementById("editAddress").value.trim(),
+    hireDate: document.getElementById("editHireDate").value,
+    education: document.getElementById("editEducation").value,
+    experienceYears: document.getElementById("editExperience").value,
+    specialties: Array.from(document.querySelectorAll(".edit-spec-check:checked")).map(c=>c.value).join(", "),
+    additionalSkills: document.getElementById("editAdditionalSkills").value.trim(),
+    certificates: document.getElementById("editCertificates").value.trim(),
+    courses: document.getElementById("editCourses").value.trim(),
+  };
+
+  try {
+    const res = await fetch(CFG.SHEET_URL, { method:"POST", body: JSON.stringify(body) });
+    const data = await res.json();
+    if (data.ok) {
+      closeModal();
+      await loadAll();
+      selectPersonnelEmployee(id);
+    } else {
+      alert("Ошибка: " + (data.error||"неизвестная"));
+    }
+  } catch(e) {
+    alert("Ошибка сети: " + e);
+  }
+}
+
+// ══════════════════════════════════════════════════════
+// РЕДАКТИРОВАНИЕ / УДАЛЕНИЕ ЗАПИСЕЙ ЛИЧНОГО ДЕЛА
+// ══════════════════════════════════════════════════════
+function toDateInputValue(s) {
+  const d = parseRecordDate(s);
+  if (!d) return "";
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth()+1).padStart(2,"0");
+  const dd = String(d.getDate()).padStart(2,"0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function openEditEventModal(row) {
+  const ev = (DATA.personnelEvents||[]).find(e => e.__row === row);
+  if (!ev) { alert("Запись не найдена — обновите список"); return; }
+
+  openModal(`
+    <div style="font-size:16px;font-weight:800;color:var(--navy);margin-bottom:16px">✏ Событие — ${ev.empName||""}</div>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <select id="editEventType" style="padding:10px;border:1px solid var(--border);border-radius:8px">
+        <option value="поощрение" ${ev.type==="поощрение"?"selected":""}>Поощрение</option>
+        <option value="награда" ${ev.type==="награда"?"selected":""}>Награда</option>
+        <option value="взыскание" ${ev.type==="взыскание"?"selected":""}>Взыскание</option>
+      </select>
+      <textarea id="editEventDescription" placeholder="Описание" rows="3"
+        style="padding:10px;border:1px solid var(--border);border-radius:8px;font-family:inherit;resize:vertical">${ev.description||""}</textarea>
+      <input id="editEventIssuedBy" placeholder="Кем оформлено" value="${(ev.issuedBy||"").replace(/"/g,"&quot;")}" style="padding:10px;border:1px solid var(--border);border-radius:8px">
+      <label style="font-size:11px;color:var(--gray)">Дата
+        <input id="editEventDate" type="date" value="${toDateInputValue(ev.date)}" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;margin-top:4px">
+      </label>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:16px">
+      <button class="btn btn-ghost" onclick="closeModal()" style="flex:1">Отмена</button>
+      <button class="btn btn-gold" onclick="submitEditEvent(${ev.__row},'${ev.empId}')" style="flex:1">💾 Сохранить</button>
+    </div>
+  `);
+}
+
+async function submitEditEvent(row, empId) {
+  const body = {
+    action: "updatePersonnelEvent",
+    row, empId,
+    type: document.getElementById("editEventType").value,
+    description: document.getElementById("editEventDescription").value.trim(),
+    issuedBy: document.getElementById("editEventIssuedBy").value.trim(),
+    date: document.getElementById("editEventDate").value,
+  };
+  try {
+    const res = await fetch(CFG.SHEET_URL, { method:"POST", body: JSON.stringify(body) });
+    const data = await res.json();
+    if (data.ok) {
+      closeModal();
+      await loadAll();
+      if (CURRENT_PROFILE_ID) selectPersonnelEmployee(CURRENT_PROFILE_ID);
+    } else {
+      alert("Ошибка: " + (data.error||"неизвестная"));
+    }
+  } catch(e) {
+    alert("Ошибка сети: " + e);
+  }
+}
+
+function deletePersonnelEventConfirm(row, empId) {
+  if (!confirm("Удалить эту запись из личного дела? Действие необратимо.")) return;
+  (async () => {
+    try {
+      const res = await fetch(CFG.SHEET_URL, { method:"POST", body: JSON.stringify({ action:"deletePersonnelEvent", row, empId }) });
+      const data = await res.json();
+      if (data.ok) {
+        await loadAll();
+        if (CURRENT_PROFILE_ID) selectPersonnelEmployee(CURRENT_PROFILE_ID);
+      } else {
+        alert("Ошибка: " + (data.error||"неизвестная"));
+      }
+    } catch(e) {
+      alert("Ошибка сети: " + e);
+    }
+  })();
 }
 
 // ══════════════════════════════════════════════════════
