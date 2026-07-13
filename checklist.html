@@ -100,8 +100,8 @@ input:focus, select:focus, textarea:focus { border-color:var(--gold); }
 .error-title { font-size:16px; font-weight:800; color:var(--red); margin-bottom:8px; }
 .error-sub { font-size:13px; color:var(--gray); line-height:1.6; }
 
-#screenLoading, #screenSearch, #screenForm, #screenSuccess, #screenError { display:none; }
-#screenLoading.active, #screenSearch.active, #screenForm.active, #screenSuccess.active, #screenError.active { display:block; }
+#screenLoading, #screenSearch, #screenForm, #screenSuccess, #screenError, #screenHub, #screenFuelForm { display:none; }
+#screenLoading.active, #screenSearch.active, #screenForm.active, #screenSuccess.active, #screenError.active, #screenHub.active, #screenFuelForm.active { display:block; }
 </style>
 </head>
 <body>
@@ -124,14 +124,36 @@ input:focus, select:focus, textarea:focus { border-color:var(--gold); }
     </div>
   </div>
 
+  <!-- ЭКРАН: выбор действия -->
+  <div id="screenHub">
+    <div class="card" style="text-align:center">
+      <div class="card-title" id="hubEquipmentTitle" style="margin-bottom:16px"></div>
+      <button class="btn btn-gold" style="margin-bottom:10px" onclick="startFlow('inspection')">📋 Провести осмотр</button>
+      <button class="btn btn-ghost" onclick="startFlow('fuel')">⛽ Записать заправку</button>
+    </div>
+  </div>
+
+  <!-- ЭКРАН: форма заправки (короткая) -->
+  <div id="screenFuelForm">
+    <div id="fuelSelectedBoxWrap"></div>
+    <div class="card">
+      <div class="card-title" id="fuelEquipmentTitle"></div>
+      <label class="label" style="font-size:12px;font-weight:700;color:var(--gray);margin-bottom:6px;display:block">Количество топлива (литры)</label>
+      <input type="number" id="fuelAmount" min="0" step="1" placeholder="Например: 150">
+    </div>
+    <div id="fuelHint" class="hint" style="text-align:center"></div>
+    <button class="btn btn-gold" id="fuelSubmitBtn" onclick="submitFuel()">Записать заправку</button>
+  </div>
+
   <!-- ЭКРАН: найти себя -->
   <div id="screenSearch">
     <div class="card">
-      <div class="card-title">Кто проводит осмотр?</div>
+      <div class="card-title" id="searchTitle">Кто проводит осмотр?</div>
       <div class="hint">Начните вводить фамилию.</div>
       <input type="text" id="empSearch" placeholder="🔍 Введите фамилию..." oninput="renderEmpList(this.value)">
       <div id="empList"></div>
     </div>
+    <button class="btn btn-ghost" onclick="showScreen('Hub')">← Назад</button>
   </div>
 
   <!-- ЭКРАН: форма чек-листа -->
@@ -144,8 +166,8 @@ input:focus, select:focus, textarea:focus { border-color:var(--gold); }
     </div>
 
     <div class="card" id="fuelCard" style="display:none">
-      <div class="card-title">Уровень топлива (%)</div>
-      <input type="number" id="fuelLevel" min="0" max="100" placeholder="Например: 75">
+      <div class="card-title" id="fuelCardTitle">Уровень топлива</div>
+      <input type="number" id="fuelLevel" min="0" placeholder="Введите количество">
     </div>
 
     <div class="card" id="itemsCard"></div>
@@ -164,8 +186,8 @@ input:focus, select:focus, textarea:focus { border-color:var(--gold); }
   <div id="screenSuccess">
     <div class="card success-box">
       <div class="success-icon">✅</div>
-      <div class="success-title">Чек-лист отправлен</div>
-      <div class="success-sub">Спасибо! Осмотр зафиксирован.</div>
+      <div class="success-title" id="successTitle">Готово</div>
+      <div class="success-sub" id="successSub">Спасибо! Данные зафиксированы.</div>
     </div>
   </div>
 </div>
@@ -182,7 +204,7 @@ let selected = null;
 let itemStates = {}; // itemKey -> {status: "ok"|"defect", comment: ""}
 
 function showScreen(name) {
-  ["Loading","Error","Search","Form","Success"].forEach(s => {
+  ["Loading","Error","Search","Form","Success","Hub","FuelForm"].forEach(s => {
     document.getElementById("screen"+s).classList.remove("active");
   });
   document.getElementById("screen"+name).classList.add("active");
@@ -220,26 +242,38 @@ async function init() {
       return;
     }
 
-    if (!equipment.templateId) {
-      showError("Шаблон не назначен", `Для техники «${equipmentId}» ещё не выбран шаблон чек-листа. Обратитесь к инструктору.`);
-      return;
-    }
-
-    template = (tplRes||[]).find(t => t.id === equipment.templateId);
-    if (!template) {
-      showError("Шаблон не найден", `Шаблон «${equipment.templateId}» не найден на сервере. Обратитесь к инструктору.`);
-      return;
+    // Шаблон нужен только для осмотра, не для заправки — проверяем мягко,
+    // ошибку покажем только если человек выберет "Провести осмотр".
+    if (equipment.templateId) {
+      template = (tplRes||[]).find(t => t.id === equipment.templateId);
     }
 
     EMPLOYEES = (empRes||[]).map(e => ({ id:e.id, name:e.name, position:e.position }));
 
-    document.getElementById("pageTitle").textContent = template.title;
+    document.getElementById("pageTitle").textContent = equipment.model || "Осмотр техники";
     document.getElementById("pageSubtitle").textContent = "Caravan Resources · " + equipment.equipmentId;
+    document.getElementById("hubEquipmentTitle").textContent = `${equipment.equipmentId} — ${equipment.model}`;
 
-    showScreen("Search");
+    showScreen("Hub");
   } catch(e) {
     showError("Ошибка соединения", "Не удалось загрузить данные. Проверьте интернет и обновите страницу.");
   }
+}
+
+let flowMode = "inspection"; // "inspection" или "fuel" — куда ведёт поиск сотрудника
+
+function startFlow(mode) {
+  flowMode = mode;
+  if (mode === "inspection" && !equipment.templateId) {
+    showError("Шаблон не назначен", `Для техники «${equipment.equipmentId}» ещё не выбран шаблон чек-листа. Обратитесь к инструктору.`);
+    return;
+  }
+  if (mode === "inspection" && !template) {
+    showError("Шаблон не найден", `Шаблон «${equipment.templateId}» не найден на сервере. Обратитесь к инструктору.`);
+    return;
+  }
+  document.getElementById("searchTitle").textContent = mode === "fuel" ? "Кто заправляет?" : "Кто проводит осмотр?";
+  showScreen("Search");
 }
 
 function renderEmpList(query) {
@@ -248,7 +282,11 @@ function renderEmpList(query) {
   if (!q) { list.innerHTML = ""; return; }
   const filtered = EMPLOYEES.filter(e => String(e.name||"").toLowerCase().includes(q)).slice(0, 8);
   if (filtered.length === 0) {
-    list.innerHTML = `<div style="padding:12px;color:var(--gray);font-size:13px;text-align:center">Не найдено. Обратитесь к инструктору, если вас нет в списке.</div>`;
+    list.innerHTML = `<div style="padding:12px;color:var(--gray);font-size:13px;text-align:center">
+      Не найдено. Если вас нет в базе — заполните
+      <a href="anketa.html" style="color:var(--navy2);font-weight:700">анкету</a>,
+      после подтверждения инструктором вы сможете проводить осмотры.
+    </div>`;
     return;
   }
   list.innerHTML = filtered.map(e => `
@@ -264,7 +302,71 @@ function renderEmpList(query) {
 
 function pickEmployee(emp) {
   selected = emp;
-  showForm();
+  if (flowMode === "fuel") {
+    showFuelForm();
+  } else {
+    showForm();
+  }
+}
+
+function showFuelForm() {
+  document.getElementById("fuelSelectedBoxWrap").innerHTML = `
+    <div class="selected-box">
+      <div class="emp-avatar">${initials(selected.name)}</div>
+      <div>
+        <div class="name">${selected.name}</div>
+        <div style="font-size:11px;color:var(--gray)">${selected.position||"—"}</div>
+      </div>
+      <span class="change" onclick="showScreen('Search')">изменить</span>
+    </div>
+  `;
+  document.getElementById("fuelEquipmentTitle").textContent = `${equipment.equipmentId} — ${equipment.model}`;
+  document.getElementById("fuelAmount").value = "";
+  document.getElementById("fuelHint").textContent = "";
+  showScreen("FuelForm");
+}
+
+async function submitFuel() {
+  const amount = document.getElementById("fuelAmount").value;
+  const hint = document.getElementById("fuelHint");
+  if (!amount || Number(amount) <= 0) {
+    hint.style.color = "var(--red)";
+    hint.textContent = "Укажите количество литров";
+    return;
+  }
+
+  const btn = document.getElementById("fuelSubmitBtn");
+  btn.disabled = true;
+  btn.textContent = "Отправка...";
+
+  try {
+    const res = await fetch(CFG.SHEET_URL, {
+      method: "POST",
+      body: JSON.stringify({
+        action: "submitFuelRecord",
+        equipmentId: equipment.equipmentId,
+        empId: selected.id,
+        empName: selected.name,
+        amountLiters: amount,
+      })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      document.getElementById("successTitle").textContent = "Заправка записана";
+      document.getElementById("successSub").textContent = `${amount} л добавлено в ${equipment.equipmentId}.`;
+      showScreen("Success");
+    } else {
+      hint.style.color = "var(--red)";
+      hint.textContent = "Ошибка: " + (data.error||"неизвестная");
+      btn.disabled = false;
+      btn.textContent = "Записать заправку";
+    }
+  } catch(e) {
+    hint.style.color = "var(--red)";
+    hint.textContent = "Ошибка сети. Проверьте интернет.";
+    btn.disabled = false;
+    btn.textContent = "Записать заправку";
+  }
 }
 
 function showForm() {
@@ -283,7 +385,13 @@ function showForm() {
   document.getElementById("equipmentSubtitle").textContent = (equipment.type||"") + (equipment.site?" · "+equipment.site:"");
 
   if (template.fuelLevelField) {
+    const f = template.fuelLevelField;
     document.getElementById("fuelCard").style.display = "block";
+    document.getElementById("fuelCardTitle").textContent = `${f.label} (${f.unit||""})`;
+    const fuelInput = document.getElementById("fuelLevel");
+    fuelInput.min = f.min ?? 0;
+    if (f.max != null) fuelInput.max = f.max;
+    fuelInput.placeholder = f.unit === "%" ? "Например: 75" : "Например: 150";
   }
 
   itemStates = {};
@@ -361,6 +469,8 @@ async function submitChecklist() {
     });
     const data = await res.json();
     if (data.ok) {
+      document.getElementById("successTitle").textContent = "Чек-лист отправлен";
+      document.getElementById("successSub").textContent = "Спасибо! Осмотр зафиксирован.";
       showScreen("Success");
     } else {
       hint.style.color = "var(--red)";
