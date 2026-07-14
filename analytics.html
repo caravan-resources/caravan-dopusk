@@ -156,9 +156,9 @@ function logout() {
 async function loadAll() {
   try {
     const [eq, records, fuel] = await Promise.all([
-      fetch(`${CFG.SHEET_URL}?action=getEquipment`).then(r=>r.json()),
-      fetch(`${CFG.SHEET_URL}?action=getChecklistRecords`).then(r=>r.json()),
-      fetch(`${CFG.SHEET_URL}?action=getFuelRecords`).then(r=>r.json()),
+      fetch(`${CFG.SHEET_URL}?action=getEquipment`, {cache:"no-store"}).then(r=>r.json()),
+      fetch(`${CFG.SHEET_URL}?action=getChecklistRecords`, {cache:"no-store"}).then(r=>r.json()),
+      fetch(`${CFG.SHEET_URL}?action=getFuelRecords`, {cache:"no-store"}).then(r=>r.json()),
     ]);
     DATA.equipment = Array.isArray(eq) ? eq : [];
     DATA.checklistRecords = Array.isArray(records) ? records : [];
