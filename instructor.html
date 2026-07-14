@@ -211,6 +211,7 @@ tr:hover td { background:#FAFBFD; }
     <button id="navSurveys" onclick="showTab('surveys')">📋 Анкеты <span id="surveyBadge" style="display:none;background:var(--red);color:#fff;border-radius:99px;padding:1px 7px;font-size:11px;margin-left:4px"></span></button>
     <button id="navEquipment" onclick="showTab('equipment')">🚜 Техника</button>
     <button id="navFuel"     onclick="showTab('fuel')">⛽ Топливо</button>
+    <button id="navReports"  onclick="showTab('reports')">📄 Отчёты</button>
     <button id="navImport"   onclick="showTab('import')">➕ Импорт теста</button>
   </nav>
 
@@ -430,7 +431,10 @@ tr:hover td { background:#FAFBFD; }
       <div class="panel">
         <div class="panel-title">
           Проведённые осмотры
-          <button class="btn btn-ghost" onclick="loadAll()">🔄 Обновить</button>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-ghost" onclick="exportChecklistCSV()">⬇️ Скачать CSV</button>
+            <button class="btn btn-ghost" onclick="loadAll()">🔄 Обновить</button>
+          </div>
         </div>
         <div id="checklistRecordsList"></div>
       </div>
@@ -470,9 +474,34 @@ tr:hover td { background:#FAFBFD; }
       <div class="panel">
         <div class="panel-title">
           Записи заправок
-          <button class="btn btn-ghost" onclick="loadAll()">🔄 Обновить</button>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-ghost" onclick="exportFuelCSV()">⬇️ Скачать CSV</button>
+            <button class="btn btn-ghost" onclick="loadAll()">🔄 Обновить</button>
+          </div>
         </div>
         <div id="fuelRecordsList"></div>
+      </div>
+    </div>
+
+    <!-- ══ ОТЧЁТЫ ══ -->
+    <div id="tabReports" class="screen">
+      <div class="panel">
+        <div class="panel-title">
+          📄 Сформировать отчёт
+          <div style="display:flex;gap:6px" id="reportPeriodButtons"></div>
+        </div>
+        <div class="hint" style="margin-bottom:12px">
+          Текстовая сводка по топливу и осмотрам за выбранный период, с сравнением к предыдущему такому же периоду.
+        </div>
+        <button class="btn btn-gold" style="width:auto;padding:10px 20px" onclick="generateReport()">📄 Сформировать отчёт</button>
+      </div>
+
+      <div class="panel" id="reportOutputPanel" style="display:none">
+        <div class="panel-title">
+          Отчёт
+          <button class="btn btn-ghost" onclick="copyReportText()">📋 Скопировать текст</button>
+        </div>
+        <div id="reportOutput" style="font-size:13px;line-height:1.7;color:var(--navy)"></div>
       </div>
     </div>
 
@@ -881,13 +910,14 @@ function renderAll() {
   renderChecklistAnalytics();
   renderFuelAnalytics();
   renderFuelRecordsList();
+  renderReportPeriodButtons();
 }
 
 // ══════════════════════════════════════════════════════
 // НАВИГАЦИЯ
 // ══════════════════════════════════════════════════════
 function showTab(name) {
-  ["dash","tests","access","alerts","print","certPrint","training","personnel","surveys","equipment","fuel","import"].forEach(t => {
+  ["dash","tests","access","alerts","print","certPrint","training","personnel","surveys","equipment","fuel","reports","import"].forEach(t => {
     document.getElementById("tab"+cap(t)).classList.remove("active");
     document.getElementById("nav"+cap(t)).classList.remove("active");
   });
@@ -3245,6 +3275,179 @@ function renderFuelRecordsList() {
       </div>
     `;
   }).join("");
+}
+
+// ══════════════════════════════════════════════════════
+// ЭКСПОРТ CSV (использует уже существующую downloadCSV(rows, filename), см. выше)
+// ══════════════════════════════════════════════════════
+function exportFuelCSV() {
+  const headers = ["Дата и время","Техника","Модель","Сотрудник","Смена","Литры"];
+  const rows = (DATA.fuel || []).map(f => {
+    const eq = (DATA.equipment||[]).find(e => String(e.equipmentId)===String(f.equipmentId));
+    const d = parseRecordDate(f.date);
+    return [
+      fmtRecordDateTime(f.date),
+      f.equipmentId || "",
+      eq ? eq.model : "",
+      f.empName || "",
+      d ? fuelShiftOf(d) : "",
+      Number(f.amountLiters) || 0,
+    ];
+  });
+  downloadCSV([headers, ...rows], `Заправки_${today()}.csv`);
+}
+
+function exportChecklistCSV() {
+  const headers = ["Дата и время","Техника","Шаблон","Сотрудник","Раздел","Пункт","Статус","Комментарий"];
+  const rows = [];
+  (DATA.checklistRecords || []).forEach(rec => {
+    (rec.items || []).forEach(it => {
+      rows.push([
+        fmtRecordDateTime(rec.date),
+        rec.equipmentId || "",
+        rec.templateId || "",
+        rec.empName || "",
+        it.section || "",
+        it.itemText || "",
+        it.status === "defect" ? "Неисправно" : it.status === "ok" ? "Исправно" : (it.status||""),
+        it.comment || "",
+      ]);
+    });
+  });
+  downloadCSV([headers, ...rows], `Осмотры_${today()}.csv`);
+}
+
+// ══════════════════════════════════════════════════════
+// ОТЧЁТЫ — текстовые аналитические выводы за период
+// ══════════════════════════════════════════════════════
+let REPORT_PERIOD = "week"; // "day" | "week"
+
+function reportRange(period, offsetPeriods) {
+  // offsetPeriods=0 — текущий период, -1 — предыдущий такой же (для сравнения)
+  const now = new Date();
+  if (period === "day") {
+    const start = new Date(now); start.setHours(0,0,0,0); start.setDate(start.getDate() + offsetPeriods);
+    const end = new Date(start); end.setDate(end.getDate() + 1);
+    return [start, end];
+  }
+  const start = new Date(now); start.setHours(0,0,0,0); start.setDate(start.getDate() - 7 + offsetPeriods*7);
+  const end = new Date(start); end.setDate(end.getDate() + 7);
+  return [start, end];
+}
+
+function inRange(dateVal, start, end) {
+  const d = parseRecordDate(dateVal);
+  return d && d >= start && d < end;
+}
+
+function setReportPeriod(p) {
+  REPORT_PERIOD = p;
+  renderReportPeriodButtons();
+}
+
+function renderReportPeriodButtons() {
+  const el = document.getElementById("reportPeriodButtons");
+  if (!el) return;
+  el.innerHTML = [["day","Сутки"],["week","Неделя"]].map(([key,label]) => `
+    <button class="btn ${REPORT_PERIOD===key?'btn-gold':'btn-ghost'}" style="width:auto;padding:8px 12px;font-size:12px"
+      onclick="setReportPeriod('${key}')">${label}</button>
+  `).join("");
+}
+
+function pctChange(cur, prev) {
+  if (!prev) return cur ? "новое" : null;
+  const pct = Math.round((cur - prev) / prev * 100);
+  if (pct === 0) return "без изменений";
+  return (pct > 0 ? "+" : "") + pct + "%";
+}
+
+function generateReport() {
+  const period = REPORT_PERIOD;
+  const periodLabel = period === "day" ? "сутки" : "неделю";
+  const [start, end] = reportRange(period, 0);
+  const [prevStart, prevEnd] = reportRange(period, -1);
+
+  const fmtShort = d => `${String(d.getDate()).padStart(2,"0")}.${String(d.getMonth()+1).padStart(2,"0")}`;
+  const rangeLabel = `${fmtShort(start)}–${fmtShort(new Date(end - 1))}`;
+
+  // ── ТОПЛИВО ──
+  const fuelCur  = (DATA.fuel||[]).filter(f => inRange(f.date, start, end));
+  const fuelPrev = (DATA.fuel||[]).filter(f => inRange(f.date, prevStart, prevEnd));
+  const litersCur  = fuelCur.reduce((s,f)=>s+(Number(f.amountLiters)||0),0);
+  const litersPrev = fuelPrev.reduce((s,f)=>s+(Number(f.amountLiters)||0),0);
+
+  const fuelByEq = {};
+  fuelCur.forEach(f => { fuelByEq[f.equipmentId] = (fuelByEq[f.equipmentId]||0) + (Number(f.amountLiters)||0); });
+  const topFuel = Object.entries(fuelByEq).sort((a,b)=>b[1]-a[1]).slice(0,3);
+
+  // ── ОСМОТРЫ ──
+  const recCur  = (DATA.checklistRecords||[]).filter(r => inRange(r.date, start, end));
+  const recPrev = (DATA.checklistRecords||[]).filter(r => inRange(r.date, prevStart, prevEnd));
+
+  let defectsCur = 0, itemsCur = 0;
+  const defectTextCounts = {};
+  const inspectedEquipmentIds = new Set();
+  recCur.forEach(r => {
+    inspectedEquipmentIds.add(r.equipmentId);
+    (r.items||[]).forEach(it => {
+      itemsCur++;
+      if (it.status === "defect") {
+        defectsCur++;
+        defectTextCounts[it.itemText] = (defectTextCounts[it.itemText]||0) + 1;
+      }
+    });
+  });
+  const topDefects = Object.entries(defectTextCounts).sort((a,b)=>b[1]-a[1]).slice(0,3);
+
+  let defectsPrev = 0, itemsPrev = 0;
+  recPrev.forEach(r => (r.items||[]).forEach(it => { itemsPrev++; if (it.status==="defect") defectsPrev++; }));
+
+  const activeEquipment = (DATA.equipment||[]).filter(e => e.templateId);
+  const notInspected = activeEquipment.filter(e => !inspectedEquipmentIds.has(e.equipmentId));
+
+  // ── СБОРКА ТЕКСТА ──
+  const lines = [];
+  lines.push(`<div style="font-size:15px;font-weight:800;color:var(--navy);margin-bottom:4px">Отчёт за ${periodLabel} (${rangeLabel})</div>`);
+  lines.push(`<div style="font-size:11px;color:var(--gray);margin-bottom:16px">Сформирован ${fmtRecordDateTime(new Date().toISOString())}</div>`);
+
+  lines.push(`<div style="font-weight:700;color:var(--navy2);margin:14px 0 6px">⛽ Топливо</div>`);
+  const fuelChange = pctChange(litersCur, litersPrev);
+  lines.push(`<div>Заправок: <b>${fuelCur.length}</b>, всего <b>${litersCur.toLocaleString("ru-RU")} л</b>${fuelChange ? ` (к прошлому периоду: ${fuelChange})` : ""}.</div>`);
+  if (topFuel.length) {
+    lines.push(`<div style="margin-top:4px">Больше всего заправлялись: ${topFuel.map(([id,l]) => {
+      const eq = (DATA.equipment||[]).find(e=>String(e.equipmentId)===String(id));
+      return `<b>${id}</b>${eq ? ' ('+eq.model+')' : ''} — ${l.toLocaleString("ru-RU")} л`;
+    }).join(", ")}.</div>`);
+  } else {
+    lines.push(`<div style="margin-top:4px;color:var(--gray)">Заправок за период не было.</div>`);
+  }
+
+  lines.push(`<div style="font-weight:700;color:var(--navy2);margin:16px 0 6px">🔧 Осмотры и неисправности</div>`);
+  const defectRate = itemsCur ? Math.round(defectsCur/itemsCur*100) : 0;
+  const defectRatePrev = itemsPrev ? Math.round(defectsPrev/itemsPrev*100) : 0;
+  lines.push(`<div>Проведено осмотров: <b>${recCur.length}</b>. Найдено неисправностей: <b>${defectsCur}</b> из ${itemsCur} проверенных пунктов (${defectRate}%${itemsPrev ? `, было ${defectRatePrev}%` : ""}).</div>`);
+  if (topDefects.length) {
+    lines.push(`<div style="margin-top:4px">Чаще всего повторяется: ${topDefects.map(([t,c]) => `«${t}» (${c}×)`).join(", ")}.</div>`);
+  }
+  if (notInspected.length) {
+    lines.push(`<div style="margin-top:8px;color:var(--red)">⚠ Не проходили осмотр за период (${notInspected.length} ед.): ${notInspected.map(e=>e.equipmentId).join(", ")}.</div>`);
+  } else {
+    lines.push(`<div style="margin-top:8px;color:var(--green,#2E7D32)">Вся активная техника проходила осмотр хотя бы раз за период.</div>`);
+  }
+
+  document.getElementById("reportOutput").innerHTML = lines.join("\n");
+  document.getElementById("reportOutputPanel").style.display = "block";
+  document.getElementById("reportOutputPanel").scrollIntoView({ behavior:"smooth", block:"start" });
+}
+
+function copyReportText() {
+  const el = document.getElementById("reportOutput");
+  const text = el.innerText;
+  navigator.clipboard.writeText(text).then(() => {
+    alert("Текст отчёта скопирован в буфер обмена.");
+  }).catch(() => {
+    alert("Не удалось скопировать. Выделите текст отчёта вручную.");
+  });
 }
 
 async function submitChecklistImport() {
