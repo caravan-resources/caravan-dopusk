@@ -493,6 +493,10 @@ tr:hover td { background:#FAFBFD; }
         <div class="hint" style="margin-bottom:12px">
           Текстовая сводка по топливу и осмотрам за выбранный период, с сравнением к предыдущему такому же периоду.
         </div>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+          <label style="font-size:13px;color:var(--gray)">Тренд по конкретной машине (необязательно):</label>
+          <select id="reportTrendEquipment" style="max-width:280px"><option value="">— не выбрано —</option></select>
+        </div>
         <button class="btn btn-gold" style="width:auto;padding:10px 20px" onclick="generateReport()">📄 Сформировать отчёт</button>
       </div>
 
@@ -3352,6 +3356,15 @@ function renderReportPeriodButtons() {
     <button class="btn ${REPORT_PERIOD===key?'btn-gold':'btn-ghost'}" style="width:auto;padding:8px 12px;font-size:12px"
       onclick="setReportPeriod('${key}')">${label}</button>
   `).join("");
+
+  const sel = document.getElementById("reportTrendEquipment");
+  if (sel && sel.options.length <= 1) {
+    const prevVal = sel.value;
+    sel.innerHTML = `<option value="">— не выбрано —</option>` +
+      (DATA.equipment||[]).slice().sort((a,b)=>String(a.equipmentId).localeCompare(String(b.equipmentId)))
+        .map(e => `<option value="${e.equipmentId}">${e.equipmentId} — ${e.model}</option>`).join("");
+    sel.value = prevVal;
+  }
 }
 
 function pctChange(cur, prev) {
@@ -3359,6 +3372,96 @@ function pctChange(cur, prev) {
   const pct = Math.round((cur - prev) / prev * 100);
   if (pct === 0) return "без изменений";
   return (pct > 0 ? "+" : "") + pct + "%";
+}
+
+// ── Показания моточасов/пробега из чек-листов: [{date, value}], по возрастанию ──
+function getMeterReadings(equipmentId, itemText) {
+  const out = [];
+  (DATA.checklistRecords||[]).forEach(rec => {
+    if (String(rec.equipmentId) !== String(equipmentId)) return;
+    const item = (rec.items||[]).find(it => it.itemText === itemText);
+    if (!item || item.status === "" || item.status == null) return;
+    const val = Number(item.status);
+    if (isNaN(val)) return;
+    const d = parseRecordDate(rec.date);
+    if (!d) return;
+    out.push({ date: d, value: val });
+  });
+  out.sort((a,b) => a.date - b.date);
+  return out;
+}
+
+// ── Расход л/маш-час и л/100км: сравнивает крайние показания вокруг периода с суммой топлива за период ──
+function computeConsumptionRate(equipmentId, start, end) {
+  const fuelInPeriod = (DATA.fuel||[]).filter(f => String(f.equipmentId)===String(equipmentId) && inRange(f.date, start, end));
+  const liters = fuelInPeriod.reduce((s,f)=>s+(Number(f.amountLiters)||0),0);
+  if (!liters) return null;
+
+  function delta(readings) {
+    const upToEnd = readings.filter(r => r.date <= end);
+    if (upToEnd.length < 2) return null;
+    const first = upToEnd[0], last = upToEnd[upToEnd.length-1];
+    if (last.date <= start) return null; // все показания старше периода — сравнивать не с чем
+    const d = last.value - first.value;
+    return d > 0 ? d : null;
+  }
+
+  const dHours = delta(getMeterReadings(equipmentId, "Моточасы"));
+  const dKm    = delta(getMeterReadings(equipmentId, "Пробег (км)"));
+
+  return {
+    liters,
+    perHour:  dHours ? +(liters/dHours).toFixed(1) : null,
+    per100km: dKm    ? +(liters/dKm*100).toFixed(1) : null,
+  };
+}
+
+// ── Топ проблемной техники за всё время (не только за период) ──
+function allTimeTopDefective(limit) {
+  const counts = {};
+  (DATA.checklistRecords||[]).forEach(rec => {
+    (rec.items||[]).forEach(it => {
+      if (it.status === "defect") counts[rec.equipmentId] = (counts[rec.equipmentId]||0) + 1;
+    });
+  });
+  return Object.entries(counts).sort((a,b)=>b[1]-a[1]).slice(0, limit||5);
+}
+
+// ── Тренд по конкретной машине: неисправности по неделям за последние N недель ──
+function equipmentTrend(equipmentId, weeks) {
+  const now = new Date();
+  const buckets = [];
+  for (let i = weeks-1; i >= 0; i--) {
+    const end = new Date(now); end.setHours(0,0,0,0); end.setDate(end.getDate() - i*7);
+    const start = new Date(end); start.setDate(start.getDate()-7);
+    const recs = (DATA.checklistRecords||[]).filter(r => String(r.equipmentId)===String(equipmentId) && inRange(r.date, start, end));
+    let defects = 0, items = 0;
+    recs.forEach(r => (r.items||[]).forEach(it => { items++; if (it.status==="defect") defects++; }));
+    buckets.push({ start, osmotrs: recs.length, defects, items });
+  }
+  return buckets;
+}
+
+// ── Дисциплина осмотров по операторам за период ──
+function operatorDiscipline(recCur) {
+  const counts = {};
+  recCur.forEach(r => { const name = r.empName || "—"; counts[name] = (counts[name]||0) + 1; });
+  return Object.entries(counts).sort((a,b)=>b[1]-a[1]);
+}
+
+// ── Ночь vs день по неисправностям за период (та же граница смен, что и у топлива: 07:00–19:00 / 19:00–07:00) ──
+function shiftDefects(recCur) {
+  const out = { "День": {items:0, defects:0}, "Ночь": {items:0, defects:0} };
+  recCur.forEach(r => {
+    const d = parseRecordDate(r.date);
+    if (!d) return;
+    const shift = fuelShiftOf(d);
+    (r.items||[]).forEach(it => {
+      out[shift].items++;
+      if (it.status === "defect") out[shift].defects++;
+    });
+  });
+  return out;
 }
 
 function generateReport() {
@@ -3434,6 +3537,67 @@ function generateReport() {
   } else {
     lines.push(`<div style="margin-top:8px;color:var(--green,#2E7D32)">Вся активная техника проходила осмотр хотя бы раз за период.</div>`);
   }
+
+  // ── РАСХОД ТОПЛИВА НА МОТОЧАС / 100КМ ──
+  lines.push(`<div style="font-weight:700;color:var(--navy2);margin:16px 0 6px">📉 Расход топлива на моточас / 100км</div>`);
+  const rateRows = Object.keys(fuelByEq).map(id => ({ id, rate: computeConsumptionRate(id, start, end) }))
+    .filter(r => r.rate && (r.rate.perHour || r.rate.per100km));
+  if (rateRows.length) {
+    rateRows.forEach(r => {
+      const eq = (DATA.equipment||[]).find(e=>String(e.equipmentId)===String(r.id));
+      const parts = [];
+      if (r.rate.perHour)  parts.push(`${r.rate.perHour} л/маш-час`);
+      if (r.rate.per100km) parts.push(`${r.rate.per100km} л/100км`);
+      lines.push(`<div>${r.id}${eq?' ('+eq.model+')':''}: ${parts.join(", ")}</div>`);
+    });
+  } else {
+    lines.push(`<div style="color:var(--gray)">Пока недостаточно показаний моточасов/пробега из чек-листов, чтобы посчитать расход — нужно минимум два замера на машину в один период. Данные копятся по мере осмотров.</div>`);
+  }
+
+  // ── ТОП ПРОБЛЕМНОЙ ТЕХНИКИ ЗА ВСЁ ВРЕМЯ ──
+  lines.push(`<div style="font-weight:700;color:var(--navy2);margin:16px 0 6px">🏆 Топ проблемной техники за всё время</div>`);
+  const allTimeTop = allTimeTopDefective(5);
+  if (allTimeTop.length) {
+    lines.push(`<div>${allTimeTop.map(([id,c]) => {
+      const eq = (DATA.equipment||[]).find(e=>String(e.equipmentId)===String(id));
+      return `<b>${id}</b>${eq?' ('+eq.model+')':''} — ${c} неиспр.`;
+    }).join("; ")}.</div>`);
+  } else {
+    lines.push(`<div style="color:var(--gray)">Неисправностей за всё время ещё не зафиксировано.</div>`);
+  }
+
+  // ── ТРЕНД ПО ВЫБРАННОЙ МАШИНЕ ──
+  const trendEqId = (document.getElementById("reportTrendEquipment")||{}).value;
+  if (trendEqId) {
+    const eq = (DATA.equipment||[]).find(e=>String(e.equipmentId)===String(trendEqId));
+    lines.push(`<div style="font-weight:700;color:var(--navy2);margin:16px 0 6px">📈 Тренд по машине ${trendEqId}${eq?' ('+eq.model+')':''} — по неделям</div>`);
+    const trend = equipmentTrend(trendEqId, 6);
+    const withData = trend.filter(b => b.osmotrs > 0);
+    if (withData.length) {
+      lines.push(`<div>${trend.map(b => {
+        const wk = `${String(b.start.getDate()).padStart(2,"0")}.${String(b.start.getMonth()+1).padStart(2,"0")}`;
+        return `${wk}: ${b.osmotrs} осм., ${b.defects} неиспр.`;
+      }).join(" &nbsp;→&nbsp; ")}</div>`);
+    } else {
+      lines.push(`<div style="color:var(--gray)">Осмотров этой машины за последние 6 недель не было.</div>`);
+    }
+  }
+
+  // ── ДИСЦИПЛИНА ОСМОТРОВ ПО ОПЕРАТОРАМ ──
+  lines.push(`<div style="font-weight:700;color:var(--navy2);margin:16px 0 6px">👷 Кто проводил осмотры за период</div>`);
+  const opDiscipline = operatorDiscipline(recCur);
+  if (opDiscipline.length) {
+    lines.push(`<div>${opDiscipline.map(([name,c]) => `${name} — ${c}`).join("; ")}.</div>`);
+  } else {
+    lines.push(`<div style="color:var(--gray)">Осмотров за период не было.</div>`);
+  }
+
+  // ── НОЧЬ VS ДЕНЬ ПО ДЕФЕКТАМ ──
+  lines.push(`<div style="font-weight:700;color:var(--navy2);margin:16px 0 6px">🌙 Ночь vs ☀ день — неисправности</div>`);
+  const shiftD = shiftDefects(recCur);
+  const dayRate = shiftD["День"].items ? Math.round(shiftD["День"].defects/shiftD["День"].items*100) : 0;
+  const nightRate = shiftD["Ночь"].items ? Math.round(shiftD["Ночь"].defects/shiftD["Ночь"].items*100) : 0;
+  lines.push(`<div>День: ${shiftD["День"].defects} из ${shiftD["День"].items} пунктов (${dayRate}%). Ночь: ${shiftD["Ночь"].defects} из ${shiftD["Ночь"].items} пунктов (${nightRate}%).</div>`);
 
   document.getElementById("reportOutput").innerHTML = lines.join("\n");
   document.getElementById("reportOutputPanel").style.display = "block";
