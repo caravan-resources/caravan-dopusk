@@ -795,7 +795,10 @@ function jsonpFetch(url, callbackName) {
       resolve(data);
     };
     const script = document.createElement("script");
-    script.src = `${url}&callback=${callbackName}`;
+    // _=Date.now() — метка времени против кэширования браузером: без неё
+    // повторный запрос на тот же URL иногда отдавался из кэша <script>-тега,
+    // а не реально ходил на сервер за свежими данными.
+    script.src = `${url}&callback=${callbackName}&_=${Date.now()}`;
     script.onerror = () => { clearTimeout(timeout); reject(new Error("script error")); };
     document.head.appendChild(script);
   });
@@ -1082,9 +1085,9 @@ function renderDashboard() {
     </div>
   `).join("");
 
-  document.getElementById("defectsCount").textContent = recordsWithDefects.length ? `${recordsWithDefects.length} осмотр(ов)` : "";
-  document.getElementById("defectsList").innerHTML = recordsWithDefects.length
-    ? recordsWithDefects.slice(0,8).map(r => {
+  document.getElementById("defectsCount").textContent = recentDefects.length ? `${recentDefects.length} осмотр(ов)` : "";
+  document.getElementById("defectsList").innerHTML = recentDefects.length
+    ? recentDefects.slice(0,8).map(r => {
         const defects = r.items.filter(it=>it.status==="defect");
         const eq = equipment.find(e => String(e.equipmentId)===String(r.equipmentId));
         const eqLabel = eq ? `${eq.equipmentId} — ${eq.model}` : r.equipmentId;
@@ -1101,7 +1104,7 @@ function renderDashboard() {
           </div>
         `;
       }).join("")
-    : `<div class="empty"><div class="empty-icon">✓</div>Неисправностей не найдено</div>`;
+    : `<div class="empty"><div class="empty-icon">✓</div>Неисправностей за последние 7 дней не найдено</div>`;
 }
 
 // ══════════════════════════════════════════════════════
