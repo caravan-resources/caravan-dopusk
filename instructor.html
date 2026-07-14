@@ -292,6 +292,24 @@ tr:hover td { background:#FAFBFD; }
         </div>
         <div style="margin-top:8px;font-size:12px;color:var(--gray)" id="testsCount"></div>
       </div>
+
+      <div class="panel">
+        <div class="panel-title">🎯 Требования по должностям — какие тесты обязательны</div>
+        <div class="hint" style="margin-bottom:12px">
+          Сверка идёт по точному совпадению строки должности. Если у людей одна и та же должность записана
+          по-разному («Машинист экскаватора» / «Машинист гидравлического экскаватора») — требование сработает
+          только для точного варианта, который вы выберете ниже.
+        </div>
+        <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px">
+          <div style="flex:1;min-width:240px">
+            <label style="font-size:12px;font-weight:700;color:var(--gray);display:block;margin-bottom:4px">Должность</label>
+            <select id="reqPositionSelect" style="width:100%"></select>
+          </div>
+          <div id="reqTestChecks" style="display:flex;gap:14px;flex-wrap:wrap"></div>
+          <button class="btn btn-gold" style="width:auto;padding:9px 18px" onclick="saveRequirementFromUI()">Сохранить</button>
+        </div>
+        <div id="requirementsList"></div>
+      </div>
     </div>
 
     <!-- ══ СРОКИ ДОПУСКОВ ══ -->
@@ -861,6 +879,15 @@ async function loadAll() {
     DATA.requirements = [];
   }
 
+  // Тесты — нужны для выбора при задании требований по должностям
+  try {
+    const d = await jsonpFetch(`${CFG.SHEET_URL}?action=getTests`, "cb_tests");
+    DATA.tests = Array.isArray(d) ? d : [];
+  } catch(e) {
+    console.error("Тесты:", e);
+    DATA.tests = [];
+  }
+
   // Личное дело — поощрения, награды, взыскания
   try {
     const d = await jsonpFetch(`${CFG.SHEET_URL}?action=getPersonnelEvents`, "cb_personnel_events");
@@ -922,6 +949,7 @@ async function loadAll() {
 function renderAll() {
   renderDashboard();
   renderTestsTable();
+  renderRequirementsPanel();
   renderAccessTable();
   renderAlerts();
   renderPrintSelect();
@@ -1186,6 +1214,80 @@ function renderTestsTable() {
       <td style="color:var(--gray)">${dur}</td>
     </tr>`;
   }).join("");
+}
+
+// ══════════════════════════════════════════════════════
+// ТРЕБОВАНИЯ ПО ДОЛЖНОСТЯМ — какие тесты обязательны для позиции.
+// Использует уже существующий backend (getRequirements/saveRequirement,
+// был в коде с самого начала, но фронтенда для него не было).
+// ══════════════════════════════════════════════════════
+function renderRequirementsPanel() {
+  const posSel = document.getElementById("reqPositionSelect");
+  const checksEl = document.getElementById("reqTestChecks");
+  const listEl = document.getElementById("requirementsList");
+  if (!posSel || !checksEl || !listEl) return;
+
+  // Список должностей — реально встречающиеся у сотрудников, без пустых,
+  // отсортированы по частоте (самые массовые — сверху, их обычно и настраивают первыми).
+  const posCounts = {};
+  (DATA.employees||[]).forEach(e => { if (e.position) posCounts[e.position] = (posCounts[e.position]||0)+1; });
+  const positions = Object.entries(posCounts).sort((a,b)=>b[1]-a[1]);
+
+  if (posSel.options.length === 0) {
+    posSel.innerHTML = positions.map(([p,c]) => `<option value="${p.replace(/"/g,'&quot;')}">${p} (${c} чел.)</option>`).join("");
+    posSel.onchange = () => renderRequirementsPanel();
+  }
+
+  const tests = DATA.tests || [];
+  const currentPos = posSel.value || (positions[0] ? positions[0][0] : "");
+  const existing = (DATA.requirements||[]).find(r => String(r.position||"").trim().toLowerCase() === String(currentPos).trim().toLowerCase());
+  const checkedIds = new Set(existing ? existing.requiredTests : []);
+
+  checksEl.innerHTML = tests.map(t => `
+    <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
+      <input type="checkbox" class="req-test-check" value="${t.id}" ${checkedIds.has(t.id)?"checked":""}>
+      ${t.title}
+    </label>
+  `).join("") || `<span style="font-size:12px;color:var(--gray)">Тестов в системе пока нет</span>`;
+
+  // Список уже заданных требований — с возможностью быстро перейти к редактированию
+  const withReq = (DATA.requirements||[]).filter(r => r.requiredTests && r.requiredTests.length);
+  listEl.innerHTML = withReq.length
+    ? `<div style="font-size:12px;font-weight:700;color:var(--gray);margin:12px 0 6px">Уже задано (${withReq.length}):</div>` +
+      withReq.map(r => {
+        const titles = r.requiredTests.map(tid => (tests.find(t=>t.id===tid)||{}).title || tid).join(", ");
+        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px">
+          <div><b>${r.position}</b> <span style="color:var(--gray)">— ${titles}</span></div>
+          <button class="btn btn-ghost" style="width:auto;padding:4px 12px;font-size:12px" onclick="editRequirement('${r.position.replace(/'/g,"\\'")}')">Изменить</button>
+        </div>`;
+      }).join("")
+    : `<div style="font-size:12px;color:var(--gray);margin-top:12px">Пока ни для одной должности требования не заданы.</div>`;
+}
+
+function editRequirement(position) {
+  const sel = document.getElementById("reqPositionSelect");
+  sel.value = position;
+  renderRequirementsPanel();
+  sel.scrollIntoView({ behavior:"smooth", block:"center" });
+}
+
+async function saveRequirementFromUI() {
+  const position = document.getElementById("reqPositionSelect").value;
+  if (!position) { alert("Выберите должность"); return; }
+  const requiredTests = Array.from(document.querySelectorAll(".req-test-check:checked")).map(c => c.value);
+
+  try {
+    const res = await fetch(CFG.SHEET_URL, { method:"POST", body: JSON.stringify({ action:"saveRequirement", position, requiredTests }) });
+    const data = await res.json();
+    if (data.ok) {
+      alert(`Требования для «${position}» сохранены.`);
+      await loadAll();
+    } else {
+      alert("Ошибка: " + (data.error || "неизвестная"));
+    }
+  } catch(e) {
+    alert("Ошибка сети: " + e.message);
+  }
 }
 
 function exportTestsCSV() {
