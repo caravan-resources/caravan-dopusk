@@ -1319,7 +1319,7 @@ function renderAccessTable() {
 
   let emps = DATA.employees.filter(e => {
     if (q && !(e.name||"").toLowerCase().includes(q)) return false;
-    if (fs!=="all" && e.site!==fs) return false;
+    if (fs!=="all" && (e.site||"").trim()!==fs) return false;
     if (fst!=="all" && statusOf(e)!==fst) return false;
     return true;
   }).sort((a,b)=>(daysLeft(a.validUntil)||999)-(daysLeft(b.validUntil)||999));
@@ -1642,7 +1642,7 @@ function renderPrintSelect() {
   // Поиск активен — фильтруем и показываем
   const emps = DATA.employees.filter(e => {
     if (q && !(e.name||"").toLowerCase().includes(q)) return false;
-    if (fs !== "all" && e.site !== fs) return false;
+    if (fs !== "all" && (e.site||"").trim() !== fs) return false;
     return true;
   });
 
@@ -1806,7 +1806,7 @@ function cardHTML(emp) {
 }
 
 
-function printCards() {
+async function printCards() {
   if (printSelected.size === 0) { alert("Выберите сотрудников для печати"); return; }
   const selected = DATA.employees.filter(e=>printSelected.has(e.id));
 
@@ -1818,6 +1818,22 @@ function printCards() {
   area.style.cssText = "display:none";
   area.innerHTML = selected.map(e=>cardHTML(e)).join("");
   document.body.appendChild(area);
+
+  // Без этой паузы Chrome иногда успевает открыть диалог печати раньше,
+  // чем реально отрисует карточки и догрузит фото с Google Drive —
+  // печатается пустой белый лист. Ждём и загрузку картинок, и пару
+  // кадров отрисовки, прежде чем звать печать.
+  const images = Array.from(area.querySelectorAll("img"));
+  await Promise.all(images.map(img => {
+    if (img.complete) return Promise.resolve();
+    return new Promise(resolve => {
+      img.addEventListener("load", resolve, { once:true });
+      img.addEventListener("error", resolve, { once:true });
+      setTimeout(resolve, 4000); // не ждём вечно, если фото не грузится
+    });
+  }));
+  await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+
   window.print();
 }
 
@@ -2116,7 +2132,7 @@ function certCardHTML(t) {
   </div>`;
 }
 
-function printCertCards() {
+async function printCertCards() {
   if (printSelectedTraining.size === 0) { alert("Выберите удостоверения для печати"); return; }
   const selected = DATA.training.filter(t => printSelectedTraining.has(trainingKey(t)));
 
@@ -2127,6 +2143,18 @@ function printCertCards() {
   area.style.cssText = "display:none";
   area.innerHTML = selected.map(t => certCardHTML(t)).join("");
   document.body.appendChild(area);
+
+  const images = Array.from(area.querySelectorAll("img"));
+  await Promise.all(images.map(img => {
+    if (img.complete) return Promise.resolve();
+    return new Promise(resolve => {
+      img.addEventListener("load", resolve, { once:true });
+      img.addEventListener("error", resolve, { once:true });
+      setTimeout(resolve, 4000);
+    });
+  }));
+  await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+
   window.print();
 }
 
@@ -2583,8 +2611,8 @@ function openEditEmployeeModal(id) {
         value="${!isPreset ? esc(emp.position) : ""}"
         style="display:${!isPreset && emp.position ? "block" : "none"};padding:10px;border:1px solid var(--border);border-radius:8px">
       <select id="editSite" style="padding:10px;border:1px solid var(--border);border-radius:8px">
-        <option value="Алмалы" ${emp.site==="Алмалы"?"selected":""}>Алмалы</option>
-        <option value="Ашыктас" ${emp.site==="Ашыктас"?"selected":""}>Ашыктас</option>
+        <option value="Алмалы" ${(emp.site||"").trim()==="Алмалы"?"selected":""}>Алмалы</option>
+        <option value="Ашыктас" ${(emp.site||"").trim()==="Ашыктас"?"selected":""}>Ашыктас</option>
       </select>
       <select id="editToo" style="padding:10px;border:1px solid var(--border);border-radius:8px">
         <option value="SRC" ${emp.tooPrimary==="SRC"?"selected":""}>ТОО «Saryarka Resources Capital» (SRC)</option>
