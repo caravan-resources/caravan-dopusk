@@ -668,7 +668,10 @@ tr:hover td { background:#FAFBFD; }
       <div class="panel">
         <div class="panel-title">
           Анкеты на проверку
-          <button class="btn btn-ghost" onclick="loadAll()">🔄 Обновить</button>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-ghost" onclick="showAnketaQR()">📱 QR для анкеты</button>
+            <button class="btn btn-ghost" onclick="loadAll()">🔄 Обновить</button>
+          </div>
         </div>
         <div id="surveysList"></div>
       </div>
@@ -3018,6 +3021,27 @@ async function deleteEquipmentUnit(equipmentId) {
     }
   } catch(e) {
     alert("Ошибка сети: " + e);
+  }
+}
+
+function showAnketaQR() {
+  const url = `${location.origin}${location.pathname.replace(/instructor\.html$/, "")}anketa.html`;
+  openModal(`
+    <div style="font-size:16px;font-weight:800;color:var(--navy);margin-bottom:16px;text-align:center">QR для анкеты</div>
+    <div id="qrContainer" style="display:flex;justify-content:center;margin-bottom:14px"></div>
+    <div style="font-size:11px;color:var(--gray);word-break:break-all;text-align:center;margin-bottom:14px">${url}</div>
+    <div class="hint" style="text-align:center;margin-bottom:14px">
+      Один и тот же QR для всех — не привязан к конкретному человеку или технике.
+      Раздайте, повесьте на стенд, отправьте в рабочий чат. PIN не нужен.
+    </div>
+    <button class="btn btn-gold" onclick="window.print()">🖨 Печать</button>
+    <button class="btn btn-ghost" style="margin-top:8px" onclick="closeModal()">Закрыть</button>
+  `);
+  const container = document.getElementById("qrContainer");
+  if (container && window.QRCode) {
+    new QRCode(container, { text: url, width: 220, height: 220 });
+  } else {
+    container.innerHTML = `<div style="color:var(--red);font-size:13px">Не удалось загрузить библиотеку QR. Проверьте интернет и обновите страницу.</div>`;
   }
 }
 
