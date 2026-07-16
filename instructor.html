@@ -337,7 +337,7 @@ tr:hover td { background:#FAFBFD; }
               <tr>
                 <th></th><th>Сотрудник</th><th>Должность</th><th>Участок</th>
                 <th>Дата прохождения</th><th>Действителен до</th>
-                <th>Статус</th><th>Дней осталось</th><th>Безопасное вождение</th>
+                <th style="padding-left:8px;padding-right:8px">Статус</th><th style="padding-left:8px;padding-right:8px">Дней</th><th style="padding-left:8px;padding-right:8px">Вождение</th>
               </tr>
             </thead>
             <tbody id="accessTableBody"></tbody>
@@ -1392,11 +1392,21 @@ function renderAccessTable() {
       <td style="color:var(--gray)">${fmtDate(e.passDate)}</td>
       <td style="font-weight:700;color:${st==="expired"?"var(--red)":st==="warning"?"var(--yellow)":"var(--navy)"}">
         ${fmtDate(e.validUntil)}</td>
-      <td>${statusBadge(st)}</td>
-      <td style="font-weight:700;color:${st==="expired"?"var(--red)":st==="warning"?"var(--yellow)":"var(--gray)"}">${daysStr}</td>
-      <td>${driving ? statusBadge(drivingSt) : `<span class="badge b-gray">— Не проходил</span>`}</td>
+      <td style="padding-left:8px;padding-right:8px">${statusBadge(st)}</td>
+      <td style="padding-left:8px;padding-right:8px;font-weight:700;color:${st==="expired"?"var(--red)":st==="warning"?"var(--yellow)":"var(--gray)"}">${daysStr}</td>
+      <td style="white-space:nowrap;font-size:12px;padding-left:8px;padding-right:8px">${driving ? compactStatusDot(drivingSt, daysLeft(driving.validUntil)) : `<span style="color:var(--gray)">—</span>`}</td>
     </tr>`;
   }).join("");
+}
+
+// Компактный вариант статуса — цветная точка + число дней, без длинного текста
+// бейджа. Нужен там, где ширины мало (доп. колонки в и без того широкой таблице).
+function compactStatusDot(status, days) {
+  const map = { expired: "🔴", warning: "🟡", ok: "🟢", nodate: "⚪" };
+  const dot = map[status] || "⚪";
+  if (days === null || days === undefined) return `${dot}`;
+  const txt = days < 0 ? `${Math.abs(days)}д назад` : `${days}д`;
+  return `${dot} ${txt}`;
 }
 
 function exportAccessCSV() {
@@ -2291,7 +2301,7 @@ function renderTrainingTable() {
   body.innerHTML = rows.map((r,idx) => `
     <tr style="background:${idx%2===0?"#fff":"#FAFBFD"};border-bottom:1px solid var(--border)">
       <td style="padding:10px 12px;color:var(--gray);font-size:13px;white-space:nowrap">
-        ${r.date||"—"}
+        ${fmtDate(r.date)}
       </td>
       <td style="padding:10px 12px;font-weight:700;color:var(--navy);font-size:13px">
         ${r.empName||"—"}
