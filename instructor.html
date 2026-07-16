@@ -595,7 +595,7 @@ tr:hover td { background:#FAFBFD; }
     <div id="tabPrint" class="screen">
       <div class="panel">
         <div class="panel-title">
-          Выберите сотрудников для печати (до 10)
+          Выберите сотрудников для печати (по 10 на лист А4, листов будет столько, сколько нужно)
           <div style="display:flex;gap:8px">
             <button class="btn btn-ghost" onclick="selectAllPrint()">Выбрать всех</button>
             <button class="btn btn-ghost" onclick="clearPrintSelect()">Сбросить</button>
@@ -610,6 +610,8 @@ tr:hover td { background:#FAFBFD; }
             <option value="Алмалы">Алмалы</option>
             <option value="Ашыктас">Ашыктас</option>
           </select>
+          <input type="date" id="filterPrintDate" style="max-width:160px">
+          <button class="btn btn-ghost" onclick="selectByPassDate()">📅 Выбрать сдавших в этот день</button>
         </div>
         <div id="printSelectList" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:8px;margin-bottom:16px"></div>
         <div style="font-size:12px;color:var(--gray)" id="printSelectedCount">Выбрано: 0 / 10</div>
@@ -617,7 +619,10 @@ tr:hover td { background:#FAFBFD; }
 
       <!-- Превью листа А4 -->
       <div class="panel no-print">
-        <div class="panel-title">Предпросмотр</div>
+        <div class="panel-title">
+          Предпросмотр
+          <span id="printSheetsLabel" style="font-size:12px;font-weight:600;color:var(--gray)"></span>
+        </div>
         <div id="printPreview" style="background:#e5e7eb;padding:16px;border-radius:8px;
           display:flex;justify-content:center">
           <div id="printSheet" style="
@@ -633,7 +638,7 @@ tr:hover td { background:#FAFBFD; }
     <div id="tabCertPrint" class="screen">
       <div class="panel">
         <div class="panel-title">
-          Выберите удостоверения для печати (до 10)
+          Выберите удостоверения для печати (по 10 на лист А4)
           <div style="display:flex;gap:8px">
             <button class="btn btn-ghost" onclick="clearCertPrintSelect()">Сбросить</button>
             <button class="btn btn-gold" onclick="printCertCards()">🏅 Печать / PDF</button>
@@ -711,7 +716,6 @@ tr:hover td { background:#FAFBFD; }
     display:grid !important;
     grid-template-columns:85.6mm 85.6mm;
     gap:3mm; padding:5mm;
-    position:fixed; top:0; left:0;
     background:#fff;
     -webkit-print-color-adjust:exact;
     print-color-adjust:exact;
@@ -1682,7 +1686,7 @@ function renderPrintSelect() {
         </label>`).join("");
     }
     document.getElementById("printSelectedCount").textContent =
-      `Выбрано: ${printSelected.size} / 10`;
+      `Выбрано: ${printSelected.size}${sheetsLabel(printSelected.size)}`;
     renderPrintPreview();
     return;
   }
@@ -1714,22 +1718,31 @@ function renderPrintSelect() {
     }).join("");
   }
   document.getElementById("printSelectedCount").textContent =
-    `Выбрано: ${printSelected.size} / 10`;
+    `Выбрано: ${printSelected.size}${sheetsLabel(printSelected.size)}`;
   renderPrintPreview();
+}
+
+function sheetsLabel(n) {
+  return n ? " (" + Math.ceil(n/10) + " лист. А4)" : "";
 }
 
 function togglePrint(id) {
   if (printSelected.has(id)) {
     printSelected.delete(id);
   } else {
-    if (printSelected.size >= 10) { alert("Максимум 10 карточек на листе"); return; }
     printSelected.add(id);
   }
   renderPrintSelect();
 }
 
 function selectAllPrint() {
-  DATA.employees.slice(0,10).forEach(e=>printSelected.add(e.id));
+  const q  = (document.getElementById("searchPrint")?.value||"").toLowerCase();
+  const fs = document.getElementById("filterPrintSite")?.value||"all";
+  DATA.employees.filter(e => {
+    if (q && !(e.name||"").toLowerCase().includes(q)) return false;
+    if (fs !== "all" && (e.site||"").trim() !== fs) return false;
+    return true;
+  }).forEach(e=>printSelected.add(e.id));
   renderPrintSelect();
 }
 
@@ -1738,11 +1751,59 @@ function clearPrintSelect() {
   renderPrintSelect();
 }
 
+// Совпадает ли дата прохождения теста у сотрудника с выбранной датой.
+// passDate в базе бывает и "yyyy-mm-dd", и развёрнутой строкой Date —
+// сравниваем по году/месяцу/дню через parseRecordDate, а не строкой.
+function passDateMatches(emp, dateStr) {
+  if (!dateStr || !emp.passDate) return false;
+  const target = new Date(dateStr + "T00:00:00");
+  const actual = parseRecordDate(emp.passDate);
+  if (!actual || isNaN(target.getTime())) return false;
+  return target.getFullYear()===actual.getFullYear()
+      && target.getMonth()===actual.getMonth()
+      && target.getDate()===actual.getDate();
+}
+
+function selectByPassDate() {
+  const dateVal = document.getElementById("filterPrintDate").value;
+  if (!dateVal) { alert("Сначала выберите дату"); return; }
+
+  const matches = DATA.employees.filter(e => passDateMatches(e, dateVal));
+  if (!matches.length) {
+    alert("В этот день никто не сдавал тест — карточек допуска с такой датой прохождения нет.");
+    return;
+  }
+
+  let added = 0;
+  matches.forEach(e => {
+    if (printSelected.has(e.id)) return;
+    printSelected.add(e.id);
+    added++;
+  });
+
+  renderPrintSelect();
+
+  const [y,m,d] = dateVal.split("-");
+  const dateLabel = `${d}.${m}.${y}`;
+  const sheets = Math.ceil(printSelected.size / 10);
+  if (added === 0) {
+    alert(`Все, кто сдавал ${dateLabel}, уже выбраны.`);
+  } else if (matches.length > 10) {
+    alert(`За ${dateLabel} сдавали ${matches.length} чел. — выбраны все. При печати это ляжет на ${sheets} листа(ов) А4 автоматически, распечатается одним заходом.`);
+  }
+}
+
 function renderPrintPreview() {
   const sheet = document.getElementById("printSheet");
   if (!sheet) return;
   const selected = DATA.employees.filter(e=>printSelected.has(e.id));
-  const empty = Math.max(0, 10 - selected.length);
+  const sheetsCount = Math.max(1, Math.ceil(selected.length / 10));
+  const totalSlots = sheetsCount * 10;
+  const empty = totalSlots - selected.length;
+
+  const label = document.getElementById("printSheetsLabel");
+  if (label) label.textContent = selected.length > 10 ? `· ${sheetsCount} листа(ов) А4` : "";
+
   sheet.innerHTML = [
     ...selected.map(e=>cardHTML(e)),
     ...Array(empty).fill(`<div style="width:85.6mm;height:53.98mm;
@@ -1769,7 +1830,7 @@ function cardHTML(emp) {
       </div>`;
 
   return `<div style="
-    width:85.6mm; height:53.98mm; position:relative;
+    width:85.6mm; height:53.98mm; position:relative; break-inside:avoid; page-break-inside:avoid;
     border-radius:3.5mm; overflow:hidden; background:#fff;
     border:.3mm solid rgba(11,26,53,.12);
     box-shadow:0 .5mm 2mm rgba(0,0,0,.12);
@@ -1917,7 +1978,7 @@ function renderCertPrintSelect() {
       list.innerHTML = selected.map(t => certSelectItemHTML(t, true)).join("");
     }
     document.getElementById("certPrintSelectedCount").textContent =
-      `Выбрано: ${printSelectedTraining.size} / 10`;
+      `Выбрано: ${printSelectedTraining.size}${sheetsLabel(printSelectedTraining.size)}`;
     renderCertPrintPreview();
     return;
   }
@@ -1936,7 +1997,7 @@ function renderCertPrintSelect() {
       certSelectItemHTML(t, printSelectedTraining.has(trainingKey(t)))).join("");
   }
   document.getElementById("certPrintSelectedCount").textContent =
-    `Выбрано: ${printSelectedTraining.size} / 10`;
+    `Выбрано: ${printSelectedTraining.size}${sheetsLabel(printSelectedTraining.size)}`;
   renderCertPrintPreview();
 }
 
@@ -1959,7 +2020,6 @@ function toggleCertPrint(key) {
   if (printSelectedTraining.has(key)) {
     printSelectedTraining.delete(key);
   } else {
-    if (printSelectedTraining.size >= 10) { alert("Максимум 10 удостоверений на листе"); return; }
     printSelectedTraining.add(key);
   }
   renderCertPrintSelect();
@@ -2011,7 +2071,7 @@ function certCardHTML(t) {
     const passDate  = fmtDate(t.date);
     const validDate = fmtDate(t.validUntil);
     return `<div style="
-      width:85.6mm; height:53.98mm; position:relative;
+      width:85.6mm; height:53.98mm; position:relative; break-inside:avoid; page-break-inside:avoid;
       border-radius:3.5mm; overflow:hidden; background:#fff;
       border:.3mm solid rgba(11,26,53,.12);
       box-shadow:0 .5mm 2mm rgba(0,0,0,.12);
@@ -2102,7 +2162,7 @@ function certCardHTML(t) {
   // ── Бессрочное обучение — бирюзовая карточка (без изменений) ──
   const issueDate = fmtDate(t.date);
   return `<div style="
-    width:85.6mm; height:53.98mm; position:relative;
+    width:85.6mm; height:53.98mm; position:relative; break-inside:avoid; page-break-inside:avoid;
     border-radius:3.5mm; overflow:hidden; background:#fff;
     border:.3mm solid rgba(11,26,53,.12);
     box-shadow:0 .5mm 2mm rgba(0,0,0,.12);
