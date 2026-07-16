@@ -371,12 +371,20 @@ tr:hover td { background:#FAFBFD; }
         <div class="filters">
           <input type="text" id="searchTraining" placeholder="🔍 Поиск по имени или курсу..."
             oninput="renderTrainingTable()">
+          <select id="filterTrainingType" onchange="renderTrainingTable()">
+            <option value="all">Все типы обучения</option>
+          </select>
+          <select id="filterTrainingSite" onchange="renderTrainingTable()">
+            <option value="all">Все участки</option>
+            <option value="Алмалы">Алмалы</option>
+            <option value="Ашыктас">Ашыктас</option>
+          </select>
         </div>
         <div class="tbl-wrap">
           <table>
             <thead>
               <tr>
-                <th>Дата</th><th>Сотрудник</th><th>Курс / оборудование</th>
+                <th>Дата</th><th>Сотрудник</th><th>Участок</th><th>Тип обучения</th><th>Курс / оборудование</th>
               </tr>
             </thead>
             <tbody id="trainingTableBody"></tbody>
@@ -2161,13 +2169,48 @@ async function printCertCards() {
 // ══════════════════════════════════════════════════════
 // ОБУЧЕНИЕ ПО ПРОФЕССИИ
 // ══════════════════════════════════════════════════════
+// Тип обучения — часть курса до двоеточия (так собирались записи при импорте:
+// "Обучение на карьерный самосвал: теория...; практика..."). Если двоеточия нет
+// (старые ручные записи вроде "Инструктаж. Безопасное вождение") — весь текст как есть.
+function trainingTypeOf(course) {
+  const s = String(course||"");
+  const idx = s.indexOf(":");
+  return idx > 0 ? s.slice(0, idx).trim() : s.trim();
+}
+
+// Участок — в самой записи обучения его нет, берём из карточки сотрудника по empId.
+function trainingSiteOf(r) {
+  const emp = (DATA.employees||[]).find(e => String(e.id) === String(r.empId));
+  return emp ? (emp.site||"").trim() : "";
+}
+
 function renderTrainingTable() {
-  const q = (document.getElementById("searchTraining")?.value||"").toLowerCase();
+  const q  = (document.getElementById("searchTraining")?.value||"").toLowerCase();
+  const ft = document.getElementById("filterTrainingType")?.value || "all";
+  const fs = document.getElementById("filterTrainingSite")?.value || "all";
+
+  // Список типов — реально встречающиеся, отсортированные по частоте
+  const typeSel = document.getElementById("filterTrainingType");
+  if (typeSel && typeSel.options.length <= 1) {
+    const counts = {};
+    (DATA.training||[]).forEach(r => {
+      const t = trainingTypeOf(r.course);
+      if (t) counts[t] = (counts[t]||0) + 1;
+    });
+    const types = Object.entries(counts).sort((a,b)=>b[1]-a[1]);
+    typeSel.innerHTML = `<option value="all">Все типы обучения</option>` +
+      types.map(([t,c]) => `<option value="${t.replace(/"/g,'&quot;')}">${t} (${c})</option>`).join("");
+  }
+
   const rows = [...DATA.training].reverse().filter(r => {
-    if (!q) return true;
-    const name   = String(r.empName||"").toLowerCase();
-    const course = String(r.course||"").toLowerCase();
-    return name.includes(q) || course.includes(q);
+    if (q) {
+      const name   = String(r.empName||"").toLowerCase();
+      const course = String(r.course||"").toLowerCase();
+      if (!name.includes(q) && !course.includes(q)) return false;
+    }
+    if (ft !== "all" && trainingTypeOf(r.course) !== ft) return false;
+    if (fs !== "all" && trainingSiteOf(r) !== fs) return false;
+    return true;
   });
 
   const body  = document.getElementById("trainingTableBody");
@@ -2190,18 +2233,24 @@ function renderTrainingTable() {
       <td style="padding:10px 12px;font-weight:700;color:var(--navy);font-size:13px">
         ${r.empName||"—"}
       </td>
-      <td style="padding:10px 12px;font-size:13px;color:var(--gray)">
+      <td style="padding:10px 12px;color:var(--gray);font-size:13px">
+        ${trainingSiteOf(r) || "—"}
+      </td>
+      <td style="padding:10px 12px;font-size:13px">
         <span style="background:var(--light);padding:3px 10px;border-radius:99px;
-          font-size:12px;color:var(--navy);font-weight:600">
-          ${r.course||"—"}
+          font-size:12px;color:var(--navy2);font-weight:700">
+          ${trainingTypeOf(r.course) || "—"}
         </span>
+      </td>
+      <td style="padding:10px 12px;font-size:13px;color:var(--gray)">
+        ${r.course||"—"}
       </td>
     </tr>`).join("");
 }
 
 function exportTrainingCSV() {
-  const headers = ["Дата","Сотрудник","Курс / оборудование"];
-  const rows = DATA.training.map(r=>[r.date||"",r.empName||"",r.course||""]);
+  const headers = ["Дата","Сотрудник","Участок","Тип обучения","Курс / оборудование"];
+  const rows = DATA.training.map(r=>[r.date||"",r.empName||"",trainingSiteOf(r)||"",trainingTypeOf(r.course)||"",r.course||""]);
   const csv = "\uFEFF" + [headers,...rows]
     .map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(";")).join("\n");
   const a = document.createElement("a");
