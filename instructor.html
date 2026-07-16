@@ -212,6 +212,8 @@ tr:hover td { background:#FAFBFD; }
     <button id="navEquipment" onclick="showTab('equipment')">🚜 Техника</button>
     <button id="navFuel"     onclick="showTab('fuel')">⛽ Топливо</button>
     <button id="navReports"  onclick="showTab('reports')">📄 Отчёты</button>
+    <button id="navShift1"   onclick="showTab('shift1')">👷 Смена 1</button>
+    <button id="navShift2"   onclick="showTab('shift2')">👷 Смена 2</button>
     <button id="navImport"   onclick="showTab('import')">➕ Импорт теста</button>
   </nav>
 
@@ -559,6 +561,43 @@ tr:hover td { background:#FAFBFD; }
         </div>
         <div id="fullReportOutput" style="font-size:13px;line-height:1.7;color:var(--navy)"></div>
       </div>
+    </div>
+
+    <!-- ══ СМЕНА 1 / СМЕНА 2 — формация техники с закреплёнными операторами ══ -->
+    <div id="tabShift1" class="screen">
+      <div class="panel">
+        <div class="panel-title">
+          👷 Смена 1 — состав по технике
+          <div style="display:flex;gap:8px;align-items:center">
+            <span style="font-size:11px;color:var(--gray);display:flex;gap:10px;align-items:center">
+              <span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--green,#2E7D32);margin-right:3px"></span>занято</span>
+              <span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--gold);margin-right:3px"></span>вакансия</span>
+              <span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--red);margin-right:3px"></span>увольняется</span>
+            </span>
+            <button class="btn btn-ghost" onclick="loadAll()">🔄 Обновить</button>
+          </div>
+        </div>
+        <div class="hint">Вахта-1 и Вахта-2 подменяют друг друга при ротации — обе показаны, кто сейчас на площадке, система не отслеживает (нет календаря вахт).</div>
+      </div>
+      <div id="shift1Formation"></div>
+    </div>
+
+    <div id="tabShift2" class="screen">
+      <div class="panel">
+        <div class="panel-title">
+          👷 Смена 2 — состав по технике
+          <div style="display:flex;gap:8px;align-items:center">
+            <span style="font-size:11px;color:var(--gray);display:flex;gap:10px;align-items:center">
+              <span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--green,#2E7D32);margin-right:3px"></span>занято</span>
+              <span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--gold);margin-right:3px"></span>вакансия</span>
+              <span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--red);margin-right:3px"></span>увольняется</span>
+            </span>
+            <button class="btn btn-ghost" onclick="loadAll()">🔄 Обновить</button>
+          </div>
+        </div>
+        <div class="hint">Вахта-1 и Вахта-2 подменяют друг друга при ротации — обе показаны, кто сейчас на площадке, система не отслеживает (нет календаря вахт).</div>
+      </div>
+      <div id="shift2Formation"></div>
     </div>
 
     <div id="tabImport" class="screen">
@@ -978,6 +1017,15 @@ async function loadAll() {
     DATA.fuel = [];
   }
 
+  // Смены — привязка операторов к технике по вахте/смене
+  try {
+    const d = await jsonpFetch(`${CFG.SHEET_URL}?action=getShiftAssignments`, "cb_shift_assignments");
+    DATA.shiftAssignments = Array.isArray(d) ? d : [];
+  } catch(e) {
+    console.error("Смены:", e);
+    DATA.shiftAssignments = [];
+  }
+
   document.getElementById("loadingMsg").style.display = "none";
   renderAll();
 }
@@ -1000,13 +1048,15 @@ function renderAll() {
   renderFuelAnalytics();
   renderFuelRecordsList();
   renderReportPeriodButtons();
+  renderShiftFormation(1, "shift1Formation");
+  renderShiftFormation(2, "shift2Formation");
 }
 
 // ══════════════════════════════════════════════════════
 // НАВИГАЦИЯ
 // ══════════════════════════════════════════════════════
 function showTab(name) {
-  ["dash","tests","access","alerts","print","certPrint","training","personnel","surveys","equipment","fuel","reports","import"].forEach(t => {
+  ["dash","tests","access","alerts","print","certPrint","training","personnel","surveys","equipment","fuel","reports","shift1","shift2","import"].forEach(t => {
     document.getElementById("tab"+cap(t)).classList.remove("active");
     document.getElementById("nav"+cap(t)).classList.remove("active");
   });
@@ -3699,6 +3749,98 @@ function reportRange(period, offsetPeriods) {
 function inRange(dateVal, start, end) {
   const d = parseRecordDate(dateVal);
   return d && d >= start && d < end;
+}
+
+// ══════════════════════════════════════════════════════
+// СМЕНЫ — «формация» техники с закреплёнными операторами,
+// по типу техники рядами (буровые → экскаваторы/погрузчик →
+// самосвалы → бульдозеры → грейдеры → катки), внутри — карточки
+// техники с составом (Вахта-1 / Вахта-2).
+// ══════════════════════════════════════════════════════
+const SHIFT_TYPE_ORDER = ["Буровой станок","Экскаватор","Погрузчик","Самосвал","Бульдозер","Грейдер","Каток"];
+const SHIFT_TYPE_ICONS = {
+  "Буровой станок": "⛏️", "Экскаватор": "🏗️", "Погрузчик": "🚜",
+  "Самосвал": "🚛", "Бульдозер": "🚧", "Грейдер": "🛣️", "Каток": "🛞",
+};
+
+function shiftStatusColor(status) {
+  if (status === "вакансия") return "var(--gold)";
+  if (status === "увольняется") return "var(--red)";
+  if (status === "оптимизация") return "var(--gray)";
+  return "var(--green,#2E7D32)";
+}
+
+function shiftPersonLine(a) {
+  const color = shiftStatusColor(a.status);
+  const label = a.vahta || "";
+  let text = a.empName || (a.status === "вакансия" ? "вакансия" : a.status === "оптимизация" ? "не требуется" : "—");
+  if (a.status === "увольняется" && a.dismissDate) text += ` (до ${a.dismissDate})`;
+  return `<div style="display:flex;align-items:center;gap:5px;font-size:11px;padding:2px 0">
+    <span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${color};flex-shrink:0"></span>
+    <span style="color:var(--gray);font-weight:700;min-width:40px;flex-shrink:0">${label}</span>
+    <span style="color:var(--navy);font-weight:${a.status==='активен'?'700':'500'}">${text}</span>
+  </div>`;
+}
+
+function renderShiftFormation(smenaNum, containerId) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+
+  const smenaLabel = String(smenaNum);
+  const assignments = (DATA.shiftAssignments||[]).filter(a => String(a.smena) === smenaLabel);
+
+  if (!assignments.length) {
+    container.innerHTML = `<div class="panel"><div class="empty"><div class="empty-icon">👷</div>Данных по этой смене пока нет.</div></div>`;
+    return;
+  }
+
+  const byKey = {};
+  assignments.forEach(a => {
+    const key = a.equipmentId || ("pos:" + a.position);
+    if (!byKey[key]) byKey[key] = { equipmentId: a.equipmentId, position: a.position, items: [] };
+    byKey[key].items.push(a);
+  });
+
+  function typeOf(group) {
+    if (group.equipmentId) {
+      const eq = (DATA.equipment||[]).find(e => String(e.equipmentId) === String(group.equipmentId));
+      return eq ? (eq.type||"Прочее").trim().replace(/^каток$/i, "Каток") : "Прочее";
+    }
+    return "Управление участком";
+  }
+
+  const rows = {};
+  Object.entries(byKey).forEach(([key, group]) => {
+    const t = typeOf(group);
+    if (!rows[t]) rows[t] = [];
+    rows[t].push(group);
+  });
+
+  const order = [...SHIFT_TYPE_ORDER, "Управление участком", "Прочее"];
+  const usedTypes = Object.keys(rows).sort((a,b) => {
+    const ia = order.indexOf(a), ib = order.indexOf(b);
+    return (ia<0?999:ia) - (ib<0?999:ib);
+  });
+
+  container.innerHTML = usedTypes.map(type => {
+    const groups = rows[type].sort((a,b) => String(a.equipmentId||a.position).localeCompare(String(b.equipmentId||b.position)));
+    const icon = SHIFT_TYPE_ICONS[type] || "📋";
+    const cards = groups.map(g => {
+      const eq = g.equipmentId ? (DATA.equipment||[]).find(e => String(e.equipmentId)===String(g.equipmentId)) : null;
+      const title = g.equipmentId
+        ? `${g.equipmentId} <span style="font-weight:500;color:var(--gray);font-size:10px">${eq ? eq.model : ""}</span>`
+        : `<span style="font-size:12px">${g.position}</span>`;
+      const items = g.items.slice().sort((a,b) => String(a.vahta).localeCompare(String(b.vahta)));
+      return `<div style="background:#fff;border:1px solid var(--border);border-radius:10px;padding:10px 12px;min-width:210px;flex:1 1 210px;max-width:260px">
+        <div style="font-size:13px;font-weight:800;color:var(--navy);margin-bottom:6px">${title}</div>
+        ${items.map(shiftPersonLine).join("")}
+      </div>`;
+    }).join("");
+    return `<div class="panel">
+      <div class="panel-title" style="font-size:13px">${icon} ${type} <span style="font-weight:400;color:var(--gray);font-size:11px">(${groups.length})</span></div>
+      <div style="display:flex;flex-wrap:wrap;gap:10px">${cards}</div>
+    </div>`;
+  }).join("");
 }
 
 function setReportPeriod(p) {
