@@ -3671,6 +3671,48 @@ function pctChange(cur, prev) {
   return (pct > 0 ? "+" : "") + pct + "%";
 }
 
+// ══════════════════════════════════════════════════════
+// СТРОИТЕЛЬНЫЕ БЛОКИ ДЛЯ ОТЧЁТОВ — карточки статистики и таблицы,
+// тот же визуальный язык, что и на дашборде/в топливе (.stat-card,
+// .stats-grid), а не текстовые абзацы с запятыми.
+// ══════════════════════════════════════════════════════
+function reportStat(label, value, accent) {
+  return `<div class="stat-card" style="border-left-color:${accent||"var(--gold)"};padding:12px 14px">
+    <div class="stat-val" style="font-size:21px">${value}</div>
+    <div class="stat-lbl">${label}</div>
+  </div>`;
+}
+
+// items: [[label, value, accent?]]
+function reportStatGrid(items) {
+  const cols = Math.min(items.length, 4) || 1;
+  return `<div class="stats-grid" style="grid-template-columns:repeat(${cols},1fr);margin-bottom:14px">` +
+    items.map(([l,v,a]) => reportStat(l,v,a)).join("") + `</div>`;
+}
+
+// headers: [str], rows: [[str]]
+function reportTable(headers, rows, emptyText) {
+  if (!rows.length) {
+    return `<div style="font-size:13px;color:var(--gray);padding:6px 0 14px">${emptyText||"Нет данных за этот период."}</div>`;
+  }
+  return `<div class="tbl-wrap" style="margin-bottom:14px">
+    <table style="font-size:13px">
+      <thead><tr>${headers.map(h=>`<th>${h}</th>`).join("")}</tr></thead>
+      <tbody>${rows.map(r=>`<tr>${r.map(c=>`<td>${c}</td>`).join("")}</tr>`).join("")}</tbody>
+    </table>
+  </div>`;
+}
+
+function reportSectionTitle(icon, title) {
+  return `<div style="font-size:14px;font-weight:800;color:var(--navy);margin:22px 0 10px;padding-top:16px;border-top:1px solid var(--border)">${icon} ${title}</div>`;
+}
+
+// Метка техники "ID (модель)" — часто повторяется во всех отчётах
+function eqLabel(id) {
+  const eq = (DATA.equipment||[]).find(e=>String(e.equipmentId)===String(id));
+  return eq ? `${id} <span style="color:var(--gray)">(${eq.model})</span>` : String(id);
+}
+
 // ── Показания моточасов/пробега из чек-листов: [{date, value}], по возрастанию ──
 function getMeterReadings(equipmentId, itemText) {
   const out = [];
@@ -3805,96 +3847,102 @@ function generateReport() {
   const activeEquipment = (DATA.equipment||[]).filter(e => e.templateId);
   const notInspected = activeEquipment.filter(e => !inspectedEquipmentIds.has(e.equipmentId));
 
-  // ── СБОРКА ТЕКСТА ──
+  // ── СБОРКА: карточки + таблицы вместо абзацев ──
   const lines = [];
   lines.push(`<div style="font-size:15px;font-weight:800;color:var(--navy);margin-bottom:4px">Отчёт за ${periodLabel} (${rangeLabel})</div>`);
   lines.push(`<div style="font-size:11px;color:var(--gray);margin-bottom:16px">Сформирован ${fmtRecordDateTime(new Date().toISOString())}</div>`);
 
-  lines.push(`<div style="font-weight:700;color:var(--navy2);margin:14px 0 6px">⛽ Топливо</div>`);
+  // ⛽ Топливо
+  lines.push(reportSectionTitle("⛽","Топливо"));
   const fuelChange = pctChange(litersCur, litersPrev);
-  lines.push(`<div>Заправок: <b>${fuelCur.length}</b>, всего <b>${litersCur.toLocaleString("ru-RU")} л</b>${fuelChange ? ` (к прошлому периоду: ${fuelChange})` : ""}.</div>`);
-  if (topFuel.length) {
-    lines.push(`<div style="margin-top:4px">Больше всего заправлялись: ${topFuel.map(([id,l]) => {
-      const eq = (DATA.equipment||[]).find(e=>String(e.equipmentId)===String(id));
-      return `<b>${id}</b>${eq ? ' ('+eq.model+')' : ''} — ${l.toLocaleString("ru-RU")} л`;
-    }).join(", ")}.</div>`);
-  } else {
-    lines.push(`<div style="margin-top:4px;color:var(--gray)">Заправок за период не было.</div>`);
-  }
+  lines.push(reportStatGrid([
+    ["Заправок", fuelCur.length],
+    ["Литров всего", litersCur.toLocaleString("ru-RU")],
+    ["К прошлому периоду", fuelChange || "—", fuelChange && fuelChange.startsWith("+") ? "var(--red)" : "var(--green,#2E7D32)"],
+  ]));
+  lines.push(reportTable(
+    ["Техника","Литров"],
+    topFuel.map(([id,l]) => [eqLabel(id), `<b>${l.toLocaleString("ru-RU")}</b>`]),
+    "Заправок за период не было."
+  ));
 
-  lines.push(`<div style="font-weight:700;color:var(--navy2);margin:16px 0 6px">🔧 Осмотры и неисправности</div>`);
+  // 🔧 Осмотры и неисправности
+  lines.push(reportSectionTitle("🔧","Осмотры и неисправности"));
   const defectRate = itemsCur ? Math.round(defectsCur/itemsCur*100) : 0;
   const defectRatePrev = itemsPrev ? Math.round(defectsPrev/itemsPrev*100) : 0;
-  lines.push(`<div>Проведено осмотров: <b>${recCur.length}</b>. Найдено неисправностей: <b>${defectsCur}</b> из ${itemsCur} проверенных пунктов (${defectRate}%${itemsPrev ? `, было ${defectRatePrev}%` : ""}).</div>`);
-  if (topDefects.length) {
-    lines.push(`<div style="margin-top:4px">Чаще всего повторяется: ${topDefects.map(([t,c]) => `«${t}» (${c}×)`).join(", ")}.</div>`);
-  }
+  lines.push(reportStatGrid([
+    ["Осмотров", recCur.length],
+    ["Неисправностей", defectsCur, defectsCur ? "var(--red)" : "var(--gold)"],
+    ["% дефектных пунктов", `${defectRate}%`, defectRate ? "var(--red)" : "var(--gold)"],
+    ["Было в прошлый раз", itemsPrev ? `${defectRatePrev}%` : "—"],
+  ]));
+  lines.push(reportTable(
+    ["Пункт","Повторов"],
+    topDefects.map(([t,c]) => [t, `<b>${c}×</b>`]),
+    "Неисправностей за период не найдено."
+  ));
   if (notInspected.length) {
-    lines.push(`<div style="margin-top:8px;color:var(--red)">⚠ Не проходили осмотр за период (${notInspected.length} ед.): ${notInspected.map(e=>e.equipmentId).join(", ")}.</div>`);
+    lines.push(`<div style="margin-bottom:14px;padding:10px 12px;background:var(--redbg,#FEECEC);border-radius:8px;font-size:13px;color:var(--red)">
+      ⚠ Не проходили осмотр за период (${notInspected.length} ед.): ${notInspected.map(e=>e.equipmentId).join(", ")}
+    </div>`);
   } else {
-    lines.push(`<div style="margin-top:8px;color:var(--green,#2E7D32)">Вся активная техника проходила осмотр хотя бы раз за период.</div>`);
+    lines.push(`<div style="margin-bottom:14px;padding:10px 12px;background:var(--greenbg,#EAF7ED);border-radius:8px;font-size:13px;color:var(--green,#2E7D32)">
+      ✓ Вся активная техника проходила осмотр хотя бы раз за период
+    </div>`);
   }
 
-  // ── РАСХОД ТОПЛИВА НА МОТОЧАС / 100КМ ──
-  lines.push(`<div style="font-weight:700;color:var(--navy2);margin:16px 0 6px">📉 Расход топлива на моточас / 100км</div>`);
+  // 📉 Расход на моточас/100км
+  lines.push(reportSectionTitle("📉","Расход топлива на моточас / 100км"));
   const rateRows = Object.keys(fuelByEq).map(id => ({ id, rate: computeConsumptionRate(id, start, end) }))
     .filter(r => r.rate && (r.rate.perHour || r.rate.per100km));
-  if (rateRows.length) {
-    rateRows.forEach(r => {
-      const eq = (DATA.equipment||[]).find(e=>String(e.equipmentId)===String(r.id));
-      const parts = [];
-      if (r.rate.perHour)  parts.push(`${r.rate.perHour} л/маш-час`);
-      if (r.rate.per100km) parts.push(`${r.rate.per100km} л/100км`);
-      lines.push(`<div>${r.id}${eq?' ('+eq.model+')':''}: ${parts.join(", ")}</div>`);
-    });
-  } else {
-    lines.push(`<div style="color:var(--gray)">Пока недостаточно показаний моточасов/пробега из чек-листов, чтобы посчитать расход — нужно минимум два замера на машину в один период. Данные копятся по мере осмотров.</div>`);
-  }
+  lines.push(reportTable(
+    ["Техника","л/маш-час","л/100км"],
+    rateRows.map(r => [eqLabel(r.id), r.rate.perHour||"—", r.rate.per100km||"—"]),
+    "Пока недостаточно показаний моточасов/пробега из чек-листов — нужно минимум два замера на машину в один период. Данные копятся по мере осмотров."
+  ));
 
-  // ── ТОП ПРОБЛЕМНОЙ ТЕХНИКИ ЗА ВСЁ ВРЕМЯ ──
-  lines.push(`<div style="font-weight:700;color:var(--navy2);margin:16px 0 6px">🏆 Топ проблемной техники за всё время</div>`);
+  // 🏆 Топ проблемной техники за всё время
+  lines.push(reportSectionTitle("🏆","Топ проблемной техники за всё время"));
   const allTimeTop = allTimeTopDefective(5);
-  if (allTimeTop.length) {
-    lines.push(`<div>${allTimeTop.map(([id,c]) => {
-      const eq = (DATA.equipment||[]).find(e=>String(e.equipmentId)===String(id));
-      return `<b>${id}</b>${eq?' ('+eq.model+')':''} — ${c} неиспр.`;
-    }).join("; ")}.</div>`);
-  } else {
-    lines.push(`<div style="color:var(--gray)">Неисправностей за всё время ещё не зафиксировано.</div>`);
-  }
+  lines.push(reportTable(
+    ["Техника","Неисправностей"],
+    allTimeTop.map(([id,c]) => [eqLabel(id), `<b>${c}</b>`]),
+    "Неисправностей за всё время ещё не зафиксировано."
+  ));
 
-  // ── ТРЕНД ПО ВЫБРАННОЙ МАШИНЕ ──
+  // 📈 Тренд по выбранной машине
   const trendEqId = (document.getElementById("reportTrendEquipment")||{}).value;
   if (trendEqId) {
-    const eq = (DATA.equipment||[]).find(e=>String(e.equipmentId)===String(trendEqId));
-    lines.push(`<div style="font-weight:700;color:var(--navy2);margin:16px 0 6px">📈 Тренд по машине ${trendEqId}${eq?' ('+eq.model+')':''} — по неделям</div>`);
+    lines.push(reportSectionTitle("📈",`Тренд по машине ${eqLabel(trendEqId)} — по неделям`));
     const trend = equipmentTrend(trendEqId, 6);
     const withData = trend.filter(b => b.osmotrs > 0);
-    if (withData.length) {
-      lines.push(`<div>${trend.map(b => {
-        const wk = `${String(b.start.getDate()).padStart(2,"0")}.${String(b.start.getMonth()+1).padStart(2,"0")}`;
-        return `${wk}: ${b.osmotrs} осм., ${b.defects} неиспр.`;
-      }).join(" &nbsp;→&nbsp; ")}</div>`);
-    } else {
-      lines.push(`<div style="color:var(--gray)">Осмотров этой машины за последние 6 недель не было.</div>`);
-    }
+    lines.push(reportTable(
+      ["Неделя от","Осмотров","Неисправностей"],
+      trend.map(b => [`${String(b.start.getDate()).padStart(2,"0")}.${String(b.start.getMonth()+1).padStart(2,"0")}`, b.osmotrs, b.defects]),
+      withData.length ? "" : "Осмотров этой машины за последние 6 недель не было."
+    ));
   }
 
-  // ── ДИСЦИПЛИНА ОСМОТРОВ ПО ОПЕРАТОРАМ ──
-  lines.push(`<div style="font-weight:700;color:var(--navy2);margin:16px 0 6px">👷 Кто проводил осмотры за период</div>`);
+  // 👷 Дисциплина осмотров по операторам
+  lines.push(reportSectionTitle("👷","Кто проводил осмотры за период"));
   const opDiscipline = operatorDiscipline(recCur);
-  if (opDiscipline.length) {
-    lines.push(`<div>${opDiscipline.map(([name,c]) => `${name} — ${c}`).join("; ")}.</div>`);
-  } else {
-    lines.push(`<div style="color:var(--gray)">Осмотров за период не было.</div>`);
-  }
+  lines.push(reportTable(
+    ["Сотрудник","Осмотров"],
+    opDiscipline.map(([name,c]) => [name, `<b>${c}</b>`]),
+    "Осмотров за период не было."
+  ));
 
-  // ── НОЧЬ VS ДЕНЬ ПО ДЕФЕКТАМ ──
-  lines.push(`<div style="font-weight:700;color:var(--navy2);margin:16px 0 6px">🌙 Ночь vs ☀ день — неисправности</div>`);
+  // 🌙 Ночь vs день
+  lines.push(reportSectionTitle("🌙☀","Ночь vs день — неисправности"));
   const shiftD = shiftDefects(recCur);
   const dayRate = shiftD["День"].items ? Math.round(shiftD["День"].defects/shiftD["День"].items*100) : 0;
   const nightRate = shiftD["Ночь"].items ? Math.round(shiftD["Ночь"].defects/shiftD["Ночь"].items*100) : 0;
-  lines.push(`<div>День: ${shiftD["День"].defects} из ${shiftD["День"].items} пунктов (${dayRate}%). Ночь: ${shiftD["Ночь"].defects} из ${shiftD["Ночь"].items} пунктов (${nightRate}%).</div>`);
+  lines.push(reportStatGrid([
+    ["☀ День — неисправностей", `${shiftD["День"].defects} из ${shiftD["День"].items}`],
+    ["☀ День — % дефектных", `${dayRate}%`, dayRate ? "var(--red)" : "var(--gold)"],
+    ["🌙 Ночь — неисправностей", `${shiftD["Ночь"].defects} из ${shiftD["Ночь"].items}`],
+    ["🌙 Ночь — % дефектных", `${nightRate}%`, nightRate ? "var(--red)" : "var(--gold)"],
+  ]));
 
   document.getElementById("reportOutput").innerHTML = lines.join("\n");
   document.getElementById("reportOutputPanel").style.display = "block";
@@ -3982,52 +4030,66 @@ function generateFullSystemReport() {
   const lowerKatok = eq.filter(e => e.type === "каток").length;
   const trimSite = emp.filter(e => e.site && e.site !== e.site.trim()).length;
 
-  // ── СБОРКА HTML ──
+  // ── СБОРКА: карточки + таблицы вместо абзацев ──
   const L = [];
-  const h2 = (icon,t) => L.push(`<div style="font-size:14px;font-weight:800;color:var(--navy);margin:20px 0 8px;padding-top:14px;border-top:1px solid var(--border)">${icon} ${t}</div>`);
-  const row = (a,b) => L.push(`<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:13px"><span style="color:var(--gray)">${a}</span><span style="font-weight:700;color:var(--navy)">${b}</span></div>`);
 
   L.push(`<div style="font-size:16px;font-weight:800;color:var(--navy)">Сводный отчёт по системе «Допуск в карьер»</div>`);
   L.push(`<div style="font-size:11px;color:var(--gray);margin-bottom:8px">Снимок на ${fmtRecordDateTime(new Date().toISOString())}</div>`);
 
-  h2("👥","Кадры");
-  row("Всего сотрудников", totalEmp);
-  row("С табельным номером (SRC-/CL-/КУ-)", `${tabelny} (${pct(tabelny,totalEmp)}%)`);
-  row("Без ТОО", `${noToo} (${pct(noToo,totalEmp)}%)`);
-  row("Без телефона", `${noPhone} (${pct(noPhone,totalEmp)}%)`);
-  row("Без фото", `${noPhoto} (${pct(noPhoto,totalEmp)}%)`);
-  row("С действующим допуском", `${validPass} (${pct(validPass,totalEmp)}%)`);
-  row("Без сданного теста вообще", `${noPass} (${pct(noPass,totalEmp)}%)`);
-  L.push(`<div style="margin-top:6px;font-size:12px;color:var(--gray)">По ТОО: ${Object.entries(tooCounts).map(([k,v])=>`${k} — ${v}`).join(", ")}</div>`);
-  L.push(`<div style="font-size:12px;color:var(--gray)">По участку: ${Object.entries(siteCounts).map(([k,v])=>`${k} — ${v}`).join(", ")}</div>`);
-  L.push(`<div style="font-size:12px;color:var(--gray)">Топ должностей: ${topPositions.map(([k,v])=>`${k} (${v})`).join(", ")}</div>`);
+  // 👥 Кадры
+  L.push(reportSectionTitle("👥","Кадры"));
+  L.push(reportStatGrid([
+    ["Всего сотрудников", totalEmp],
+    ["С табельным номером", `${tabelny} (${pct(tabelny,totalEmp)}%)`],
+    ["С действующим допуском", `${validPass} (${pct(validPass,totalEmp)}%)`, "var(--green,#2E7D32)"],
+    ["Без сданного теста", `${noPass} (${pct(noPass,totalEmp)}%)`, noPass ? "var(--red)" : "var(--gold)"],
+  ]));
+  L.push(reportStatGrid([
+    ["Без ТОО", `${noToo} (${pct(noToo,totalEmp)}%)`, "var(--gray)"],
+    ["Без телефона", `${noPhone} (${pct(noPhone,totalEmp)}%)`, "var(--gray)"],
+    ["Без фото", `${noPhoto} (${pct(noPhoto,totalEmp)}%)`, "var(--gray)"],
+    ["Анкет в очереди", surv.length, surv.length ? "var(--gold)" : "var(--gray)"],
+  ]));
+  L.push(`<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:8px">
+    <div>${reportTable(["ТОО","Человек"], Object.entries(tooCounts).sort((a,b)=>b[1]-a[1]).map(([k,v])=>[k,v]))}</div>
+    <div>${reportTable(["Участок","Человек"], Object.entries(siteCounts).sort((a,b)=>b[1]-a[1]).map(([k,v])=>[k,v]))}</div>
+  </div>`);
+  L.push(reportTable(["Должность","Человек"], topPositions.map(([k,v])=>[k, `<b>${v}</b>`])));
   if (hourKeys.length) {
-    L.push(`<div style="margin-top:6px;font-size:12px;color:var(--gray)">Анкет в очереди сейчас: <b>${surv.length}</b>. Подача идёт с ${hourKeys[0]}:00 по ${hourKeys[hourKeys.length-1]}:00.</div>`);
+    L.push(`<div style="font-size:12px;color:var(--gray);margin:-6px 0 14px">Подача анкет идёт с ${hourKeys[0]}:00 по ${hourKeys[hourKeys.length-1]}:00.</div>`);
   }
 
-  h2("🚜","Техника");
-  row("Всего единиц", totalEq);
-  row("С привязанным шаблоном чек-листа", `${withTpl} (${pct(withTpl,totalEq)}%)`);
-  row("С указанным участком", `${withSite} (${pct(withSite,totalEq)}%)`);
-  L.push(`<div style="margin-top:6px;font-size:12px;color:var(--gray)">По типам: ${Object.entries(typeCounts).map(([k,v])=>`${k} — ${v}`).join(", ")}</div>`);
-  L.push(`<div style="font-size:12px;color:var(--gray)">Шаблонов чек-листов: ${tpl.length}</div>`);
+  // 🚜 Техника
+  L.push(reportSectionTitle("🚜","Техника"));
+  L.push(reportStatGrid([
+    ["Всего единиц", totalEq],
+    ["С шаблоном чек-листа", `${withTpl} (${pct(withTpl,totalEq)}%)`, withTpl===totalEq?"var(--green,#2E7D32)":"var(--gold)"],
+    ["С указанным участком", `${withSite} (${pct(withSite,totalEq)}%)`, withSite===totalEq?"var(--green,#2E7D32)":"var(--gray)"],
+    ["Шаблонов чек-листов", tpl.length],
+  ]));
+  L.push(reportTable(["Тип техники","Единиц"], Object.entries(typeCounts).sort((a,b)=>b[1]-a[1]).map(([k,v])=>[k, `<b>${v}</b>`])));
 
-  h2("🔧","Осмотры и топливо — реальное использование");
-  row("Осмотров всего", chk.length);
-  row("Уникальной техники осмотрено", `${inspectedEqIds.size} из ${totalEq} (${pct(inspectedEqIds.size,totalEq)}%)`);
-  row("Пунктов проверено / неисправностей", `${totalItems} / ${totalDefects}`);
-  row("Заправок зафиксировано", fuel.length);
+  // 🔧 Осмотры и топливо
+  L.push(reportSectionTitle("🔧","Осмотры и топливо — реальное использование"));
+  L.push(reportStatGrid([
+    ["Осмотров всего", chk.length],
+    ["Техники осмотрено", `${inspectedEqIds.size} из ${totalEq} (${pct(inspectedEqIds.size,totalEq)}%)`],
+    ["Пунктов / неисправностей", `${totalItems} / ${totalDefects}`],
+    ["Заправок зафиксировано", fuel.length],
+  ]));
   const opList = Object.entries(operatorCounts).sort((a,b)=>b[1]-a[1]);
-  if (opList.length) {
-    L.push(`<div style="margin-top:6px;font-size:12px;color:var(--gray)">Кто проводил осмотры: ${opList.map(([k,v])=>`${k} (${v})`).join(", ")}</div>`);
-  }
+  L.push(reportTable(["Кто проводил осмотры","Осмотров"], opList.map(([k,v])=>[k, `<b>${v}</b>`]), "Осмотров ещё не было."));
 
-  h2("🎓","Обучение и тестирование");
-  row("Попыток сдачи тестов", res.length);
-  row("Сдали", `${passedTests} (${pct(passedTests,res.length)}%)`);
-  row("Записей в «Обучение» (курсы/инструктажи)", train.length);
+  // 🎓 Обучение и тестирование
+  L.push(reportSectionTitle("🎓","Обучение и тестирование"));
+  L.push(reportStatGrid([
+    ["Попыток сдачи тестов", res.length],
+    ["Сдали", `${passedTests} (${pct(passedTests,res.length)}%)`, "var(--green,#2E7D32)"],
+    ["Записей в «Обучение»", train.length],
+  ]));
 
-  h2("⚠️","Что стоит проверить руками");
+  // ⚠️ Что стоит проверить руками
+  L.push(reportSectionTitle("⚠️","Что стоит проверить руками"));
   const flags = [];
   if (pe.length === 0) flags.push("«Личное дело» сейчас пусто — если раньше там были записи, стоит проверить, не удалено ли что-то по ошибке.");
   if (lowerKatok > 0) flags.push(`${lowerKatok} ед. техники с типом «каток» в нижнем регистре — не смёржено с «Каток» в аналитике по типам.`);
@@ -4036,9 +4098,11 @@ function generateFullSystemReport() {
   if (totalEq && pct(withSite,totalEq) < 20) flags.push("Участок почти не заполнен у техники — аналитика «по участкам» для техники сейчас невозможна.");
   if (chk.length && pct(inspectedEqIds.size,totalEq) < 30) flags.push("Осмотрена лишь малая часть техники — большая часть аналитики по топливу/неисправностям пока не наберёт данных.");
   if (flags.length) {
-    L.push(`<ul style="margin:4px 0 0 18px;padding:0;font-size:13px;color:var(--red)">${flags.map(f=>`<li style="margin-bottom:4px">${f}</li>`).join("")}</ul>`);
+    L.push(`<div style="display:flex;flex-direction:column;gap:6px">${flags.map(f=>
+      `<div style="padding:9px 12px;background:var(--redbg,#FEECEC);border-radius:8px;font-size:13px;color:var(--red)">⚠ ${f}</div>`
+    ).join("")}</div>`);
   } else {
-    L.push(`<div style="font-size:13px;color:var(--gray)">Явных нестыковок в данных на этот момент не найдено.</div>`);
+    L.push(`<div style="padding:9px 12px;background:var(--greenbg,#EAF7ED);border-radius:8px;font-size:13px;color:var(--green,#2E7D32)">✓ Явных нестыковок в данных на этот момент не найдено.</div>`);
   }
 
   document.getElementById("fullReportOutput").innerHTML = L.join("\n");
