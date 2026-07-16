@@ -337,7 +337,7 @@ tr:hover td { background:#FAFBFD; }
               <tr>
                 <th></th><th>Сотрудник</th><th>Должность</th><th>Участок</th>
                 <th>Дата прохождения</th><th>Действителен до</th>
-                <th>Статус</th><th>Дней осталось</th>
+                <th>Статус</th><th>Дней осталось</th><th>Безопасное вождение</th>
               </tr>
             </thead>
             <tbody id="accessTableBody"></tbody>
@@ -364,9 +364,17 @@ tr:hover td { background:#FAFBFD; }
     <!-- ══ ОБУЧЕНИЕ ══ -->
     <div id="tabTraining" class="screen">
       <div class="panel">
+        <div class="panel-title">Обучение по профессиям</div>
+        <div class="stats-grid" id="statsGridTraining" style="margin-bottom:0"></div>
+      </div>
+
+      <div class="panel">
         <div class="panel-title">
           История обучения по профессии
           <button class="btn btn-ghost" onclick="exportTrainingCSV()">📥 CSV</button>
+        </div>
+        <div class="hint" style="margin-bottom:8px">
+          Периодические инструктажи с датой действия (например, безопасное вождение) показаны на вкладке «🪪 Сроки допусков» — там же, где остальные сроки, а не здесь.
         </div>
         <div class="filters">
           <input type="text" id="searchTraining" placeholder="🔍 Поиск по имени или курсу..."
@@ -780,6 +788,19 @@ function statusOf(emp) {
   if (d < 0) return "expired";
   if (d <= CFG.WARN_DAYS) return "warning";
   return "ok";
+}
+
+// Периодический инструктаж сотрудника — любая запись из «Обучение», у которой
+// проставлен validUntil (это и есть признак «допуск-подобной» записи, как и в
+// instruktazhAsAccessLike). Берём самую свежую по дате, если их несколько.
+function periodicInstructionOf(empId, courseFilter) {
+  const records = (DATA.training||[]).filter(r =>
+    String(r.empId) === String(empId) && r.validUntil &&
+    (!courseFilter || courseFilter.test(r.course||""))
+  );
+  if (!records.length) return null;
+  records.sort((a,b) => new Date(b.date) - new Date(a.date));
+  return records[0];
 }
 function statusBadge(st) {
   const map = {
@@ -1349,6 +1370,8 @@ function renderAccessTable() {
     const rowCls = st==="expired"?"row-red":st==="warning"?"row-yellow":"";
     const daysStr = dl===null?"—":dl<0?`${Math.abs(dl)} дн. назад`:`${dl} дн.`;
     const initials = (e.name||"?").split(" ").slice(0,2).map(w=>w[0]||"").join("");
+    const driving = periodicInstructionOf(e.id, /вожден/i);
+    const drivingSt = driving ? statusOf({validUntil: driving.validUntil}) : "nodate";
     return `<tr class="${rowCls}">
       <td style="padding:8px 12px">
         <div style="display:flex;align-items:center;gap:6px">
@@ -1371,18 +1394,25 @@ function renderAccessTable() {
         ${fmtDate(e.validUntil)}</td>
       <td>${statusBadge(st)}</td>
       <td style="font-weight:700;color:${st==="expired"?"var(--red)":st==="warning"?"var(--yellow)":"var(--gray)"}">${daysStr}</td>
+      <td>${driving ? statusBadge(drivingSt) : `<span class="badge b-gray">— Не проходил</span>`}</td>
     </tr>`;
   }).join("");
 }
 
 function exportAccessCSV() {
-  const headers = ["ФИО","Должность","Участок","Дата прохождения","Действителен до","Статус","Дней"];
-  const rows = DATA.employees.map(e=>[
-    e.name,e.position,e.site,
-    fmtDate(e.passDate),fmtDate(e.validUntil),
-    {expired:"Просрочен",warning:"Истекает",ok:"Действителен",nodate:"Нет данных"}[statusOf(e)],
-    daysLeft(e.validUntil)??""
-  ]);
+  const headers = ["ФИО","Должность","Участок","Дата прохождения","Действителен до","Статус","Дней","Безопасное вождение — действителен до","Безопасное вождение — статус"];
+  const rows = DATA.employees.map(e=>{
+    const driving = periodicInstructionOf(e.id, /вожден/i);
+    const drivingSt = driving ? statusOf({validUntil: driving.validUntil}) : "nodate";
+    return [
+      e.name,e.position,e.site,
+      fmtDate(e.passDate),fmtDate(e.validUntil),
+      {expired:"Просрочен",warning:"Истекает",ok:"Действителен",nodate:"Нет данных"}[statusOf(e)],
+      daysLeft(e.validUntil)??"",
+      driving ? fmtDate(driving.validUntil) : "",
+      driving ? {expired:"Просрочен",warning:"Истекает",ok:"Действителен"}[drivingSt] : "Не проходил",
+    ];
+  });
   downloadCSV([headers,...rows],`Допуски_${today()}.csv`);
 }
 
@@ -2184,16 +2214,49 @@ function trainingSiteOf(r) {
   return emp ? (emp.site||"").trim() : "";
 }
 
+// Записи, которые остаются именно «обучением по профессии» — периодические
+// инструктажи (с validUntil, вроде безопасного вождения) теперь живут на
+// вкладке «Сроки допусков», здесь их не показываем, чтобы не дублировать.
+function professionTraining() {
+  return (DATA.training||[]).filter(r => !r.validUntil);
+}
+
+function renderTrainingStats() {
+  const el = document.getElementById("statsGridTraining");
+  if (!el) return;
+  const records = professionTraining();
+  const uniqueEmp = new Set(records.map(r => String(r.empId||r.empName))).size;
+  const typeCounts = {};
+  records.forEach(r => { const t = trainingTypeOf(r.course); if (t) typeCounts[t] = (typeCounts[t]||0)+1; });
+  const topType = Object.entries(typeCounts).sort((a,b)=>b[1]-a[1])[0];
+
+  el.innerHTML = [
+    {lbl:"Записей об обучении", val:records.length, acc:"var(--gold)"},
+    {lbl:"Уникальных сотрудников", val:uniqueEmp, acc:"var(--navy2)"},
+    {lbl:"Типов обучения", val:Object.keys(typeCounts).length, acc:"var(--navy2)"},
+    {lbl:"Самый частый тип", val:topType ? `${topType[0]} (${topType[1]})` : "—", acc:"var(--gray)"},
+  ].map(s=>`
+    <div class="stat-card" style="border-left-color:${s.acc}">
+      <div class="stat-val" style="color:${s.acc};${typeof s.val==='string'&&s.val.length>14?'font-size:15px':''}">${s.val}</div>
+      <div class="stat-lbl">${s.lbl}</div>
+    </div>
+  `).join("");
+}
+
 function renderTrainingTable() {
   const q  = (document.getElementById("searchTraining")?.value||"").toLowerCase();
   const ft = document.getElementById("filterTrainingType")?.value || "all";
   const fs = document.getElementById("filterTrainingSite")?.value || "all";
 
+  renderTrainingStats();
+
+  const pool = professionTraining();
+
   // Список типов — реально встречающиеся, отсортированные по частоте
   const typeSel = document.getElementById("filterTrainingType");
   if (typeSel && typeSel.options.length <= 1) {
     const counts = {};
-    (DATA.training||[]).forEach(r => {
+    pool.forEach(r => {
       const t = trainingTypeOf(r.course);
       if (t) counts[t] = (counts[t]||0) + 1;
     });
@@ -2202,7 +2265,7 @@ function renderTrainingTable() {
       types.map(([t,c]) => `<option value="${t.replace(/"/g,'&quot;')}">${t} (${c})</option>`).join("");
   }
 
-  const rows = [...DATA.training].reverse().filter(r => {
+  const rows = [...pool].reverse().filter(r => {
     if (q) {
       const name   = String(r.empName||"").toLowerCase();
       const course = String(r.course||"").toLowerCase();
@@ -2250,7 +2313,7 @@ function renderTrainingTable() {
 
 function exportTrainingCSV() {
   const headers = ["Дата","Сотрудник","Участок","Тип обучения","Курс / оборудование"];
-  const rows = DATA.training.map(r=>[r.date||"",r.empName||"",trainingSiteOf(r)||"",trainingTypeOf(r.course)||"",r.course||""]);
+  const rows = professionTraining().map(r=>[r.date||"",r.empName||"",trainingSiteOf(r)||"",trainingTypeOf(r.course)||"",r.course||""]);
   const csv = "\uFEFF" + [headers,...rows]
     .map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(";")).join("\n");
   const a = document.createElement("a");
