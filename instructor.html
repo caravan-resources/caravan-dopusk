@@ -212,8 +212,8 @@ tr:hover td { background:#FAFBFD; }
     <button id="navEquipment" onclick="showTab('equipment')">🚜 Техника</button>
     <button id="navFuel"     onclick="showTab('fuel')">⛽ Топливо</button>
     <button id="navReports"  onclick="showTab('reports')">📄 Отчёты</button>
-    <button id="navShift1"   onclick="showTab('shift1')">👷 Смена 1</button>
-    <button id="navShift2"   onclick="showTab('shift2')">👷 Смена 2</button>
+    <button id="navShift1"   onclick="showTab('shift1')">👷 Вахта 1</button>
+    <button id="navShift2"   onclick="showTab('shift2')">👷 Вахта 2</button>
     <button id="navImport"   onclick="showTab('import')">➕ Импорт теста</button>
   </nav>
 
@@ -567,7 +567,7 @@ tr:hover td { background:#FAFBFD; }
     <div id="tabShift1" class="screen">
       <div class="panel">
         <div class="panel-title">
-          👷 Смена 1 — состав по технике
+          👷 Вахта 1 — состав по технике (день + ночь)
           <div style="display:flex;gap:8px;align-items:center">
             <span style="font-size:11px;color:var(--gray);display:flex;gap:10px;align-items:center">
               <span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--green,#2E7D32);margin-right:3px"></span>занято</span>
@@ -577,7 +577,7 @@ tr:hover td { background:#FAFBFD; }
             <button class="btn btn-ghost" onclick="loadAll()">🔄 Обновить</button>
           </div>
         </div>
-        <div class="hint">Вахта-1 и Вахта-2 подменяют друг друга при ротации — обе показаны, кто сейчас на площадке, система не отслеживает (нет календаря вахт).</div>
+        <div class="hint">Здесь вся вахта-1 целиком — и дневная, и ночная смена вместе. Вахта-2 в это время дома, смотрите на соседней вкладке.</div>
       </div>
       <div id="shift1Formation"></div>
     </div>
@@ -585,7 +585,7 @@ tr:hover td { background:#FAFBFD; }
     <div id="tabShift2" class="screen">
       <div class="panel">
         <div class="panel-title">
-          👷 Смена 2 — состав по технике
+          👷 Вахта 2 — состав по технике (день + ночь)
           <div style="display:flex;gap:8px;align-items:center">
             <span style="font-size:11px;color:var(--gray);display:flex;gap:10px;align-items:center">
               <span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--green,#2E7D32);margin-right:3px"></span>занято</span>
@@ -595,7 +595,7 @@ tr:hover td { background:#FAFBFD; }
             <button class="btn btn-ghost" onclick="loadAll()">🔄 Обновить</button>
           </div>
         </div>
-        <div class="hint">Вахта-1 и Вахта-2 подменяют друг друга при ротации — обе показаны, кто сейчас на площадке, система не отслеживает (нет календаря вахт).</div>
+        <div class="hint">Здесь вся вахта-2 целиком — и дневная, и ночная смена вместе. Вахта-1 в это время дома, смотрите на соседней вкладке.</div>
       </div>
       <div id="shift2Formation"></div>
     </div>
@@ -3752,16 +3752,18 @@ function inRange(dateVal, start, end) {
 }
 
 // ══════════════════════════════════════════════════════
-// СМЕНЫ — «формация» техники с закреплёнными операторами,
+// ВАХТЫ — «формация» техники с закреплёнными операторами,
 // по типу техники рядами (буровые → экскаваторы/погрузчик →
-// самосвалы → бульдозеры → грейдеры → катки), внутри — карточки
-// техники с составом (Вахта-1 / Вахта-2).
+// самосвалы → бульдозеры → грейдеры → катки). Таб = вахта
+// (кто целиком на объекте — день+ночь вместе), внутри карточки —
+// смена 1 (день) и смена 2 (ночь) этой же вахты, парой.
 // ══════════════════════════════════════════════════════
 const SHIFT_TYPE_ORDER = ["Буровой станок","Экскаватор","Погрузчик","Самосвал","Бульдозер","Грейдер","Каток"];
 const SHIFT_TYPE_ICONS = {
   "Буровой станок": "⛏️", "Экскаватор": "🏗️", "Погрузчик": "🚜",
   "Самосвал": "🚛", "Бульдозер": "🚧", "Грейдер": "🛣️", "Каток": "🛞",
 };
+const SMENA_LABEL = { 1: "День", 2: "Ночь" };
 
 function shiftStatusColor(status) {
   if (status === "вакансия") return "var(--gold)";
@@ -3772,25 +3774,30 @@ function shiftStatusColor(status) {
 
 function shiftPersonLine(a) {
   const color = shiftStatusColor(a.status);
-  const label = a.vahta || "";
+  const label = SMENA_LABEL[Number(a.smena)] || String(a.smena||"");
   let text = a.empName || (a.status === "вакансия" ? "вакансия" : a.status === "оптимизация" ? "не требуется" : "—");
   if (a.status === "увольняется" && a.dismissDate) text += ` (до ${a.dismissDate})`;
+  const clickable = a.empId && a.status !== "вакансия" && a.status !== "оптимизация";
+  const nameHtml = clickable
+    ? `<span style="color:var(--navy);font-weight:700;cursor:pointer;text-decoration:underline;text-decoration-style:dotted"
+         onclick="goToEmployeeProfile('${String(a.empId).replace(/'/g,"\\'")}')">${text}</span>`
+    : `<span style="color:var(--navy);font-weight:500">${text}</span>`;
   return `<div style="display:flex;align-items:center;gap:5px;font-size:11px;padding:2px 0">
     <span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${color};flex-shrink:0"></span>
-    <span style="color:var(--gray);font-weight:700;min-width:40px;flex-shrink:0">${label}</span>
-    <span style="color:var(--navy);font-weight:${a.status==='активен'?'700':'500'}">${text}</span>
+    <span style="color:var(--gray);font-weight:700;min-width:34px;flex-shrink:0">${label}</span>
+    ${nameHtml}
   </div>`;
 }
 
-function renderShiftFormation(smenaNum, containerId) {
+function renderShiftFormation(vahtaNum, containerId) {
   const container = document.getElementById(containerId);
   if (!container) return;
 
-  const smenaLabel = String(smenaNum);
-  const assignments = (DATA.shiftAssignments||[]).filter(a => String(a.smena) === smenaLabel);
+  const vahtaLabel = "Вахта-" + vahtaNum;
+  const assignments = (DATA.shiftAssignments||[]).filter(a => String(a.vahta) === vahtaLabel);
 
   if (!assignments.length) {
-    container.innerHTML = `<div class="panel"><div class="empty"><div class="empty-icon">👷</div>Данных по этой смене пока нет.</div></div>`;
+    container.innerHTML = `<div class="panel"><div class="empty"><div class="empty-icon">👷</div>Данных по этой вахте пока нет.</div></div>`;
     return;
   }
 
@@ -3827,10 +3834,11 @@ function renderShiftFormation(smenaNum, containerId) {
     const icon = SHIFT_TYPE_ICONS[type] || "📋";
     const cards = groups.map(g => {
       const eq = g.equipmentId ? (DATA.equipment||[]).find(e => String(e.equipmentId)===String(g.equipmentId)) : null;
+      const titleClick = g.equipmentId ? ` onclick="showEquipmentQuickView('${String(g.equipmentId).replace(/'/g,"\\'")}')" style="cursor:pointer"` : "";
       const title = g.equipmentId
-        ? `${g.equipmentId} <span style="font-weight:500;color:var(--gray);font-size:10px">${eq ? eq.model : ""}</span>`
+        ? `<span${titleClick}><span style="text-decoration:underline;text-decoration-style:dotted">${g.equipmentId}</span> <span style="font-weight:500;color:var(--gray);font-size:10px">${eq ? eq.model : ""}</span></span>`
         : `<span style="font-size:12px">${g.position}</span>`;
-      const items = g.items.slice().sort((a,b) => String(a.vahta).localeCompare(String(b.vahta)));
+      const items = g.items.slice().sort((a,b) => Number(a.smena)-Number(b.smena));
       return `<div style="background:#fff;border:1px solid var(--border);border-radius:10px;padding:10px 12px;min-width:210px;flex:1 1 210px;max-width:260px">
         <div style="font-size:13px;font-weight:800;color:var(--navy);margin-bottom:6px">${title}</div>
         ${items.map(shiftPersonLine).join("")}
@@ -3841,6 +3849,38 @@ function renderShiftFormation(smenaNum, containerId) {
       <div style="display:flex;flex-wrap:wrap;gap:10px">${cards}</div>
     </div>`;
   }).join("");
+}
+
+// Клик по сотруднику в формации — переход на его карточку во вкладке «Сотрудники»
+function goToEmployeeProfile(empId) {
+  showTab("personnel");
+  document.getElementById("navPersonnel")?.classList.add("active");
+  selectPersonnelEmployee(empId);
+  window.scrollTo({ top:0, behavior:"smooth" });
+}
+
+// Клик по технике в формации — всплывающая карточка на месте, без перехода
+function showEquipmentQuickView(equipmentId) {
+  const eq = (DATA.equipment||[]).find(e => String(e.equipmentId)===String(equipmentId));
+  if (!eq) return;
+  const crew = (DATA.shiftAssignments||[]).filter(a => String(a.equipmentId)===String(equipmentId) && a.status==="активен");
+  const crewHtml = crew.length
+    ? crew.map(a => `<div style="font-size:12px;padding:3px 0">
+        <b>${a.vahta}</b> · ${SMENA_LABEL[Number(a.smena)]||a.smena} — ${a.empName||"—"}
+      </div>`).join("")
+    : `<div style="font-size:12px;color:var(--gray)">Экипаж по вахтам не назначен.</div>`;
+  openModal(`
+    <div style="font-size:18px;font-weight:800;color:var(--navy);margin-bottom:4px">${eq.equipmentId}</div>
+    <div style="font-size:13px;color:var(--gray);margin-bottom:14px">${eq.model||"—"} · ${eq.type||"—"}</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px;margin-bottom:14px">
+      <div><span style="color:var(--gray)">Участок:</span> <b>${eq.site||"—"}</b></div>
+      <div><span style="color:var(--gray)">Шаблон чек-листа:</span> <b>${eq.templateId||"—"}</b></div>
+    </div>
+    <div style="font-weight:700;font-size:13px;color:var(--navy);margin-bottom:6px;border-top:1px solid var(--border);padding-top:10px">Экипаж по вахтам</div>
+    ${crewHtml}
+    <button class="btn btn-gold" style="margin-top:16px" onclick="closeModal();showEquipmentQR('${String(equipmentId).replace(/'/g,"\\'")}')">🔗 Показать QR чек-листа</button>
+    <button class="btn btn-ghost" style="margin-top:8px" onclick="closeModal()">Закрыть</button>
+  `);
 }
 
 function setReportPeriod(p) {
