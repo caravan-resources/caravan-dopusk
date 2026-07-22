@@ -212,8 +212,8 @@ tr:hover td { background:#FAFBFD; }
     <button id="navEquipment" onclick="showTab('equipment')">🚜 Техника</button>
     <button id="navFuel"     onclick="showTab('fuel')">⛽ Топливо</button>
     <button id="navReports"  onclick="showTab('reports')">📄 Отчёты</button>
-    <button id="navShift1"   onclick="showTab('shift1')">👷 Вахта 1</button>
-    <button id="navShift2"   onclick="showTab('shift2')">👷 Вахта 2</button>
+    <button id="navShift1"   onclick="showTab('shift1')">👷 Вахта 1 (Алмалы)</button>
+    <button id="navShift2"   onclick="showTab('shift2')">👷 Вахта 2 (Алмалы)</button>
     <button id="navImport"   onclick="showTab('import')">➕ Импорт теста</button>
   </nav>
 
@@ -567,7 +567,7 @@ tr:hover td { background:#FAFBFD; }
     <div id="tabShift1" class="screen">
       <div class="panel">
         <div class="panel-title">
-          👷 Вахта 1 — состав по технике (день + ночь)
+          👷 Вахта 1 — Алмалы — состав по технике (день + ночь)
           <div style="display:flex;gap:8px;align-items:center">
             <span style="font-size:11px;color:var(--gray);display:flex;gap:10px;align-items:center">
               <span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--green,#2E7D32);margin-right:3px"></span>занято</span>
@@ -585,7 +585,7 @@ tr:hover td { background:#FAFBFD; }
     <div id="tabShift2" class="screen">
       <div class="panel">
         <div class="panel-title">
-          👷 Вахта 2 — состав по технике (день + ночь)
+          👷 Вахта 2 — Алмалы — состав по технике (день + ночь)
           <div style="display:flex;gap:8px;align-items:center">
             <span style="font-size:11px;color:var(--gray);display:flex;gap:10px;align-items:center">
               <span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--green,#2E7D32);margin-right:3px"></span>занято</span>
@@ -1048,8 +1048,8 @@ function renderAll() {
   renderFuelAnalytics();
   renderFuelRecordsList();
   renderReportPeriodButtons();
-  renderShiftFormation(1, "shift1Formation");
-  renderShiftFormation(2, "shift2Formation");
+  renderShiftFormation(1, "shift1Formation", "Алмалы");
+  renderShiftFormation(2, "shift2Formation", "Алмалы");
 }
 
 // ══════════════════════════════════════════════════════
@@ -3782,7 +3782,7 @@ function shiftPersonLine(a, ctx) {
     ? `<span style="color:var(--navy);font-weight:700;cursor:pointer;text-decoration:underline;text-decoration-style:dotted"
          onclick="goToEmployeeProfile('${String(a.empId).replace(/'/g,"\\'")}')">${text}</span>`
     : `<span style="color:var(--navy);font-weight:500">${text}</span>`;
-  const editCtx = `${a.__row}, '${String(ctx.equipmentId||"").replace(/'/g,"\\'")}', '${String(ctx.position||"").replace(/'/g,"\\'")}', '${ctx.vahta}', ${a.smena}, '${String(a.empId||"").replace(/'/g,"\\'")}', '${String(a.empName||"").replace(/'/g,"\\'")}', '${a.status}', '${a.dismissDate||""}'`;
+  const editCtx = `${a.__row}, '${String(ctx.equipmentId||"").replace(/'/g,"\\'")}', '${String(ctx.position||"").replace(/'/g,"\\'")}', '${ctx.vahta}', ${a.smena}, '${String(a.empId||"").replace(/'/g,"\\'")}', '${String(a.empName||"").replace(/'/g,"\\'")}', '${a.status}', '${a.dismissDate||""}', '${ctx.site}'`;
   return `<div style="display:flex;align-items:center;gap:5px;font-size:11px;padding:2px 0">
     <span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${color};flex-shrink:0"></span>
     <span style="color:var(--gray);font-weight:700;min-width:34px;flex-shrink:0">${label}</span>
@@ -3793,7 +3793,7 @@ function shiftPersonLine(a, ctx) {
 
 function shiftEmptySlotLine(smenaNum, ctx) {
   const label = SMENA_LABEL[smenaNum] || String(smenaNum);
-  const addCtx = `null, '${String(ctx.equipmentId||"").replace(/'/g,"\\'")}', '${String(ctx.position||"").replace(/'/g,"\\'")}', '${ctx.vahta}', ${smenaNum}, '', '', 'активен', ''`;
+  const addCtx = `null, '${String(ctx.equipmentId||"").replace(/'/g,"\\'")}', '${String(ctx.position||"").replace(/'/g,"\\'")}', '${ctx.vahta}', ${smenaNum}, '', '', 'активен', '', '${ctx.site}'`;
   return `<div style="display:flex;align-items:center;gap:5px;font-size:11px;padding:2px 0">
     <span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--border);flex-shrink:0"></span>
     <span style="color:var(--gray);font-weight:700;min-width:34px;flex-shrink:0">${label}</span>
@@ -3840,12 +3840,14 @@ function equipmentFuelChecklistLines(equipmentId) {
   </div>`;
 }
 
-function renderShiftFormation(vahtaNum, containerId) {
+function renderShiftFormation(vahtaNum, containerId, site) {
   const container = document.getElementById(containerId);
   if (!container) return;
 
   const vahtaLabel = "Вахта-" + vahtaNum;
-  const assignments = (DATA.shiftAssignments||[]).filter(a => String(a.vahta) === vahtaLabel);
+  const assignments = (DATA.shiftAssignments||[]).filter(a =>
+    String(a.vahta) === vahtaLabel && (String(a.site||"").trim() === site)
+  );
 
   const byKey = {};
   assignments.forEach(a => {
@@ -3854,10 +3856,10 @@ function renderShiftFormation(vahtaNum, containerId) {
     byKey[key].items.push(a);
   });
 
-  // Добавить карточки для техники, у которой пока вообще нет ни одной записи
-  // на эту вахту (чтобы можно было завести с нуля через «+ Добавить»)
+  // Добавить карточки для техники этого же участка, у которой пока вообще
+  // нет ни одной записи на эту вахту (чтобы можно было завести с нуля через «+ Добавить»)
   (DATA.equipment||[]).forEach(eq => {
-    if (!byKey[eq.equipmentId]) {
+    if ((eq.site||"").trim() === site && !byKey[eq.equipmentId]) {
       byKey[eq.equipmentId] = { equipmentId: eq.equipmentId, position: "", items: [] };
     }
   });
@@ -3897,7 +3899,7 @@ function renderShiftFormation(vahtaNum, containerId) {
       const title = g.equipmentId
         ? `<span${titleClick}><span style="text-decoration:underline;text-decoration-style:dotted">${g.equipmentId}</span> <span style="font-weight:500;color:var(--gray);font-size:10px">${eq ? eq.model : ""}</span></span>`
         : `<span style="font-size:12px">${g.position}</span>`;
-      const ctx = { equipmentId: g.equipmentId, position: g.position, vahta: vahtaLabel };
+      const ctx = { equipmentId: g.equipmentId, position: g.position, vahta: vahtaLabel, site };
       const bySmena = {};
       g.items.forEach(a => { bySmena[Number(a.smena)] = a; });
       const slots = [1,2].map(sm => bySmena[sm] ? shiftPersonLine(bySmena[sm], ctx) : shiftEmptySlotLine(sm, ctx)).join("");
@@ -3955,8 +3957,8 @@ function showEquipmentQuickView(equipmentId) {
 // ══════════════════════════════════════════════════════
 let SHIFT_EDIT_CTX = null;
 
-function openShiftEditModal(row, equipmentId, position, vahta, smena, empId, empName, status, dismissDate) {
-  SHIFT_EDIT_CTX = { row, equipmentId, position, vahta, smena };
+function openShiftEditModal(row, equipmentId, position, vahta, smena, empId, empName, status, dismissDate, site) {
+  SHIFT_EDIT_CTX = { row, equipmentId, position, vahta, smena, site };
   const isNew = row === null;
   const title = equipmentId || position || "—";
 
@@ -4028,7 +4030,7 @@ async function saveShiftEditFromModal() {
   const body = ctx.row
     ? { action:"updateShiftAssignment", row: ctx.row, empId: finalEmpId, empName: finalName, status, dismissDate, skill: "" }
     : { action:"saveShiftAssignment", equipmentId: ctx.equipmentId, position: ctx.position, smena: String(ctx.smena), vahta: ctx.vahta,
-        empId: finalEmpId, empName: finalName, status, dismissDate, skill: "", site: "Алмалы" };
+        empId: finalEmpId, empName: finalName, status, dismissDate, skill: "", site: ctx.site };
 
   try {
     const res = await fetch(CFG.SHEET_URL, { method:"POST", body: JSON.stringify(body) });
