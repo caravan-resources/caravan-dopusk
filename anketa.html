@@ -146,6 +146,13 @@ input:focus, select:focus, textarea:focus { border-color:var(--gold); }
         <option value="CL">ТОО «Караван Логистик»</option>
       </select>
 
+      <label class="label">Участок</label>
+      <select id="fSite">
+        <option value="">— выберите —</option>
+        <option value="Алмалы">Алмалы</option>
+        <option value="Ашыктас">Ашыктас</option>
+      </select>
+
       <label class="label">Дата приёма на работу</label>
       <input type="date" id="fHireDate">
 
@@ -467,6 +474,7 @@ function backToSearch() {
 async function submitForm() {
   const name = document.getElementById("fName").value.trim();
   const too  = document.getElementById("fToo").value;
+  const site = document.getElementById("fSite").value;
   const checkedSpecs = Array.from(document.querySelectorAll(".spec-check:checked")).map(c=>c.value);
 
   // Должность и специальности для рабочих позиций — одно и то же (по факту
@@ -478,6 +486,7 @@ async function submitForm() {
 
   if (!name) { alert("Укажите ФИО"); return; }
   if (!too)  { alert("Выберите основное ТОО"); return; }
+  if (!site) { alert("Выберите участок"); return; }
   if (!position && checkedSpecs.length === 0) {
     alert("Укажите должность или отметьте хотя бы одну специальность");
     return;
@@ -521,6 +530,7 @@ async function submitForm() {
     position,
     too,
     tooSecondary: document.getElementById("fTooSecondary").value,
+    site,
     hireDate: document.getElementById("fHireDate").value,
     address: document.getElementById("fAddress").value.trim(),
     phone: document.getElementById("fPhone").value.trim(),
