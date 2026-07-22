@@ -3801,6 +3801,45 @@ function shiftEmptySlotLine(smenaNum, ctx) {
   </div>`;
 }
 
+// Последняя заправка и последний чек-лист по конкретной технике —
+// для отображения прямо в карточках формации по вахтам.
+function lastFuelOf(equipmentId) {
+  const recs = (DATA.fuel||[]).filter(f => String(f.equipmentId)===String(equipmentId));
+  if (!recs.length) return null;
+  recs.sort((a,b) => new Date(b.date)-new Date(a.date));
+  return recs[0];
+}
+
+function lastChecklistOf(equipmentId) {
+  const recs = (DATA.checklistRecords||[]).filter(r => String(r.equipmentId)===String(equipmentId));
+  if (!recs.length) return null;
+  recs.sort((a,b) => new Date(b.date)-new Date(a.date));
+  return recs[0];
+}
+
+function equipmentFuelChecklistLines(equipmentId) {
+  const lastFuel = lastFuelOf(equipmentId);
+  const lastChk  = lastChecklistOf(equipmentId);
+
+  const fuelLine = lastFuel
+    ? `⛽ ${fmtRecordDateTime(lastFuel.date)} · ${lastFuel.amountLiters}л · <span style="color:var(--navy)">${lastFuel.empName||"—"}</span>`
+    : `⛽ заправок не было`;
+
+  let chkLine, chkColor = "var(--gray)";
+  if (lastChk) {
+    const hasDefect = (lastChk.items||[]).some(it => it.status === "defect");
+    chkColor = hasDefect ? "var(--red)" : "var(--gray)";
+    chkLine = `📋 ${fmtRecordDateTime(lastChk.date)} · <span style="color:var(--navy)">${lastChk.empName||"—"}</span> ${hasDefect?"⚠":"✓"}`;
+  } else {
+    chkLine = `📋 осмотров не было`;
+  }
+
+  return `<div style="margin-top:6px;padding-top:6px;border-top:1px dashed var(--border);font-size:10px;line-height:1.6">
+    <div style="color:var(--gray)">${fuelLine}</div>
+    <div style="color:${chkColor}">${chkLine}</div>
+  </div>`;
+}
+
 function renderShiftFormation(vahtaNum, containerId) {
   const container = document.getElementById(containerId);
   if (!container) return;
@@ -3862,9 +3901,11 @@ function renderShiftFormation(vahtaNum, containerId) {
       const bySmena = {};
       g.items.forEach(a => { bySmena[Number(a.smena)] = a; });
       const slots = [1,2].map(sm => bySmena[sm] ? shiftPersonLine(bySmena[sm], ctx) : shiftEmptySlotLine(sm, ctx)).join("");
+      const fuelChkBlock = g.equipmentId ? equipmentFuelChecklistLines(g.equipmentId) : "";
       return `<div style="background:#fff;border:1px solid var(--border);border-radius:10px;padding:10px 12px;min-width:210px;flex:1 1 210px;max-width:260px">
         <div style="font-size:13px;font-weight:800;color:var(--navy);margin-bottom:6px">${title}</div>
         ${slots}
+        ${fuelChkBlock}
       </div>`;
     }).join("");
     return `<div class="panel">
@@ -3901,6 +3942,8 @@ function showEquipmentQuickView(equipmentId) {
     </div>
     <div style="font-weight:700;font-size:13px;color:var(--navy);margin-bottom:6px;border-top:1px solid var(--border);padding-top:10px">Экипаж по вахтам</div>
     ${crewHtml}
+    <div style="font-weight:700;font-size:13px;color:var(--navy);margin:14px 0 6px;border-top:1px solid var(--border);padding-top:10px">Топливо и осмотры</div>
+    ${equipmentFuelChecklistLines(equipmentId).replace('margin-top:6px;padding-top:6px;border-top:1px dashed var(--border);','')}
     <button class="btn btn-gold" style="margin-top:16px" onclick="closeModal();showEquipmentQR('${String(equipmentId).replace(/'/g,"\\'")}')">🔗 Показать QR чек-листа</button>
     <button class="btn btn-ghost" style="margin-top:8px" onclick="closeModal()">Закрыть</button>
   `);
