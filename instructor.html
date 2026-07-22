@@ -3772,7 +3772,7 @@ function shiftStatusColor(status) {
   return "var(--green,#2E7D32)";
 }
 
-function shiftPersonLine(a) {
+function shiftPersonLine(a, ctx) {
   const color = shiftStatusColor(a.status);
   const label = SMENA_LABEL[Number(a.smena)] || String(a.smena||"");
   let text = a.empName || (a.status === "вакансия" ? "вакансия" : a.status === "оптимизация" ? "не требуется" : "—");
@@ -3782,10 +3782,22 @@ function shiftPersonLine(a) {
     ? `<span style="color:var(--navy);font-weight:700;cursor:pointer;text-decoration:underline;text-decoration-style:dotted"
          onclick="goToEmployeeProfile('${String(a.empId).replace(/'/g,"\\'")}')">${text}</span>`
     : `<span style="color:var(--navy);font-weight:500">${text}</span>`;
+  const editCtx = `${a.__row}, '${String(ctx.equipmentId||"").replace(/'/g,"\\'")}', '${String(ctx.position||"").replace(/'/g,"\\'")}', '${ctx.vahta}', ${a.smena}, '${String(a.empId||"").replace(/'/g,"\\'")}', '${String(a.empName||"").replace(/'/g,"\\'")}', '${a.status}', '${a.dismissDate||""}'`;
   return `<div style="display:flex;align-items:center;gap:5px;font-size:11px;padding:2px 0">
     <span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${color};flex-shrink:0"></span>
     <span style="color:var(--gray);font-weight:700;min-width:34px;flex-shrink:0">${label}</span>
     ${nameHtml}
+    <span onclick="openShiftEditModal(${editCtx})" style="margin-left:auto;cursor:pointer;opacity:.5;font-size:11px" title="Изменить">✏️</span>
+  </div>`;
+}
+
+function shiftEmptySlotLine(smenaNum, ctx) {
+  const label = SMENA_LABEL[smenaNum] || String(smenaNum);
+  const addCtx = `null, '${String(ctx.equipmentId||"").replace(/'/g,"\\'")}', '${String(ctx.position||"").replace(/'/g,"\\'")}', '${ctx.vahta}', ${smenaNum}, '', '', 'активен', ''`;
+  return `<div style="display:flex;align-items:center;gap:5px;font-size:11px;padding:2px 0">
+    <span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--border);flex-shrink:0"></span>
+    <span style="color:var(--gray);font-weight:700;min-width:34px;flex-shrink:0">${label}</span>
+    <span onclick="openShiftEditModal(${addCtx})" style="color:var(--gold);cursor:pointer;font-weight:700">+ Добавить</span>
   </div>`;
 }
 
@@ -3796,16 +3808,19 @@ function renderShiftFormation(vahtaNum, containerId) {
   const vahtaLabel = "Вахта-" + vahtaNum;
   const assignments = (DATA.shiftAssignments||[]).filter(a => String(a.vahta) === vahtaLabel);
 
-  if (!assignments.length) {
-    container.innerHTML = `<div class="panel"><div class="empty"><div class="empty-icon">👷</div>Данных по этой вахте пока нет.</div></div>`;
-    return;
-  }
-
   const byKey = {};
   assignments.forEach(a => {
     const key = a.equipmentId || ("pos:" + a.position);
     if (!byKey[key]) byKey[key] = { equipmentId: a.equipmentId, position: a.position, items: [] };
     byKey[key].items.push(a);
+  });
+
+  // Добавить карточки для техники, у которой пока вообще нет ни одной записи
+  // на эту вахту (чтобы можно было завести с нуля через «+ Добавить»)
+  (DATA.equipment||[]).forEach(eq => {
+    if (!byKey[eq.equipmentId]) {
+      byKey[eq.equipmentId] = { equipmentId: eq.equipmentId, position: "", items: [] };
+    }
   });
 
   function typeOf(group) {
@@ -3829,6 +3844,11 @@ function renderShiftFormation(vahtaNum, containerId) {
     return (ia<0?999:ia) - (ib<0?999:ib);
   });
 
+  if (!usedTypes.length) {
+    container.innerHTML = `<div class="panel"><div class="empty"><div class="empty-icon">👷</div>Данных по этой вахте пока нет.</div></div>`;
+    return;
+  }
+
   container.innerHTML = usedTypes.map(type => {
     const groups = rows[type].sort((a,b) => String(a.equipmentId||a.position).localeCompare(String(b.equipmentId||b.position)));
     const icon = SHIFT_TYPE_ICONS[type] || "📋";
@@ -3838,10 +3858,13 @@ function renderShiftFormation(vahtaNum, containerId) {
       const title = g.equipmentId
         ? `<span${titleClick}><span style="text-decoration:underline;text-decoration-style:dotted">${g.equipmentId}</span> <span style="font-weight:500;color:var(--gray);font-size:10px">${eq ? eq.model : ""}</span></span>`
         : `<span style="font-size:12px">${g.position}</span>`;
-      const items = g.items.slice().sort((a,b) => Number(a.smena)-Number(b.smena));
+      const ctx = { equipmentId: g.equipmentId, position: g.position, vahta: vahtaLabel };
+      const bySmena = {};
+      g.items.forEach(a => { bySmena[Number(a.smena)] = a; });
+      const slots = [1,2].map(sm => bySmena[sm] ? shiftPersonLine(bySmena[sm], ctx) : shiftEmptySlotLine(sm, ctx)).join("");
       return `<div style="background:#fff;border:1px solid var(--border);border-radius:10px;padding:10px 12px;min-width:210px;flex:1 1 210px;max-width:260px">
         <div style="font-size:13px;font-weight:800;color:var(--navy);margin-bottom:6px">${title}</div>
-        ${items.map(shiftPersonLine).join("")}
+        ${slots}
       </div>`;
     }).join("");
     return `<div class="panel">
@@ -3881,6 +3904,119 @@ function showEquipmentQuickView(equipmentId) {
     <button class="btn btn-gold" style="margin-top:16px" onclick="closeModal();showEquipmentQR('${String(equipmentId).replace(/'/g,"\\'")}')">🔗 Показать QR чек-листа</button>
     <button class="btn btn-ghost" style="margin-top:8px" onclick="closeModal()">Закрыть</button>
   `);
+}
+
+// ══════════════════════════════════════════════════════
+// Редактирование назначения смены — добавить / изменить / удалить.
+// row=null означает «слот сейчас пустой, создаём новую запись».
+// ══════════════════════════════════════════════════════
+let SHIFT_EDIT_CTX = null;
+
+function openShiftEditModal(row, equipmentId, position, vahta, smena, empId, empName, status, dismissDate) {
+  SHIFT_EDIT_CTX = { row, equipmentId, position, vahta, smena };
+  const isNew = row === null;
+  const title = equipmentId || position || "—";
+
+  openModal(`
+    <div style="font-size:16px;font-weight:800;color:var(--navy);margin-bottom:2px">${title}</div>
+    <div style="font-size:12px;color:var(--gray);margin-bottom:16px">${vahta} · ${SMENA_LABEL[Number(smena)]||smena}</div>
+
+    <label style="font-size:12px;font-weight:700;color:var(--gray);display:block;margin-bottom:4px">Сотрудник</label>
+    <input type="text" id="shiftEditEmpSearch" placeholder="Начните вводить ФИО..." value="${empName.replace(/"/g,'&quot;')}"
+      oninput="renderShiftEmpSearchResults()" autocomplete="off"
+      style="width:100%;padding:9px;border:1px solid var(--border);border-radius:8px;margin-bottom:2px">
+    <input type="hidden" id="shiftEditEmpId" value="${empId}">
+    <div id="shiftEmpSearchResults" style="max-height:160px;overflow:auto;margin-bottom:12px"></div>
+
+    <label style="font-size:12px;font-weight:700;color:var(--gray);display:block;margin-bottom:4px">Статус</label>
+    <select id="shiftEditStatus" onchange="toggleShiftDismissField()" style="width:100%;padding:9px;border:1px solid var(--border);border-radius:8px;margin-bottom:12px">
+      <option value="активен" ${status==='активен'?'selected':''}>Активен</option>
+      <option value="вакансия" ${status==='вакансия'?'selected':''}>Вакансия</option>
+      <option value="увольняется" ${status==='увольняется'?'selected':''}>Увольняется</option>
+      <option value="оптимизация" ${status==='оптимизация'?'selected':''}>Оптимизация (не требуется)</option>
+    </select>
+
+    <div id="shiftDismissDateWrap" style="display:${status==='увольняется'?'block':'none'};margin-bottom:12px">
+      <label style="font-size:12px;font-weight:700;color:var(--gray);display:block;margin-bottom:4px">Дата увольнения</label>
+      <input type="date" id="shiftEditDismissDate" value="${dismissDate}" style="width:100%;padding:9px;border:1px solid var(--border);border-radius:8px">
+    </div>
+
+    <button class="btn btn-gold" onclick="saveShiftEditFromModal()">💾 Сохранить</button>
+    ${!isNew ? `<button class="btn btn-ghost" style="margin-top:8px;color:var(--red)" onclick="deleteShiftAssignmentFromModal()">🗑 Удалить запись</button>` : ""}
+    <button class="btn btn-ghost" style="margin-top:8px" onclick="closeModal()">Отмена</button>
+  `);
+}
+
+function toggleShiftDismissField() {
+  const st = document.getElementById("shiftEditStatus").value;
+  document.getElementById("shiftDismissDateWrap").style.display = st === "увольняется" ? "block" : "none";
+}
+
+function renderShiftEmpSearchResults() {
+  const q = document.getElementById("shiftEditEmpSearch").value.trim().toLowerCase();
+  const box = document.getElementById("shiftEmpSearchResults");
+  document.getElementById("shiftEditEmpId").value = ""; // сброс, пока не выберут заново
+  if (q.length < 2) { box.innerHTML = ""; return; }
+  const matches = (DATA.employees||[]).filter(e => (e.name||"").toLowerCase().includes(q)).slice(0, 8);
+  box.innerHTML = matches.map(e => `
+    <div style="padding:7px 9px;border:1px solid var(--border);border-top:none;cursor:pointer;font-size:12px"
+      onmouseover="this.style.background='var(--light)'" onmouseout="this.style.background='#fff'"
+      onclick="document.getElementById('shiftEditEmpSearch').value='${e.name.replace(/'/g,"\\'")}';document.getElementById('shiftEditEmpId').value='${e.id}';document.getElementById('shiftEmpSearchResults').innerHTML=''">
+      <b>${e.name}</b> <span style="color:var(--gray)">${e.position||""}</span>
+    </div>`).join("");
+}
+
+async function saveShiftEditFromModal() {
+  const ctx = SHIFT_EDIT_CTX;
+  if (!ctx) return;
+  const empId = document.getElementById("shiftEditEmpId").value;
+  const empName = document.getElementById("shiftEditEmpSearch").value.trim();
+  const status = document.getElementById("shiftEditStatus").value;
+  const dismissDate = status === "увольняется" ? document.getElementById("shiftEditDismissDate").value : "";
+
+  if (status === "активен" && empName && !empId) {
+    alert("Выберите сотрудника из списка (кликните по варианту), а не просто впишите текст — иначе не свяжется с карточкой.");
+    return;
+  }
+
+  const finalName = status === "вакансия" ? "вакансия" : status === "оптимизация" ? "Оптимизация" : empName;
+  const finalEmpId = (status === "вакансия" || status === "оптимизация") ? "" : empId;
+
+  const body = ctx.row
+    ? { action:"updateShiftAssignment", row: ctx.row, empId: finalEmpId, empName: finalName, status, dismissDate, skill: "" }
+    : { action:"saveShiftAssignment", equipmentId: ctx.equipmentId, position: ctx.position, smena: String(ctx.smena), vahta: ctx.vahta,
+        empId: finalEmpId, empName: finalName, status, dismissDate, skill: "", site: "Алмалы" };
+
+  try {
+    const res = await fetch(CFG.SHEET_URL, { method:"POST", body: JSON.stringify(body) });
+    const data = await res.json();
+    if (data.ok) {
+      closeModal();
+      await loadAll();
+    } else {
+      alert("Ошибка: " + (data.error || "неизвестная"));
+    }
+  } catch(e) {
+    alert("Ошибка сети: " + e.message);
+  }
+}
+
+async function deleteShiftAssignmentFromModal() {
+  const ctx = SHIFT_EDIT_CTX;
+  if (!ctx || !ctx.row) return;
+  if (!confirm("Удалить эту запись целиком?")) return;
+  try {
+    const res = await fetch(CFG.SHEET_URL, { method:"POST", body: JSON.stringify({ action:"deleteShiftAssignmentRow", row: ctx.row }) });
+    const data = await res.json();
+    if (data.ok) {
+      closeModal();
+      await loadAll();
+    } else {
+      alert("Ошибка: " + (data.error || "неизвестная"));
+    }
+  } catch(e) {
+    alert("Ошибка сети: " + e.message);
+  }
 }
 
 function setReportPeriod(p) {
