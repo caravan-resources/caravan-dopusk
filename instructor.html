@@ -203,7 +203,6 @@ tr:hover td { background:#FAFBFD; }
     <button class="active" id="navDash"    onclick="showTab('dash')">📊 Дашборд</button>
     <button id="navTests"   onclick="showTab('tests')">📋 Результаты тестов</button>
     <button id="navAccess"  onclick="showTab('access')">🪪 Сроки допусков</button>
-    <button id="navAlerts"  onclick="showTab('alerts')">🔔 Требуют внимания</button>
     <button id="navPrint"    onclick="showTab('print')">🖨 Печать карточек</button>
     <button id="navCertPrint" onclick="showTab('certPrint')">🏅 Печать удостоверений</button>
     <button id="navTraining" onclick="showTab('training')">🎓 Обучение</button>
@@ -226,12 +225,13 @@ tr:hover td { background:#FAFBFD; }
       <div class="stats-grid" id="statsGridPersonnel"></div>
 
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px">
-        <!-- Допуски, требующие внимания — просроченные + истекающие в одном месте,
-             компактный баннер, если всё в порядке, развёрнутый список, если нет -->
-        <div class="panel">
+        <!-- Требует внимания — допуски (просроченные + истекающие) + несданные
+             тесты + вакансии по вахтам, в одном месте. Компактный баннер, если
+             всё чисто, развёрнуто — если есть что показать. -->
+        <div class="panel" style="grid-column:1/-1">
           <div class="panel-title">
-            🔔 Допуски, требующие внимания
-            <span id="attentionCount" style="font-size:12px;color:var(--red)"></span>
+            🔔 Требует внимания
+            <button class="btn btn-ghost" onclick="copyAttentionList()">📋 Скопировать</button>
           </div>
           <div id="attentionList"></div>
         </div>
@@ -346,16 +346,6 @@ tr:hover td { background:#FAFBFD; }
     </div>
 
     <!-- ══ ТРЕБУЮТ ВНИМАНИЯ ══ -->
-    <div id="tabAlerts" class="screen">
-      <div class="panel">
-        <div class="panel-title">
-          Список для руководителя
-          <button class="btn btn-gold" onclick="copyAlertsList()">📋 Скопировать</button>
-        </div>
-        <div id="alertsList"></div>
-      </div>
-    </div>
-
     <!-- ══ ОБУЧЕНИЕ ══ -->
     <div id="tabTraining" class="screen">
       <div class="panel">
@@ -1028,7 +1018,6 @@ function renderAll() {
   renderTestsTable();
   renderRequirementsPanel();
   renderAccessTable();
-  renderAlerts();
   renderPrintSelect();
   renderCertPrintSelect();
   renderTrainingTable();
@@ -1049,7 +1038,7 @@ function renderAll() {
 // НАВИГАЦИЯ
 // ══════════════════════════════════════════════════════
 function showTab(name) {
-  ["dash","tests","access","alerts","print","certPrint","training","personnel","surveys","equipment","fuel","reports","shift1","shift2","import"].forEach(t => {
+  ["dash","tests","access","print","certPrint","training","personnel","surveys","equipment","fuel","reports","shift1","shift2","import"].forEach(t => {
     document.getElementById("tab"+cap(t)).classList.remove("active");
     document.getElementById("nav"+cap(t)).classList.remove("active");
   });
@@ -1120,18 +1109,22 @@ function renderDashboard() {
     </div>
   `).join("");
 
-  // Допуски, требующие внимания — просроченные (красным) + истекающие (жёлтым)
-  // в одном месте. Если и того, и другого нет — компактный баннер, не пустая
-  // полноразмерная карточка.
-  const attentionTotal = expired.length + warning.length;
-  document.getElementById("attentionCount").textContent = attentionTotal ? `${attentionTotal} чел.` : "";
+  // Требует внимания — допуски (просроченные+истекающие), несданные тесты,
+  // вакансии по вахтам — всё в одном месте вместо отдельной вкладки.
+  // Компактный баннер, если совсем чисто, иначе — секции по каждой категории.
+  const failedTests = (DATA.results||[]).filter(r => !isPassed(r))
+    .sort((a,b) => new Date(getField(b,"date","Дата")||0) - new Date(getField(a,"date","Дата")||0));
+  const shiftVacanciesList = (DATA.shiftAssignments||[]).filter(a => a.status === "вакансия");
+
+  const attentionTotal = expired.length + warning.length + failedTests.length + shiftVacanciesList.length;
+
   if (attentionTotal === 0) {
     document.getElementById("attentionList").innerHTML =
       `<div style="display:flex;align-items:center;gap:8px;padding:10px 12px;background:var(--greenbg,#EAF7ED);border-radius:8px;font-size:13px;color:var(--green,#2E7D32);font-weight:700">
-        ✓ Все допуски в порядке — ни просроченных, ни истекающих в течение 30 дней
+        ✓ Всё чисто — ни просроченных допусков, ни несданных тестов, ни вакансий на линии
       </div>`;
   } else {
-    const expiredHtml = expired.sort((a,b)=>(daysLeft(a.validUntil)||0)-(daysLeft(b.validUntil)||0)).slice(0,6).map(e=>`
+    const rowHtml = (e, color, dateLabel, dayLabel) => `
       <div style="display:flex;justify-content:space-between;align-items:center;
         padding:9px 0;border-bottom:1px solid var(--border)">
         <div>
@@ -1139,27 +1132,39 @@ function renderDashboard() {
           <div style="font-size:11px;color:var(--gray)">${e.__kind==="instruktazh"?"🔻 "+e.position:(e.position||"")+" · "+(e.site||"")}</div>
         </div>
         <div style="text-align:right">
-          <div style="font-size:13px;font-weight:800;color:var(--red)">${fmtDate(e.validUntil)}</div>
-          <div style="font-size:11px;color:var(--red)">${Math.abs(daysLeft(e.validUntil)||0)} дн. назад</div>
+          <div style="font-size:13px;font-weight:800;color:${color}">${dateLabel}</div>
+          <div style="font-size:11px;color:${color}">${dayLabel}</div>
         </div>
-      </div>
-    `).join("");
-    const warningHtml = warning.sort((a,b)=>(daysLeft(a.validUntil)||0)-(daysLeft(b.validUntil)||0)).slice(0,6).map(e=>`
+      </div>`;
+
+    const expiredHtml = expired.sort((a,b)=>(daysLeft(a.validUntil)||0)-(daysLeft(b.validUntil)||0)).slice(0,6)
+      .map(e => rowHtml(e, "var(--red)", fmtDate(e.validUntil), `${Math.abs(daysLeft(e.validUntil)||0)} дн. назад`)).join("");
+    const warningHtml = warning.sort((a,b)=>(daysLeft(a.validUntil)||0)-(daysLeft(b.validUntil)||0)).slice(0,6)
+      .map(e => rowHtml(e, "var(--yellow)", fmtDate(e.validUntil), `${daysLeft(e.validUntil)} дн.`)).join("");
+    const failedHtml = failedTests.slice(0,6).map(r => `
       <div style="display:flex;justify-content:space-between;align-items:center;
         padding:9px 0;border-bottom:1px solid var(--border)">
         <div>
-          <div style="font-size:13px;font-weight:700;color:var(--navy)">${e.name}</div>
-          <div style="font-size:11px;color:var(--gray)">${e.__kind==="instruktazh"?"🔻 "+e.position:(e.site||"")}</div>
+          <div style="font-size:13px;font-weight:700;color:var(--navy)">${getField(r,"empName","Сотрудник")}</div>
+          <div style="font-size:11px;color:var(--gray)">${getField(r,"testTitle","Тест")}</div>
         </div>
-        <div style="text-align:right">
-          <div style="font-size:13px;font-weight:800;color:var(--yellow)">${fmtDate(e.validUntil)}</div>
-          <div style="font-size:11px;color:var(--yellow)">${daysLeft(e.validUntil)} дн.</div>
-        </div>
-      </div>
-    `).join("");
+        <div style="text-align:right;font-size:12px;color:var(--gray)">${getField(r,"date","Дата")}</div>
+      </div>`).join("");
+
+    const vacBySite = {};
+    shiftVacanciesList.forEach(a => { vacBySite[a.site||"—"] = (vacBySite[a.site||"—"]||0)+1; });
+    const vacHtml = shiftVacanciesList.length
+      ? `<div style="font-size:12px;color:var(--gray);padding:6px 0">
+          ${Object.entries(vacBySite).map(([site,c])=>`${site}: <b style="color:var(--navy)">${c}</b>`).join(" · ")}
+          — смотрите на вкладках «Вахта 1/2»
+        </div>`
+      : "";
+
     document.getElementById("attentionList").innerHTML =
       (expired.length ? `<div style="font-size:11px;font-weight:700;color:var(--red);text-transform:uppercase;margin-bottom:2px">🔴 Просрочено (${expired.length})</div>${expiredHtml}` : "") +
-      (warning.length ? `<div style="font-size:11px;font-weight:700;color:var(--yellow);text-transform:uppercase;margin:${expired.length?"12px":"0"} 0 2px">🟡 Истекает в 30 дней (${warning.length})</div>${warningHtml}` : "");
+      (warning.length ? `<div style="font-size:11px;font-weight:700;color:var(--yellow);text-transform:uppercase;margin:${expired.length?"12px":"0"} 0 2px">🟡 Истекает в 30 дней (${warning.length})</div>${warningHtml}` : "") +
+      (failedTests.length ? `<div style="font-size:11px;font-weight:700;color:var(--navy2);text-transform:uppercase;margin:${expired.length||warning.length?"12px":"0"} 0 2px">📋 Не сдали тест (${failedTests.length})</div>${failedHtml}` : "") +
+      (shiftVacanciesList.length ? `<div style="font-size:11px;font-weight:700;color:var(--gold);text-transform:uppercase;margin:12px 0 2px">👷 Вакансий на вахтах (${shiftVacanciesList.length})</div>${vacHtml}` : "");
   }
 
   // Последние тесты
@@ -1496,85 +1501,34 @@ function exportAccessCSV() {
 // ══════════════════════════════════════════════════════
 // УВЕДОМЛЕНИЯ
 // ══════════════════════════════════════════════════════
-function renderAlerts() {
-  const pool = [...DATA.employees, ...instruktazhAsAccessLike()];
-  const expired = pool.filter(e=>statusOf(e)==="expired")
-    .sort((a,b)=>(daysLeft(a.validUntil)||0)-(daysLeft(b.validUntil)||0));
-  const warning = pool.filter(e=>statusOf(e)==="warning")
-    .sort((a,b)=>(daysLeft(a.validUntil)||0)-(daysLeft(b.validUntil)||0));
-  const failed  = DATA.results.filter(r=>r["Результат"]==="Не сдал ✗"||r.passed===false);
-
-  let html = "";
-
-  if (expired.length) {
-    html += `<div style="margin-bottom:20px">
-      <div style="font-weight:800;color:var(--red);font-size:14px;margin-bottom:10px">
-        🔴 Просроченные допуски (${expired.length} чел.)
-      </div>
-      ${expired.map(e=>`
-        <div style="display:flex;justify-content:space-between;align-items:center;
-          padding:10px 14px;background:var(--redbg);border:1px solid var(--red);
-          border-radius:10px;margin-bottom:8px">
-          <div>
-            <div style="font-weight:700;color:var(--navy)">${e.name}</div>
-            <div style="font-size:12px;color:var(--gray)">${e.__kind==="instruktazh"?"🔻 Инструктаж: "+e.position:(e.position||"")+" · "+(e.site||"")+" · "+(e.phone||"")}</div>
-          </div>
-          <div style="text-align:right">
-            <div style="font-weight:800;color:var(--red)">${fmtDate(e.validUntil)}</div>
-            <div style="font-size:12px;color:var(--red)">${Math.abs(daysLeft(e.validUntil)||0)} дн. просрочен</div>
-          </div>
-        </div>
-      `).join("")}
-    </div>`;
-  }
-
-  if (warning.length) {
-    html += `<div style="margin-bottom:20px">
-      <div style="font-weight:800;color:var(--yellow);font-size:14px;margin-bottom:10px">
-        🟡 Истекают в течение 30 дней (${warning.length} чел.)
-      </div>
-      ${warning.map(e=>`
-        <div style="display:flex;justify-content:space-between;align-items:center;
-          padding:10px 14px;background:var(--yellowbg);border:1px solid var(--yellow);
-          border-radius:10px;margin-bottom:8px">
-          <div>
-            <div style="font-weight:700;color:var(--navy)">${e.name}</div>
-            <div style="font-size:12px;color:var(--gray)">${e.__kind==="instruktazh"?"🔻 Инструктаж: "+e.position:(e.position||"")+" · "+(e.site||"")+" · "+(e.phone||"")}</div>
-          </div>
-          <div style="text-align:right">
-            <div style="font-weight:800;color:var(--yellow)">${fmtDate(e.validUntil)}</div>
-            <div style="font-size:12px;color:var(--yellow)">${daysLeft(e.validUntil)} дн. осталось</div>
-          </div>
-        </div>
-      `).join("")}
-    </div>`;
-  }
-
-  if (!expired.length && !warning.length) {
-    html = `<div class="empty" style="padding:60px">
-      <div class="empty-icon">✅</div>
-      <div style="font-size:16px;font-weight:800;color:var(--green);margin-top:8px">
-        Все допуски в порядке
-      </div>
-    </div>`;
-  }
-
-  document.getElementById("alertsList").innerHTML = html;
-}
-
-function copyAlertsList() {
+function copyAttentionList() {
   const pool = [...DATA.employees, ...instruktazhAsAccessLike()];
   const expired = pool.filter(e=>statusOf(e)==="expired");
   const warning = pool.filter(e=>statusOf(e)==="warning");
-  let text = `СПИСОК ДЛЯ ПЕРЕСДАЧИ ДОПУСКА / ИНСТРУКТАЖА\n${today().split("-").reverse().join(".")}\n\n`;
+  const failedTests = (DATA.results||[]).filter(r => !isPassed(r));
+  const shiftVacanciesList = (DATA.shiftAssignments||[]).filter(a => a.status === "вакансия");
+
+  let text = `ТРЕБУЕТ ВНИМАНИЯ\n${today().split("-").reverse().join(".")}\n\n`;
   if (expired.length) {
-    text += `ПРОСРОЧЕННЫЕ:\n`;
+    text += `ПРОСРОЧЕННЫЕ ДОПУСКИ:\n`;
     expired.forEach(e=>{ text+=`• ${e.name}${e.__kind==="instruktazh"?" ["+e.position+"]":" ("+e.site+")"} — до ${fmtDate(e.validUntil)}\n`; });
     text += "\n";
   }
   if (warning.length) {
     text += `ИСТЕКАЮТ В ТЕЧЕНИЕ 30 ДНЕЙ:\n`;
     warning.forEach(e=>{ text+=`• ${e.name}${e.__kind==="instruktazh"?" ["+e.position+"]":" ("+e.site+")"} — до ${fmtDate(e.validUntil)}, осталось ${daysLeft(e.validUntil)} дн.\n`; });
+    text += "\n";
+  }
+  if (failedTests.length) {
+    text += `НЕ СДАЛИ ТЕСТ:\n`;
+    failedTests.forEach(r=>{ text+=`• ${getField(r,"empName","Сотрудник")} — ${getField(r,"testTitle","Тест")} (${getField(r,"date","Дата")})\n`; });
+    text += "\n";
+  }
+  if (shiftVacanciesList.length) {
+    text += `ВАКАНСИЙ НА ВАХТАХ: ${shiftVacanciesList.length}\n`;
+    const vacBySite = {};
+    shiftVacanciesList.forEach(a => { vacBySite[a.site||"—"] = (vacBySite[a.site||"—"]||0)+1; });
+    Object.entries(vacBySite).forEach(([site,c])=>{ text+=`• ${site}: ${c}\n`; });
   }
   navigator.clipboard.writeText(text).then(()=>alert("Список скопирован в буфер обмена"));
 }
