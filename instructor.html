@@ -226,13 +226,14 @@ tr:hover td { background:#FAFBFD; }
       <div class="stats-grid" id="statsGridPersonnel"></div>
 
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px">
-        <!-- Просроченные допуски -->
+        <!-- Допуски, требующие внимания — просроченные + истекающие в одном месте,
+             компактный баннер, если всё в порядке, развёрнутый список, если нет -->
         <div class="panel">
           <div class="panel-title">
-            🔴 Просроченные допуски
-            <span id="expiredCount" style="font-size:12px;color:var(--red)"></span>
+            🔔 Допуски, требующие внимания
+            <span id="attentionCount" style="font-size:12px;color:var(--red)"></span>
           </div>
-          <div id="expiredList"></div>
+          <div id="attentionList"></div>
         </div>
         <!-- Последние тесты -->
         <div class="panel">
@@ -244,17 +245,9 @@ tr:hover td { background:#FAFBFD; }
         </div>
       </div>
 
-      <!-- Истекают скоро -->
-      <div class="panel" style="margin-top:16px">
-        <div class="panel-title">
-          🟡 Истекают в течение 30 дней
-          <span id="warnCount" style="font-size:12px;color:var(--yellow)"></span>
-        </div>
-        <div id="warnList"></div>
-      </div>
-
       <div style="font-size:15px;font-weight:800;color:var(--navy);margin:28px 0 12px;padding-top:20px;border-top:2px solid var(--border)">🚜 Техника и осмотры</div>
       <div class="stats-grid" id="statsGridEquipment"></div>
+      <div id="noTemplateBanner" style="display:none;margin-top:12px;padding:10px 12px;background:var(--yellowbg,#FFF8E1);border-radius:8px;font-size:13px;color:var(--yellow)"></div>
 
       <div class="panel" style="margin-top:16px">
         <div class="panel-title">
@@ -1127,10 +1120,18 @@ function renderDashboard() {
     </div>
   `).join("");
 
-  // Просроченные
-  document.getElementById("expiredCount").textContent = expired.length ? `${expired.length} чел.` : "";
-  document.getElementById("expiredList").innerHTML = expired.length
-    ? expired.sort((a,b)=>(daysLeft(a.validUntil)||0)-(daysLeft(b.validUntil)||0)).slice(0,6).map(e=>`
+  // Допуски, требующие внимания — просроченные (красным) + истекающие (жёлтым)
+  // в одном месте. Если и того, и другого нет — компактный баннер, не пустая
+  // полноразмерная карточка.
+  const attentionTotal = expired.length + warning.length;
+  document.getElementById("attentionCount").textContent = attentionTotal ? `${attentionTotal} чел.` : "";
+  if (attentionTotal === 0) {
+    document.getElementById("attentionList").innerHTML =
+      `<div style="display:flex;align-items:center;gap:8px;padding:10px 12px;background:var(--greenbg,#EAF7ED);border-radius:8px;font-size:13px;color:var(--green,#2E7D32);font-weight:700">
+        ✓ Все допуски в порядке — ни просроченных, ни истекающих в течение 30 дней
+      </div>`;
+  } else {
+    const expiredHtml = expired.sort((a,b)=>(daysLeft(a.validUntil)||0)-(daysLeft(b.validUntil)||0)).slice(0,6).map(e=>`
       <div style="display:flex;justify-content:space-between;align-items:center;
         padding:9px 0;border-bottom:1px solid var(--border)">
         <div>
@@ -1142,8 +1143,24 @@ function renderDashboard() {
           <div style="font-size:11px;color:var(--red)">${Math.abs(daysLeft(e.validUntil)||0)} дн. назад</div>
         </div>
       </div>
-    `).join("")
-    : `<div class="empty"><div class="empty-icon">✓</div>Просроченных нет</div>`;
+    `).join("");
+    const warningHtml = warning.sort((a,b)=>(daysLeft(a.validUntil)||0)-(daysLeft(b.validUntil)||0)).slice(0,6).map(e=>`
+      <div style="display:flex;justify-content:space-between;align-items:center;
+        padding:9px 0;border-bottom:1px solid var(--border)">
+        <div>
+          <div style="font-size:13px;font-weight:700;color:var(--navy)">${e.name}</div>
+          <div style="font-size:11px;color:var(--gray)">${e.__kind==="instruktazh"?"🔻 "+e.position:(e.site||"")}</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:13px;font-weight:800;color:var(--yellow)">${fmtDate(e.validUntil)}</div>
+          <div style="font-size:11px;color:var(--yellow)">${daysLeft(e.validUntil)} дн.</div>
+        </div>
+      </div>
+    `).join("");
+    document.getElementById("attentionList").innerHTML =
+      (expired.length ? `<div style="font-size:11px;font-weight:700;color:var(--red);text-transform:uppercase;margin-bottom:2px">🔴 Просрочено (${expired.length})</div>${expiredHtml}` : "") +
+      (warning.length ? `<div style="font-size:11px;font-weight:700;color:var(--yellow);text-transform:uppercase;margin:${expired.length?"12px":"0"} 0 2px">🟡 Истекает в 30 дней (${warning.length})</div>${warningHtml}` : "");
+  }
 
   // Последние тесты
   const last = [...results].reverse().slice(0,6);
@@ -1168,26 +1185,6 @@ function renderDashboard() {
       }).join("")
     : `<div class="empty"><div class="empty-icon">📋</div>Нет данных</div>`;
 
-  // Предупреждения
-  document.getElementById("warnCount").textContent = warning.length ? `${warning.length} чел.` : "";
-  document.getElementById("warnList").innerHTML = warning.length
-    ? `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px">
-      ${warning.sort((a,b)=>(daysLeft(a.validUntil)||0)-(daysLeft(b.validUntil)||0)).map(e=>`
-        <div style="padding:12px;background:var(--yellowbg);border:1px solid var(--yellow);
-          border-radius:10px;display:flex;justify-content:space-between;align-items:center">
-          <div>
-            <div style="font-size:13px;font-weight:700;color:var(--navy)">${e.name}</div>
-            <div style="font-size:11px;color:var(--gray)">${e.__kind==="instruktazh"?"🔻 "+e.position:(e.site||"")}</div>
-          </div>
-          <div style="text-align:right">
-            <div style="font-size:13px;font-weight:800;color:var(--yellow)">${fmtDate(e.validUntil)}</div>
-            <div style="font-size:11px;color:var(--yellow)">${daysLeft(e.validUntil)} дн.</div>
-          </div>
-        </div>
-      `).join("")}
-    </div>`
-    : `<div class="empty"><div class="empty-icon">✓</div>Все допуски в порядке</div>`;
-
   // ══ Зона техники и осмотров ══
   const equipment = DATA.equipment || [];
   const records   = DATA.checklistRecords || [];
@@ -1204,9 +1201,14 @@ function renderDashboard() {
   const fuelWeek = fuelRecords.filter(f => { const d = parseRecordDate(f.date); return d && d >= weekAgo; });
   const fuelWeekLiters = fuelWeek.reduce((s,f) => s + (Number(f.amountLiters)||0), 0);
 
+  // Вакансий на линии — живая метрика по вахтам, вместо мёртвого «без шаблона»
+  // (шаблоны на технике закрыты на 100% и не меняются, эта карточка реально
+  // отражает нехватку людей прямо сейчас).
+  const shiftVacancies = (DATA.shiftAssignments||[]).filter(a => a.status === "вакансия").length;
+
   document.getElementById("statsGridEquipment").innerHTML = [
     {lbl:"Единиц техники",        val:equipment.length,      acc:"var(--navy2)"},
-    {lbl:"Без шаблона чек-листа", val:noTemplate.length,     acc:"var(--yellow)"},
+    {lbl:"Вакансий на линии",     val:shiftVacancies,        acc:shiftVacancies?"var(--gold)":"var(--green,#2E7D32)"},
     {lbl:"Осмотров проведено",    val:records.length,        acc:"var(--gold)"},
     {lbl:"Неисправностей за 7 дней", val:recentDefects.length, acc:"var(--red)"},
     {lbl:"Топливо за 7 дней, л",  val:fuelWeekLiters.toLocaleString("ru-RU"), acc:"var(--navy2)"},
@@ -1216,6 +1218,17 @@ function renderDashboard() {
       <div class="stat-lbl">${s.lbl}</div>
     </div>
   `).join("");
+
+  // Техника без шаблона чек-листа — теперь только предупреждение, если вдруг
+  // появится (например, добавили новую единицу и забыли привязать шаблон),
+  // а не постоянная карточка в статистике.
+  const noTemplateBanner = document.getElementById("noTemplateBanner");
+  if (noTemplateBanner) {
+    noTemplateBanner.style.display = noTemplate.length ? "block" : "none";
+    if (noTemplate.length) {
+      noTemplateBanner.innerHTML = `⚠ ${noTemplate.length} ед. техники без шаблона чек-листа: ${noTemplate.map(e=>e.equipmentId).join(", ")}`;
+    }
+  }
 
   document.getElementById("defectsCount").textContent = recentDefects.length ? `${recentDefects.length} осмотр(ов)` : "";
   document.getElementById("defectsList").innerHTML = recentDefects.length
