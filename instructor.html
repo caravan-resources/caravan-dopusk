@@ -216,6 +216,13 @@ tr:hover td { background:#FAFBFD; }
     <button id="navImport"   onclick="showTab('import')">➕ Импорт теста</button>
   </nav>
 
+  <div id="criticalErrorBanner" style="display:none;background:var(--red);color:#fff;
+    padding:12px 20px;font-size:13px;font-weight:700;text-align:center">
+    ⚠ Не удалось загрузить часть данных с сервера (сотрудники или результаты тестов). То, что вы видите — может быть неполным или пустым, а не реальным состоянием базы.
+    <button onclick="loadAll()" style="margin-left:10px;background:#fff;color:var(--red);border:none;
+      padding:4px 12px;border-radius:6px;font-weight:800;cursor:pointer">Повторить загрузку</button>
+  </div>
+
   <main>
     <div id="loadingMsg" class="loading">⏳ Загрузка данных...</div>
 
@@ -904,19 +911,34 @@ async function loadAll() {
   // Сотрудники
   try {
     const d = await jsonpFetch(`${CFG.SHEET_URL}?action=list`, "cb_employees");
-    DATA.employees = Array.isArray(d) && d.length > 0 ? d : DEMO_EMPLOYEES;
+    if (Array.isArray(d) && d.length > 0) {
+      DATA.employees = d;
+      DATA.criticalLoadFailed = false;
+    } else {
+      // Пустой или неожиданный ответ — не подставляем фейковые данные молча,
+      // а честно показываем, что не загрузилось.
+      DATA.employees = [];
+      DATA.criticalLoadFailed = true;
+    }
   } catch(e) {
     console.error("Сотрудники:", e);
-    DATA.employees = DEMO_EMPLOYEES;
+    DATA.employees = [];
+    DATA.criticalLoadFailed = true;
   }
 
   // Результаты
   try {
     const d = await jsonpFetch(`${CFG.SHEET_URL}?action=getResults`, "cb_results");
-    DATA.results = Array.isArray(d) && d.length > 0 ? d : DEMO_RESULTS;
+    if (Array.isArray(d) && d.length > 0) {
+      DATA.results = d;
+    } else {
+      DATA.results = [];
+      DATA.criticalLoadFailed = true;
+    }
   } catch(e) {
     console.error("Результаты:", e);
-    DATA.results = DEMO_RESULTS;
+    DATA.results = [];
+    DATA.criticalLoadFailed = true;
   }
 
   // Обучение по профессии
@@ -1010,6 +1032,7 @@ async function loadAll() {
   }
 
   document.getElementById("loadingMsg").style.display = "none";
+  document.getElementById("criticalErrorBanner").style.display = DATA.criticalLoadFailed ? "block" : "none";
   renderAll();
 }
 
@@ -1544,22 +1567,6 @@ function downloadCSV(rows, filename) {
   a.href = "data:text/csv;charset=utf-8," + encodeURIComponent(csv);
   a.download = filename; a.click();
 }
-
-// ══════════════════════════════════════════════════════
-// ДЕМО-ДАННЫЕ (если Sheets недоступен)
-// ══════════════════════════════════════════════════════
-const DEMO_EMPLOYEES = [
-  {id:"1",name:"Ахметов Серик Болатович",position:"Машинист экскаватора",site:"Алмалы",passDate:"2024-06-15",validUntil:"2025-06-15",phone:"+7 701 111 2233"},
-  {id:"2",name:"Байжанов Руслан Темирович",position:"Водитель БелАЗ",site:"Ашыктас",passDate:"2025-04-10",validUntil:"2026-04-10",phone:"+7 702 222 3344"},
-  {id:"3",name:"Сейткали Айбек Маратович",position:"Машинист бульдозера",site:"Алмалы",passDate:"2025-05-20",validUntil:"2026-05-20",phone:"+7 705 333 4455"},
-  {id:"4",name:"Дюсенов Нурлан Асылович",position:"Оператор буровой",site:"Ашыктас",passDate:"2024-12-01",validUntil:"2025-12-01",phone:"+7 707 444 5566"},
-  {id:"5",name:"Касымов Бауыржан Ерланович",position:"Машинист экскаватора",site:"Алмалы",passDate:"2025-06-01",validUntil:"2026-06-01",phone:"+7 708 555 6677"},
-  {id:"6",name:"Нурмаганбетов Дамир Б.",position:"Водитель БелАЗ",site:"Алмалы",passDate:"2025-01-15",validUntil:"2025-07-15",phone:"+7 701 666 7788"},
-];
-const DEMO_RESULTS = [
-  {"Дата":"28.06.2026","Время":"09:14","Сотрудник":"Трусов Иван","Тест":"Допуск в карьер — Базовый курс","Результат":"Сдал ✓","Балл (%)":90,"Правильных":9,"Всего вопросов":10,"Время (мин)":14},
-  {"Дата":"27.06.2026","Время":"14:32","Сотрудник":"Ахметов Серик Болатович","Тест":"Допуск в карьер — Базовый курс","Результат":"Не сдал ✗","Балл (%)":70,"Правильных":7,"Всего вопросов":10,"Время (мин)":18},
-];
 
 // ══════════════════════════════════════════════════════
 // ЗАГРУЗКА ФОТО
