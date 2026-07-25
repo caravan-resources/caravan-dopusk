@@ -208,7 +208,9 @@ tr:hover td { background:#FAFBFD; }
     <button id="navTraining" onclick="showTab('training')">🎓 Обучение</button>
     <button id="navPersonnel" onclick="showTab('personnel')">👥 Сотрудники</button>
     <button id="navSurveys" onclick="showTab('surveys')">📋 Анкеты <span id="surveyBadge" style="display:none;background:var(--red);color:#fff;border-radius:99px;padding:1px 7px;font-size:11px;margin-left:4px"></span></button>
-    <button id="navEquipment" onclick="showTab('equipment')">🚜 Техника</button>
+    <button id="navEquipmentAlmaty"  onclick="showTab('equipmentAlmaty')">🚜 Техника (Алмалы)</button>
+    <button id="navEquipmentAshyktas" onclick="showTab('equipmentAshyktas')">🚜 Техника (Ашыктас)</button>
+    <button id="navChecklistTemplates" onclick="showTab('checklistTemplates')">🔧 Шаблоны чек-листов</button>
     <button id="navFuel"     onclick="showTab('fuel')">⛽ Топливо</button>
     <button id="navReports"  onclick="showTab('reports')">📄 Отчёты</button>
     <button id="navShift1"   onclick="showTab('shift1')">👷 Вахта 1 (Алмалы)</button>
@@ -400,22 +402,104 @@ tr:hover td { background:#FAFBFD; }
     </div>
 
     <!-- ══ ИМПОРТ ТЕСТА ══ -->
-    <!-- ══ ТЕХНИКА И ЧЕК-ЛИСТЫ ══ -->
-    <div id="tabEquipment" class="screen">
+    <!-- ══ ТЕХНИКА — АЛМАЛЫ ══ -->
+    <div id="tabEquipmentAlmaty" class="screen">
       <div class="panel">
         <div class="panel-title">
-          Реестр техники
+          Реестр техники — Алмалы
           <div style="display:flex;gap:8px">
-            <button class="btn btn-ghost" onclick="openBulkEquipmentModal()">📋 Массовая загрузка</button>
-            <button class="btn btn-gold" onclick="openEquipmentModal()">➕ Зарегистрировать единицу</button>
+            <button class="btn btn-ghost" onclick="openBulkEquipmentModal('Алмалы')">📋 Массовая загрузка</button>
+            <button class="btn btn-gold" onclick="openEquipmentModal('Алмалы')">➕ Зарегистрировать единицу</button>
           </div>
         </div>
-        <div id="equipmentList" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px"></div>
+        <div class="filters">
+          <input type="text" id="searchEquipmentAlmaty" placeholder="🔍 Поиск по номеру/модели..." oninput="renderEquipmentList('Алмалы','equipmentListAlmaty','searchEquipmentAlmaty')">
+        </div>
+        <div id="equipmentListAlmaty" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px"></div>
       </div>
 
       <div class="panel">
+        <div class="panel-title">📊 Аналитика по осмотрам — Алмалы</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+          <div>
+            <div style="font-size:13px;font-weight:700;color:var(--navy2);margin-bottom:8px">По технике — где чаще всего неисправности</div>
+            <div id="analyticsByEquipmentAlmaty"></div>
+          </div>
+          <div>
+            <div style="font-size:13px;font-weight:700;color:var(--navy2);margin-bottom:8px">Топ повторяющихся неисправностей</div>
+            <div id="analyticsByItemAlmaty"></div>
+          </div>
+        </div>
+        <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
+          <div style="font-size:13px;font-weight:700;color:var(--navy2);margin-bottom:8px">💬 Свежие комментарии</div>
+          <div id="analyticsCommentsAlmaty"></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">
+          Проведённые осмотры — Алмалы
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-ghost" onclick="exportChecklistCSV('Алмалы')">⬇️ Скачать CSV</button>
+            <button class="btn btn-ghost" onclick="loadAll()">🔄 Обновить</button>
+          </div>
+        </div>
+        <div id="checklistRecordsListAlmaty"></div>
+      </div>
+    </div>
+
+    <!-- ══ ТЕХНИКА — АШЫКТАС ══ -->
+    <div id="tabEquipmentAshyktas" class="screen">
+      <div class="panel">
+        <div class="panel-title">
+          Реестр техники — Ашыктас
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-ghost" onclick="openBulkEquipmentModal('Ашыктас')">📋 Массовая загрузка</button>
+            <button class="btn btn-gold" onclick="openEquipmentModal('Ашыктас')">➕ Зарегистрировать единицу</button>
+          </div>
+        </div>
+        <div class="filters">
+          <input type="text" id="searchEquipmentAshyktas" placeholder="🔍 Поиск по номеру/модели..." oninput="renderEquipmentList('Ашыктас','equipmentListAshyktas','searchEquipmentAshyktas')">
+        </div>
+        <div id="equipmentListAshyktas" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">📊 Аналитика по осмотрам — Ашыктас</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+          <div>
+            <div style="font-size:13px;font-weight:700;color:var(--navy2);margin-bottom:8px">По технике — где чаще всего неисправности</div>
+            <div id="analyticsByEquipmentAshyktas"></div>
+          </div>
+          <div>
+            <div style="font-size:13px;font-weight:700;color:var(--navy2);margin-bottom:8px">Топ повторяющихся неисправностей</div>
+            <div id="analyticsByItemAshyktas"></div>
+          </div>
+        </div>
+        <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
+          <div style="font-size:13px;font-weight:700;color:var(--navy2);margin-bottom:8px">💬 Свежие комментарии</div>
+          <div id="analyticsCommentsAshyktas"></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">
+          Проведённые осмотры — Ашыктас
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-ghost" onclick="exportChecklistCSV('Ашыктас')">⬇️ Скачать CSV</button>
+            <button class="btn btn-ghost" onclick="loadAll()">🔄 Обновить</button>
+          </div>
+        </div>
+        <div id="checklistRecordsListAshyktas"></div>
+      </div>
+    </div>
+
+    <!-- ══ ШАБЛОНЫ ЧЕК-ЛИСТОВ (общие, не зависят от участка) ══ -->
+    <div id="tabChecklistTemplates" class="screen">
+      <div class="panel">
         <div class="panel-title">Шаблоны чек-листов осмотра</div>
         <p style="font-size:13px;color:var(--gray);margin-bottom:12px;line-height:1.5">
+          Один шаблон применим к технике на любом участке — здесь общий список, не разделённый.
           Вставьте JSON шаблона (его готовит Клод по вашему запросу) и нажмите «Добавить».
           Если шаблон с таким <code>templateId</code> уже существует — он будет полностью заменён.
         </p>
@@ -436,35 +520,6 @@ tr:hover td { background:#FAFBFD; }
         </div>
 
         <div id="checklistTemplatesList" style="margin-top:20px"></div>
-      </div>
-
-      <div class="panel">
-        <div class="panel-title">📊 Аналитика по осмотрам</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-          <div>
-            <div style="font-size:13px;font-weight:700;color:var(--navy2);margin-bottom:8px">По технике — где чаще всего неисправности</div>
-            <div id="analyticsByEquipment"></div>
-          </div>
-          <div>
-            <div style="font-size:13px;font-weight:700;color:var(--navy2);margin-bottom:8px">Топ повторяющихся неисправностей</div>
-            <div id="analyticsByItem"></div>
-          </div>
-        </div>
-        <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
-          <div style="font-size:13px;font-weight:700;color:var(--navy2);margin-bottom:8px">💬 Свежие комментарии</div>
-          <div id="analyticsComments"></div>
-        </div>
-      </div>
-
-      <div class="panel">
-        <div class="panel-title">
-          Проведённые осмотры
-          <div style="display:flex;gap:8px">
-            <button class="btn btn-ghost" onclick="exportChecklistCSV()">⬇️ Скачать CSV</button>
-            <button class="btn btn-ghost" onclick="loadAll()">🔄 Обновить</button>
-          </div>
-        </div>
-        <div id="checklistRecordsList"></div>
       </div>
     </div>
 
@@ -947,129 +1002,41 @@ function jsonpFetch(url, callbackName) {
 
 async function loadAll() {
   document.getElementById("loadingMsg").style.display = "block";
+  DATA.criticalLoadFailed = false;
 
-  // Сотрудники
-  try {
-    const d = await jsonpFetch(`${CFG.SHEET_URL}?action=list`, "cb_employees");
-    if (Array.isArray(d) && d.length > 0) {
-      DATA.employees = d;
-      DATA.criticalLoadFailed = false;
+  // Все запросы уходят параллельно, а не по очереди — раньше полная загрузка
+  // ждала каждый ответ по отдельности (11 запросов подряд), теперь все летят
+  // разом и ждём самый медленный, а не сумму всех.
+  const fetches = [
+    { key: "employees",         action: "list",                    cb: "cb_employees",           critical: true  },
+    { key: "results",           action: "getResults",              cb: "cb_results",              critical: true  },
+    { key: "training",          action: "getTraining",             cb: "cb_training"                              },
+    { key: "requirements",      action: "getRequirements",         cb: "cb_requirements"                          },
+    { key: "tests",             action: "getTests",                cb: "cb_tests"                                 },
+    { key: "personnelEvents",   action: "getPersonnelEvents",      cb: "cb_personnel_events"                      },
+    { key: "surveys",           action: "getSurveys",              cb: "cb_surveys"                               },
+    { key: "equipment",         action: "getEquipment",            cb: "cb_equipment"                             },
+    { key: "checklistTemplates",action: "getChecklistTemplates",   cb: "cb_checklist_templates"                   },
+    { key: "checklistRecords",  action: "getChecklistRecords",     cb: "cb_checklist_records"                     },
+    { key: "fuel",              action: "getFuelRecords",          cb: "cb_fuel_records"                          },
+    { key: "shiftAssignments",  action: "getShiftAssignments",     cb: "cb_shift_assignments"                     },
+  ];
+
+  const settled = await Promise.allSettled(
+    fetches.map(f => jsonpFetch(`${CFG.SHEET_URL}?action=${f.action}`, f.cb))
+  );
+
+  settled.forEach((res, i) => {
+    const f = fetches[i];
+    const ok = res.status === "fulfilled" && Array.isArray(res.value) && (f.critical ? res.value.length > 0 : true);
+    if (ok) {
+      DATA[f.key] = res.value;
     } else {
-      // Пустой или неожиданный ответ — не подставляем фейковые данные молча,
-      // а честно показываем, что не загрузилось.
-      DATA.employees = [];
-      DATA.criticalLoadFailed = true;
+      DATA[f.key] = [];
+      if (f.critical) DATA.criticalLoadFailed = true;
+      if (res.status === "rejected") console.error(f.key + ":", res.reason);
     }
-  } catch(e) {
-    console.error("Сотрудники:", e);
-    DATA.employees = [];
-    DATA.criticalLoadFailed = true;
-  }
-
-  // Результаты
-  try {
-    const d = await jsonpFetch(`${CFG.SHEET_URL}?action=getResults`, "cb_results");
-    if (Array.isArray(d) && d.length > 0) {
-      DATA.results = d;
-    } else {
-      DATA.results = [];
-      DATA.criticalLoadFailed = true;
-    }
-  } catch(e) {
-    console.error("Результаты:", e);
-    DATA.results = [];
-    DATA.criticalLoadFailed = true;
-  }
-
-  // Обучение по профессии
-  try {
-    const d = await jsonpFetch(`${CFG.SHEET_URL}?action=getTraining`, "cb_training");
-    DATA.training = Array.isArray(d) ? d : [];
-  } catch(e) {
-    console.error("Обучение:", e);
-    DATA.training = [];
-  }
-
-  // Требования по должностям
-  try {
-    const d = await jsonpFetch(`${CFG.SHEET_URL}?action=getRequirements`, "cb_requirements");
-    DATA.requirements = Array.isArray(d) ? d : [];
-  } catch(e) {
-    console.error("Требования:", e);
-    DATA.requirements = [];
-  }
-
-  // Тесты — нужны для выбора при задании требований по должностям
-  try {
-    const d = await jsonpFetch(`${CFG.SHEET_URL}?action=getTests`, "cb_tests");
-    DATA.tests = Array.isArray(d) ? d : [];
-  } catch(e) {
-    console.error("Тесты:", e);
-    DATA.tests = [];
-  }
-
-  // Личное дело — поощрения, награды, взыскания
-  try {
-    const d = await jsonpFetch(`${CFG.SHEET_URL}?action=getPersonnelEvents`, "cb_personnel_events");
-    DATA.personnelEvents = Array.isArray(d) ? d : [];
-  } catch(e) {
-    console.error("Личное дело:", e);
-    DATA.personnelEvents = [];
-  }
-
-  // Анкеты на проверку
-  try {
-    const d = await jsonpFetch(`${CFG.SHEET_URL}?action=getSurveys`, "cb_surveys");
-    DATA.surveys = Array.isArray(d) ? d : [];
-  } catch(e) {
-    console.error("Анкеты:", e);
-    DATA.surveys = [];
-  }
-
-  // Реестр техники
-  try {
-    const d = await jsonpFetch(`${CFG.SHEET_URL}?action=getEquipment`, "cb_equipment");
-    DATA.equipment = Array.isArray(d) ? d : [];
-  } catch(e) {
-    console.error("Техника:", e);
-    DATA.equipment = [];
-  }
-
-  // Шаблоны чек-листов
-  try {
-    const d = await jsonpFetch(`${CFG.SHEET_URL}?action=getChecklistTemplates`, "cb_checklist_templates");
-    DATA.checklistTemplates = Array.isArray(d) ? d : [];
-  } catch(e) {
-    console.error("Шаблоны чек-листов:", e);
-    DATA.checklistTemplates = [];
-  }
-
-  // Проведённые осмотры техники
-  try {
-    const d = await jsonpFetch(`${CFG.SHEET_URL}?action=getChecklistRecords`, "cb_checklist_records");
-    DATA.checklistRecords = Array.isArray(d) ? d : [];
-  } catch(e) {
-    console.error("Осмотры техники:", e);
-    DATA.checklistRecords = [];
-  }
-
-  // Заправки
-  try {
-    const d = await jsonpFetch(`${CFG.SHEET_URL}?action=getFuelRecords`, "cb_fuel_records");
-    DATA.fuel = Array.isArray(d) ? d : [];
-  } catch(e) {
-    console.error("Заправки:", e);
-    DATA.fuel = [];
-  }
-
-  // Смены — привязка операторов к технике по вахте/смене
-  try {
-    const d = await jsonpFetch(`${CFG.SHEET_URL}?action=getShiftAssignments`, "cb_shift_assignments");
-    DATA.shiftAssignments = Array.isArray(d) ? d : [];
-  } catch(e) {
-    console.error("Смены:", e);
-    DATA.shiftAssignments = [];
-  }
+  });
 
   document.getElementById("loadingMsg").style.display = "none";
   document.getElementById("criticalErrorBanner").style.display = DATA.criticalLoadFailed ? "block" : "none";
@@ -1086,10 +1053,13 @@ function renderAll() {
   renderTrainingTable();
   renderPersonnelList();
   renderSurveysList();
-  renderEquipmentList();
+  renderEquipmentList("Алмалы", "equipmentListAlmaty", "searchEquipmentAlmaty");
+  renderEquipmentList("Ашыктас", "equipmentListAshyktas", "searchEquipmentAshyktas");
   renderChecklistTemplatesList();
-  renderChecklistRecordsList();
-  renderChecklistAnalytics();
+  renderChecklistRecordsList("Алмалы");
+  renderChecklistRecordsList("Ашыктас");
+  renderChecklistAnalytics("Алмалы");
+  renderChecklistAnalytics("Ашыктас");
   renderFuelAnalytics();
   renderFuelRecordsList();
   renderReportPeriodButtons();
@@ -1103,7 +1073,7 @@ function renderAll() {
 // НАВИГАЦИЯ
 // ══════════════════════════════════════════════════════
 function showTab(name) {
-  ["dash","tests","access","print","certPrint","training","personnel","surveys","equipment","fuel","reports","shift1","shift2","shift1a","shift2a","import"].forEach(t => {
+  ["dash","tests","access","print","certPrint","training","personnel","surveys","equipmentAlmaty","equipmentAshyktas","checklistTemplates","fuel","reports","shift1","shift2","shift1a","shift2a","import"].forEach(t => {
     document.getElementById("tab"+cap(t)).classList.remove("active");
     document.getElementById("nav"+cap(t)).classList.remove("active");
   });
@@ -3132,12 +3102,23 @@ async function handleRejectSurvey(row) {
 // ══════════════════════════════════════════════════════
 // ТЕХНИКА И ЧЕК-ЛИСТЫ
 // ══════════════════════════════════════════════════════
-function renderEquipmentList() {
-  const el = document.getElementById("equipmentList");
+function renderEquipmentList(site, containerId, searchId) {
+  const el = document.getElementById(containerId);
   if (!el) return;
-  const list = DATA.equipment || [];
+  const q = (document.getElementById(searchId)?.value||"").toLowerCase();
 
-  el.innerHTML = list.length ? list.map(e => `
+  const list = (DATA.equipment||[]).filter(e => {
+    if ((e.site||"").trim() !== site) return false;
+    if (q && !(`${e.equipmentId} ${e.model}`).toLowerCase().includes(q)) return false;
+    return true;
+  });
+
+  if (!list.length) {
+    el.innerHTML = `<div class="empty"><div class="empty-icon">🚜</div>Ничего не найдено</div>`;
+    return;
+  }
+
+  el.innerHTML = list.map(e => `
     <div style="padding:12px;border:1px solid var(--border);border-radius:10px;background:#fff">
       <div style="font-weight:700;color:var(--navy);font-size:14px">${e.equipmentId}</div>
       <div style="font-size:12px;color:var(--gray);margin-top:2px">${e.model||"—"}${e.type?" · "+e.type:""}</div>
@@ -3147,17 +3128,20 @@ function renderEquipmentList() {
       </div>
       <button class="btn btn-ghost" style="margin-top:8px;font-size:12px;padding:6px" onclick="showEquipmentQR('${e.equipmentId}')">🔗 Показать QR</button>
       <button class="btn btn-ghost" style="margin-top:6px;font-size:12px;padding:6px;color:var(--red)" onclick="deleteEquipmentUnit('${e.equipmentId}')">🗑 Удалить</button>
-    </div>
-  `).join("") : `<div class="empty"><div class="empty-icon">🚜</div>Техника ещё не зарегистрирована</div>`;
+    </div>`).join("");
 }
 
-function openBulkEquipmentModal() {
+let BULK_EQUIPMENT_SITE = "Алмалы";
+
+function openBulkEquipmentModal(site) {
+  BULK_EQUIPMENT_SITE = site;
   const templates = DATA.checklistTemplates || [];
   openModal(`
-    <div style="font-size:16px;font-weight:800;color:var(--navy);margin-bottom:16px">📋 Массовая загрузка техники</div>
+    <div style="font-size:16px;font-weight:800;color:var(--navy);margin-bottom:16px">📋 Массовая загрузка техники — ${site}</div>
     <p style="font-size:12px;color:var(--gray);margin-bottom:10px;line-height:1.5">
       Вставьте JSON-массив (его готовит Клод по вашему списку). Единицы с уже существующим
-      номером пропускаются, дублей не будет. Доступные шаблоны: ${templates.map(t=>t.id).join(", ") || "нет ни одного"}.
+      номером пропускаются, дублей не будет. Участок «${site}» подставится сам, если не указан явно в самой записи.
+      Доступные шаблоны: ${templates.map(t=>t.id).join(", ") || "нет ни одного"}.
     </p>
     <textarea id="bulkEquipmentJson" placeholder='[
   {"equipmentId":"HT151","model":"SANY SKT115S","type":"Самосвал","templateId":"samosval"}
@@ -3188,6 +3172,7 @@ async function submitBulkEquipment() {
     status.textContent = "❌ Нужен непустой список.";
     return;
   }
+  items = items.map(it => ({ site: BULK_EQUIPMENT_SITE, ...it }));
   status.style.color = "var(--gray)";
   status.textContent = "⏳ Загрузка...";
   try {
@@ -3207,25 +3192,24 @@ async function submitBulkEquipment() {
   }
 }
 
-function openEquipmentModal() {
+function openEquipmentModal(site) {
   const templates = DATA.checklistTemplates || [];
   openModal(`
-    <div style="font-size:16px;font-weight:800;color:var(--navy);margin-bottom:16px">➕ Зарегистрировать технику</div>
+    <div style="font-size:16px;font-weight:800;color:var(--navy);margin-bottom:16px">➕ Зарегистрировать технику — ${site}</div>
     <div style="display:flex;flex-direction:column;gap:10px">
       <input id="eqId" placeholder="Номер техники (свой, уникальный)" style="padding:10px;border:1px solid var(--border);border-radius:8px">
       <input id="eqModel" placeholder="Модель (напр. SANY SKT115S)" style="padding:10px;border:1px solid var(--border);border-radius:8px">
       <input id="eqType" placeholder="Тип (Самосвал, Экскаватор...)" style="padding:10px;border:1px solid var(--border);border-radius:8px">
       <select id="eqSite" style="padding:10px;border:1px solid var(--border);border-radius:8px">
-        <option value="">Участок — не указан</option>
-        <option value="Алмалы">Алмалы</option>
-        <option value="Ашыктас">Ашыктас</option>
+        <option value="Алмалы" ${site==='Алмалы'?'selected':''}>Алмалы</option>
+        <option value="Ашыктас" ${site==='Ашыктас'?'selected':''}>Ашыктас</option>
       </select>
       <input id="eqInventory" placeholder="Инвентарный/гос. номер (необязательно)" style="padding:10px;border:1px solid var(--border);border-radius:8px">
       <select id="eqTemplateId" style="padding:10px;border:1px solid var(--border);border-radius:8px">
         <option value="">Шаблон чек-листа — не выбран</option>
         ${templates.map(t => `<option value="${t.id}">${t.title} (${t.id})</option>`).join("")}
       </select>
-      ${templates.length === 0 ? `<div style="font-size:12px;color:var(--red)">Сначала загрузите хотя бы один шаблон чек-листа ниже на этой же вкладке.</div>` : ""}
+      ${templates.length === 0 ? `<div style="font-size:12px;color:var(--red)">Сначала загрузите хотя бы один шаблон чек-листа на вкладке «Шаблоны чек-листов».</div>` : ""}
     </div>
     <div id="eqStatus" style="margin-top:10px;font-size:13px"></div>
     <div style="display:flex;gap:8px;margin-top:16px">
@@ -3389,17 +3373,21 @@ function loadTemplateForEdit(idx) {
   document.getElementById("importChecklistJson").scrollIntoView({ behavior:"smooth", block:"center" });
 }
 
-function renderChecklistAnalytics() {
-  const records = DATA.checklistRecords || [];
-  const equipment = DATA.equipment || [];
+function renderChecklistAnalytics(site) {
+  const suffix = site === "Ашыктас" ? "Ashyktas" : "Almaty";
+  const equipment = (DATA.equipment||[]).filter(e => (e.site||"").trim() === site);
+  const eqIds = new Set(equipment.map(e => String(e.equipmentId)));
+  const records = (DATA.checklistRecords||[]).filter(r => eqIds.has(String(r.equipmentId)));
 
-  const byEqEl = document.getElementById("analyticsByEquipment");
-  const byItemEl = document.getElementById("analyticsByItem");
+  const byEqEl = document.getElementById("analyticsByEquipment"+suffix);
+  const byItemEl = document.getElementById("analyticsByItem"+suffix);
   if (!byEqEl || !byItemEl) return;
 
   if (!records.length) {
     byEqEl.innerHTML = `<div class="empty" style="padding:16px"><div class="empty-icon">📊</div>Пока нет данных</div>`;
     byItemEl.innerHTML = `<div class="empty" style="padding:16px"><div class="empty-icon">📊</div>Пока нет данных</div>`;
+    const c = document.getElementById("analyticsComments"+suffix);
+    if (c) c.innerHTML = `<div class="empty" style="padding:16px"><div class="empty-icon">💬</div>Комментариев нет</div>`;
     return;
   }
 
@@ -3433,7 +3421,7 @@ function renderChecklistAnalytics() {
     `;
   }).join("");
 
-  // ── Топ пунктов, чаще всего отмечаемых как неисправность, по всей технике ──
+  // ── Топ пунктов, чаще всего отмечаемых как неисправность, на этом участке ──
   const itemStats = {};
   records.forEach(r => {
     r.items.forEach(it => {
@@ -3455,10 +3443,8 @@ function renderChecklistAnalytics() {
     </div>
   `).join("") : `<div class="empty" style="padding:16px"><div class="empty-icon">✓</div>Неисправностей не найдено</div>`;
 
-  // ── Все комментарии по всем осмотрам, включая общие (не привязанные
-  // к конкретному "неисправно"-пункту) — иначе они не видны нигде, кроме
-  // как раскрыв конкретную запись вручную и пролистав все пункты.
-  const commentsEl = document.getElementById("analyticsComments");
+  // ── Комментарии по осмотрам этого участка ──
+  const commentsEl = document.getElementById("analyticsComments"+suffix);
   if (commentsEl) {
     const allComments = [];
     records.forEach(r => {
@@ -3489,10 +3475,12 @@ function renderChecklistAnalytics() {
   }
 }
 
-function renderChecklistRecordsList() {
-  const el = document.getElementById("checklistRecordsList");
+function renderChecklistRecordsList(site) {
+  const suffix = site === "Ашыктас" ? "Ashyktas" : "Almaty";
+  const el = document.getElementById("checklistRecordsList"+suffix);
   if (!el) return;
-  const list = DATA.checklistRecords || [];
+  const eqIds = new Set((DATA.equipment||[]).filter(e => (e.site||"").trim() === site).map(e => String(e.equipmentId)));
+  const list = (DATA.checklistRecords||[]).filter(r => eqIds.has(String(r.equipmentId)));
   if (!list.length) {
     el.innerHTML = `<div class="empty"><div class="empty-icon">📋</div>Осмотров пока нет</div>`;
     return;
@@ -3502,10 +3490,11 @@ function renderChecklistRecordsList() {
     const defects = r.items.filter(it => it.status === "defect");
     const eq = (DATA.equipment||[]).find(e => String(e.equipmentId)===String(r.equipmentId));
     const eqLabel = eq ? `${eq.equipmentId} — ${eq.model}` : r.equipmentId;
+    const detailId = `checklistRecordDetail${suffix}${idx}`;
 
     return `
       <div style="padding:12px;border:1px solid var(--border);border-radius:10px;margin-bottom:8px;background:#fff">
-        <div style="display:flex;justify-content:space-between;align-items:center;cursor:pointer" onclick="toggleChecklistRecord(${idx})">
+        <div style="display:flex;justify-content:space-between;align-items:center;cursor:pointer" onclick="toggleChecklistRecord('${detailId}')">
           <div>
             <div style="font-weight:700;color:var(--navy)">${eqLabel}</div>
             <div style="font-size:12px;color:var(--gray)">${r.empName} · ${fmtRecordDateTime(r.date)}</div>
@@ -3515,7 +3504,7 @@ function renderChecklistRecordsList() {
             : `<span style="background:var(--greenbg);color:var(--green);font-size:12px;font-weight:700;padding:3px 10px;border-radius:99px">✓ Без замечаний</span>`
           }
         </div>
-        <div id="checklistRecordDetail${idx}" style="display:none;margin-top:12px;border-top:1px solid var(--border);padding-top:10px">
+        <div id="${detailId}" style="display:none;margin-top:12px;border-top:1px solid var(--border);padding-top:10px">
           ${r.items.map(it => `
             <div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px;gap:10px">
               <span style="color:${it.status==='defect'?'var(--red)':'var(--navy)'}">${it.itemText}</span>
@@ -3529,8 +3518,8 @@ function renderChecklistRecordsList() {
   }).join("");
 }
 
-function toggleChecklistRecord(idx) {
-  const el = document.getElementById("checklistRecordDetail"+idx);
+function toggleChecklistRecord(detailId) {
+  const el = document.getElementById(detailId);
   if (el) el.style.display = el.style.display === "none" ? "block" : "none";
 }
 
@@ -3724,10 +3713,11 @@ function exportFuelCSV() {
   downloadCSV([headers, ...rows], `Заправки_${today()}.csv`);
 }
 
-function exportChecklistCSV() {
+function exportChecklistCSV(site) {
+  const eqIds = new Set((DATA.equipment||[]).filter(e => (e.site||"").trim() === site).map(e => String(e.equipmentId)));
   const headers = ["Дата и время","Техника","Шаблон","Сотрудник","Раздел","Пункт","Статус","Комментарий"];
   const rows = [];
-  (DATA.checklistRecords || []).forEach(rec => {
+  (DATA.checklistRecords || []).filter(rec => eqIds.has(String(rec.equipmentId))).forEach(rec => {
     (rec.items || []).forEach(it => {
       rows.push([
         fmtRecordDateTime(rec.date),
@@ -3741,7 +3731,7 @@ function exportChecklistCSV() {
       ]);
     });
   });
-  downloadCSV([headers, ...rows], `Осмотры_${today()}.csv`);
+  downloadCSV([headers, ...rows], `Осмотры_${site}_${today()}.csv`);
 }
 
 // ══════════════════════════════════════════════════════
