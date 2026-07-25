@@ -211,8 +211,10 @@ tr:hover td { background:#FAFBFD; }
     <button id="navEquipmentAlmaty"  onclick="showTab('equipmentAlmaty')">🚜 Техника (Алмалы)</button>
     <button id="navEquipmentAshyktas" onclick="showTab('equipmentAshyktas')">🚜 Техника (Ашыктас)</button>
     <button id="navChecklistTemplates" onclick="showTab('checklistTemplates')">🔧 Шаблоны чек-листов</button>
-    <button id="navFuel"     onclick="showTab('fuel')">⛽ Топливо</button>
-    <button id="navReports"  onclick="showTab('reports')">📄 Отчёты</button>
+    <button id="navFuelAlmaty"   onclick="showTab('fuelAlmaty')">⛽ Топливо (Алмалы)</button>
+    <button id="navFuelAshyktas" onclick="showTab('fuelAshyktas')">⛽ Топливо (Ашыктас)</button>
+    <button id="navReportsAlmaty"   onclick="showTab('reportsAlmaty')">📄 Отчёты (Алмалы)</button>
+    <button id="navReportsAshyktas" onclick="showTab('reportsAshyktas')">📄 Отчёты (Ашыктас)</button>
     <button id="navShift1"   onclick="showTab('shift1')">👷 Вахта 1 (Алмалы)</button>
     <button id="navShift2"   onclick="showTab('shift2')">👷 Вахта 2 (Алмалы)</button>
     <button id="navShift1a"  onclick="showTab('shift1a')">👷 Вахта 1 (Ашыктас)</button>
@@ -524,24 +526,24 @@ tr:hover td { background:#FAFBFD; }
     </div>
 
     <!-- ══ ТОПЛИВО ══ -->
-    <div id="tabFuel" class="screen">
+    <div id="tabFuelAlmaty" class="screen">
       <div class="panel">
         <div class="panel-title">
-          ⛽ Аналитика по топливу
-          <div style="display:flex;gap:6px" id="fuelPeriodButtons"></div>
+          ⛽ Аналитика по топливу — Алмалы
+          <div style="display:flex;gap:6px" id="fuelPeriodButtonsAlmaty"></div>
         </div>
-        <div class="stats-grid" id="statsGridFuel" style="margin-bottom:0"></div>
+        <div class="stats-grid" id="statsGridFuelAlmaty" style="margin-bottom:0"></div>
       </div>
 
       <div class="panel">
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
           <div>
             <div style="font-size:13px;font-weight:700;color:var(--navy2);margin-bottom:8px">По технике — литров за период</div>
-            <div id="fuelByEquipment"></div>
+            <div id="fuelByEquipmentAlmaty"></div>
           </div>
           <div>
             <div style="font-size:13px;font-weight:700;color:var(--navy2);margin-bottom:8px">По сменам (день 07:00–19:00 / ночь 19:00–07:00)</div>
-            <div id="fuelByShift"></div>
+            <div id="fuelByShiftAlmaty"></div>
             <div style="font-size:11px;color:var(--gray);margin-top:10px;line-height:1.5">
               Смена определяется по времени записи заправки на устройстве, которое её сделало.
             </div>
@@ -551,62 +553,147 @@ tr:hover td { background:#FAFBFD; }
 
       <div class="panel">
         <div style="font-size:13px;font-weight:700;color:var(--navy2);margin-bottom:8px">По дням</div>
-        <div id="fuelByDay"></div>
+        <div id="fuelByDayAlmaty"></div>
       </div>
 
       <div class="panel">
         <div class="panel-title">
-          Записи заправок
+          Записи заправок — Алмалы
           <div style="display:flex;gap:8px">
-            <button class="btn btn-ghost" onclick="exportFuelCSV()">⬇️ Скачать CSV</button>
+            <button class="btn btn-ghost" onclick="exportFuelCSV('Алмалы')">⬇️ Скачать CSV</button>
             <button class="btn btn-ghost" onclick="loadAll()">🔄 Обновить</button>
           </div>
         </div>
-        <div id="fuelRecordsList"></div>
+        <div id="fuelRecordsListAlmaty"></div>
+      </div>
+    </div>
+
+    <div id="tabFuelAshyktas" class="screen">
+      <div class="panel">
+        <div class="panel-title">
+          ⛽ Аналитика по топливу — Ашыктас
+          <div style="display:flex;gap:6px" id="fuelPeriodButtonsAshyktas"></div>
+        </div>
+        <div class="stats-grid" id="statsGridFuelAshyktas" style="margin-bottom:0"></div>
+      </div>
+
+      <div class="panel">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+          <div>
+            <div style="font-size:13px;font-weight:700;color:var(--navy2);margin-bottom:8px">По технике — литров за период</div>
+            <div id="fuelByEquipmentAshyktas"></div>
+          </div>
+          <div>
+            <div style="font-size:13px;font-weight:700;color:var(--navy2);margin-bottom:8px">По сменам (день 07:00–19:00 / ночь 19:00–07:00)</div>
+            <div id="fuelByShiftAshyktas"></div>
+            <div style="font-size:11px;color:var(--gray);margin-top:10px;line-height:1.5">
+              Смена определяется по времени записи заправки на устройстве, которое её сделало.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div style="font-size:13px;font-weight:700;color:var(--navy2);margin-bottom:8px">По дням</div>
+        <div id="fuelByDayAshyktas"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">
+          Записи заправок — Ашыктас
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-ghost" onclick="exportFuelCSV('Ашыктас')">⬇️ Скачать CSV</button>
+            <button class="btn btn-ghost" onclick="loadAll()">🔄 Обновить</button>
+          </div>
+        </div>
+        <div id="fuelRecordsListAshyktas"></div>
       </div>
     </div>
 
     <!-- ══ ОТЧЁТЫ ══ -->
-    <div id="tabReports" class="screen">
+    <div id="tabReportsAlmaty" class="screen">
       <div class="panel">
         <div class="panel-title">
-          📄 Сформировать отчёт
-          <div style="display:flex;gap:6px" id="reportPeriodButtons"></div>
+          📄 Сформировать отчёт — Алмалы
+          <div style="display:flex;gap:6px" id="reportPeriodButtonsAlmaty"></div>
         </div>
         <div class="hint" style="margin-bottom:12px">
           Текстовая сводка по топливу и осмотрам за выбранный период, с сравнением к предыдущему такому же периоду.
         </div>
         <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
           <label style="font-size:13px;color:var(--gray)">Тренд по конкретной машине (необязательно):</label>
-          <select id="reportTrendEquipment" style="max-width:280px"><option value="">— не выбрано —</option></select>
+          <select id="reportTrendEquipmentAlmaty" style="max-width:280px"><option value="">— не выбрано —</option></select>
         </div>
-        <button class="btn btn-gold" style="width:auto;padding:10px 20px" onclick="generateReport()">📄 Сформировать отчёт</button>
+        <button class="btn btn-gold" style="width:auto;padding:10px 20px" onclick="generateReport('Алмалы')">📄 Сформировать отчёт</button>
       </div>
 
-      <div class="panel" id="reportOutputPanel" style="display:none">
+      <div class="panel" id="reportOutputPanelAlmaty" style="display:none">
         <div class="panel-title">
           Отчёт
-          <button class="btn btn-ghost" onclick="copyReportText()">📋 Скопировать текст</button>
+          <button class="btn btn-ghost" onclick="copyReportText('Алмалы')">📋 Скопировать текст</button>
         </div>
-        <div id="reportOutput" style="font-size:13px;line-height:1.7;color:var(--navy)"></div>
+        <div id="reportOutputAlmaty" style="font-size:13px;line-height:1.7;color:var(--navy)"></div>
       </div>
 
       <div class="panel" style="border-top:3px solid var(--gold);margin-top:24px">
         <div class="panel-title">
-          📊 Сводный отчёт по всей системе
+          📊 Сводный отчёт — Алмалы
         </div>
         <div class="hint" style="margin-bottom:12px">
-          Кадры + техника + осмотры + топливо + обучение — одним снимком на текущий момент, с выводами и рекомендациями. Для руководителя: одна кнопка, весь срез.
+          Кадры + техника + осмотры + топливо + обучение этого участка одним снимком, с выводами и рекомендациями.
         </div>
-        <button class="btn btn-gold" style="width:auto;padding:10px 20px" onclick="generateFullSystemReport()">📊 Сформировать сводный отчёт</button>
+        <button class="btn btn-gold" style="width:auto;padding:10px 20px" onclick="generateFullSystemReport('Алмалы')">📊 Сформировать сводный отчёт</button>
       </div>
 
-      <div class="panel" id="fullReportOutputPanel" style="display:none">
+      <div class="panel" id="fullReportOutputPanelAlmaty" style="display:none">
         <div class="panel-title">
-          Сводный отчёт по системе
-          <button class="btn btn-ghost" onclick="copyFullReportText()">📋 Скопировать текст</button>
+          Сводный отчёт
+          <button class="btn btn-ghost" onclick="copyFullReportText('Алмалы')">📋 Скопировать текст</button>
         </div>
-        <div id="fullReportOutput" style="font-size:13px;line-height:1.7;color:var(--navy)"></div>
+        <div id="fullReportOutputAlmaty" style="font-size:13px;line-height:1.7;color:var(--navy)"></div>
+      </div>
+    </div>
+
+    <div id="tabReportsAshyktas" class="screen">
+      <div class="panel">
+        <div class="panel-title">
+          📄 Сформировать отчёт — Ашыктас
+          <div style="display:flex;gap:6px" id="reportPeriodButtonsAshyktas"></div>
+        </div>
+        <div class="hint" style="margin-bottom:12px">
+          Текстовая сводка по топливу и осмотрам за выбранный период, с сравнением к предыдущему такому же периоду.
+        </div>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+          <label style="font-size:13px;color:var(--gray)">Тренд по конкретной машине (необязательно):</label>
+          <select id="reportTrendEquipmentAshyktas" style="max-width:280px"><option value="">— не выбрано —</option></select>
+        </div>
+        <button class="btn btn-gold" style="width:auto;padding:10px 20px" onclick="generateReport('Ашыктас')">📄 Сформировать отчёт</button>
+      </div>
+
+      <div class="panel" id="reportOutputPanelAshyktas" style="display:none">
+        <div class="panel-title">
+          Отчёт
+          <button class="btn btn-ghost" onclick="copyReportText('Ашыктас')">📋 Скопировать текст</button>
+        </div>
+        <div id="reportOutputAshyktas" style="font-size:13px;line-height:1.7;color:var(--navy)"></div>
+      </div>
+
+      <div class="panel" style="border-top:3px solid var(--gold);margin-top:24px">
+        <div class="panel-title">
+          📊 Сводный отчёт — Ашыктас
+        </div>
+        <div class="hint" style="margin-bottom:12px">
+          Кадры + техника + осмотры + топливо + обучение этого участка одним снимком, с выводами и рекомендациями.
+        </div>
+        <button class="btn btn-gold" style="width:auto;padding:10px 20px" onclick="generateFullSystemReport('Ашыктас')">📊 Сформировать сводный отчёт</button>
+      </div>
+
+      <div class="panel" id="fullReportOutputPanelAshyktas" style="display:none">
+        <div class="panel-title">
+          Сводный отчёт
+          <button class="btn btn-ghost" onclick="copyFullReportText('Ашыктас')">📋 Скопировать текст</button>
+        </div>
+        <div id="fullReportOutputAshyktas" style="font-size:13px;line-height:1.7;color:var(--navy)"></div>
       </div>
     </div>
 
@@ -1060,9 +1147,12 @@ function renderAll() {
   renderChecklistRecordsList("Ашыктас");
   renderChecklistAnalytics("Алмалы");
   renderChecklistAnalytics("Ашыктас");
-  renderFuelAnalytics();
-  renderFuelRecordsList();
-  renderReportPeriodButtons();
+  renderFuelAnalytics("Алмалы");
+  renderFuelAnalytics("Ашыктас");
+  renderFuelRecordsList("Алмалы");
+  renderFuelRecordsList("Ашыктас");
+  renderReportPeriodButtons("Алмалы");
+  renderReportPeriodButtons("Ашыктас");
   renderShiftFormation(1, "shift1Formation", "Алмалы");
   renderShiftFormation(2, "shift2Formation", "Алмалы");
   renderShiftFormation(1, "shift1FormationAshyktas", "Ашыктас");
@@ -1073,7 +1163,7 @@ function renderAll() {
 // НАВИГАЦИЯ
 // ══════════════════════════════════════════════════════
 function showTab(name) {
-  ["dash","tests","access","print","certPrint","training","personnel","surveys","equipmentAlmaty","equipmentAshyktas","checklistTemplates","fuel","reports","shift1","shift2","shift1a","shift2a","import"].forEach(t => {
+  ["dash","tests","access","print","certPrint","training","personnel","surveys","equipmentAlmaty","equipmentAshyktas","checklistTemplates","fuelAlmaty","fuelAshyktas","reportsAlmaty","reportsAshyktas","shift1","shift2","shift1a","shift2a","import"].forEach(t => {
     document.getElementById("tab"+cap(t)).classList.remove("active");
     document.getElementById("nav"+cap(t)).classList.remove("active");
   });
@@ -3526,7 +3616,7 @@ function toggleChecklistRecord(detailId) {
 // ══════════════════════════════════════════════════════
 // ТОПЛИВО — аналитика и записи
 // ══════════════════════════════════════════════════════
-let FUEL_PERIOD = "week"; // "day" | "week" | "month" | "all"
+let FUEL_PERIOD = { "Алмалы": "week", "Ашыктас": "week" }; // "day" | "week" | "month" | "all"
 
 function fuelPeriodStart(period) {
   const now = new Date();
@@ -3542,23 +3632,26 @@ function fuelShiftOf(date) {
   return (h >= 7 && h < 19) ? "День" : "Ночь";
 }
 
-function setFuelPeriod(p) {
-  FUEL_PERIOD = p;
-  renderFuelAnalytics();
+function setFuelPeriod(site, p) {
+  FUEL_PERIOD[site] = p;
+  renderFuelAnalytics(site);
 }
 
-function renderFuelAnalytics() {
-  const btnsEl = document.getElementById("fuelPeriodButtons");
+function renderFuelAnalytics(site) {
+  const suffix = site === "Ашыктас" ? "Ashyktas" : "Almaty";
+  const btnsEl = document.getElementById("fuelPeriodButtons"+suffix);
   if (!btnsEl) return; // вкладка ещё не отрисована
 
+  const period = FUEL_PERIOD[site];
   const periods = [["day","Сутки"],["week","Неделя"],["month","Месяц"],["all","Всё время"]];
   btnsEl.innerHTML = periods.map(([key,label]) => `
-    <button class="btn ${FUEL_PERIOD===key?'btn-gold':'btn-ghost'}" style="width:auto;padding:8px 12px;font-size:12px"
-      onclick="setFuelPeriod('${key}')">${label}</button>
+    <button class="btn ${period===key?'btn-gold':'btn-ghost'}" style="width:auto;padding:8px 12px;font-size:12px"
+      onclick="setFuelPeriod('${site}','${key}')">${label}</button>
   `).join("");
 
-  const all = DATA.fuel || [];
-  const start = fuelPeriodStart(FUEL_PERIOD);
+  const eqIds = new Set((DATA.equipment||[]).filter(e => (e.site||"").trim() === site).map(e => String(e.equipmentId)));
+  const all = (DATA.fuel||[]).filter(f => eqIds.has(String(f.equipmentId)));
+  const start = fuelPeriodStart(period);
   const records = all.filter(f => {
     const d = parseRecordDate(f.date);
     return d && (!start || d >= start);
@@ -3567,7 +3660,7 @@ function renderFuelAnalytics() {
   const totalLiters = records.reduce((s,f) => s + (Number(f.amountLiters)||0), 0);
   const equipmentTouched = new Set(records.map(f=>f.equipmentId)).size;
 
-  document.getElementById("statsGridFuel").innerHTML = [
+  document.getElementById("statsGridFuel"+suffix).innerHTML = [
     {lbl:"Заправок за период",  val:records.length, acc:"var(--gold)"},
     {lbl:"Литров всего",        val:totalLiters.toLocaleString("ru-RU"), acc:"var(--navy2)"},
     {lbl:"В среднем за заправку, л", val: records.length ? Math.round(totalLiters/records.length) : 0, acc:"var(--navy2)"},
@@ -3580,7 +3673,7 @@ function renderFuelAnalytics() {
   `).join("");
 
   // ── По технике ──
-  const byEqEl = document.getElementById("fuelByEquipment");
+  const byEqEl = document.getElementById("fuelByEquipment"+suffix);
   if (byEqEl) {
     if (!records.length) {
       byEqEl.innerHTML = `<div class="empty" style="padding:16px"><div class="empty-icon">⛽</div>Заправок за период нет</div>`;
@@ -3611,7 +3704,7 @@ function renderFuelAnalytics() {
   }
 
   // ── По сменам ──
-  const byShiftEl = document.getElementById("fuelByShift");
+  const byShiftEl = document.getElementById("fuelByShift"+suffix);
   if (byShiftEl) {
     if (!records.length) {
       byShiftEl.innerHTML = `<div class="empty" style="padding:16px"><div class="empty-icon">⛽</div>Заправок за период нет</div>`;
@@ -3637,7 +3730,7 @@ function renderFuelAnalytics() {
   }
 
   // ── По дням ──
-  const byDayEl = document.getElementById("fuelByDay");
+  const byDayEl = document.getElementById("fuelByDay"+suffix);
   if (byDayEl) {
     if (!records.length) {
       byDayEl.innerHTML = `<div class="empty" style="padding:16px"><div class="empty-icon">⛽</div>Заправок за период нет</div>`;
@@ -3668,10 +3761,13 @@ function renderFuelAnalytics() {
   }
 }
 
-function renderFuelRecordsList() {
-  const el = document.getElementById("fuelRecordsList");
+function renderFuelRecordsList(site) {
+  const suffix = site === "Ашыктас" ? "Ashyktas" : "Almaty";
+  const el = document.getElementById("fuelRecordsList"+suffix);
   if (!el) return;
-  const list = (DATA.fuel || []).slice().sort((a,b) => (parseRecordDate(b.date)||0) - (parseRecordDate(a.date)||0));
+  const eqIds = new Set((DATA.equipment||[]).filter(e => (e.site||"").trim() === site).map(e => String(e.equipmentId)));
+  const list = (DATA.fuel || []).filter(f => eqIds.has(String(f.equipmentId)))
+    .sort((a,b) => (parseRecordDate(b.date)||0) - (parseRecordDate(a.date)||0));
   if (!list.length) {
     el.innerHTML = `<div class="empty"><div class="empty-icon">⛽</div>Заправок пока нет</div>`;
     return;
@@ -3696,9 +3792,10 @@ function renderFuelRecordsList() {
 // ══════════════════════════════════════════════════════
 // ЭКСПОРТ CSV (использует уже существующую downloadCSV(rows, filename), см. выше)
 // ══════════════════════════════════════════════════════
-function exportFuelCSV() {
+function exportFuelCSV(site) {
+  const eqIds = new Set((DATA.equipment||[]).filter(e => (e.site||"").trim() === site).map(e => String(e.equipmentId)));
   const headers = ["Дата и время","Техника","Модель","Сотрудник","Смена","Литры"];
-  const rows = (DATA.fuel || []).map(f => {
+  const rows = (DATA.fuel || []).filter(f => eqIds.has(String(f.equipmentId))).map(f => {
     const eq = (DATA.equipment||[]).find(e => String(e.equipmentId)===String(f.equipmentId));
     const d = parseRecordDate(f.date);
     return [
@@ -3710,7 +3807,7 @@ function exportFuelCSV() {
       Number(f.amountLiters) || 0,
     ];
   });
-  downloadCSV([headers, ...rows], `Заправки_${today()}.csv`);
+  downloadCSV([headers, ...rows], `Заправки_${site}_${today()}.csv`);
 }
 
 function exportChecklistCSV(site) {
@@ -3737,7 +3834,7 @@ function exportChecklistCSV(site) {
 // ══════════════════════════════════════════════════════
 // ОТЧЁТЫ — текстовые аналитические выводы за период
 // ══════════════════════════════════════════════════════
-let REPORT_PERIOD = "week"; // "day" | "week"
+let REPORT_PERIOD = { "Алмалы": "week", "Ашыктас": "week" }; // "day" | "week"
 
 function reportRange(period, offsetPeriods) {
   // offsetPeriods=0 — текущий период, -1 — предыдущий такой же (для сравнения)
@@ -4076,24 +4173,27 @@ async function deleteShiftAssignmentFromModal() {
   }
 }
 
-function setReportPeriod(p) {
-  REPORT_PERIOD = p;
-  renderReportPeriodButtons();
+function setReportPeriod(site, p) {
+  REPORT_PERIOD[site] = p;
+  renderReportPeriodButtons(site);
 }
 
-function renderReportPeriodButtons() {
-  const el = document.getElementById("reportPeriodButtons");
+function renderReportPeriodButtons(site) {
+  const suffix = site === "Ашыктас" ? "Ashyktas" : "Almaty";
+  const el = document.getElementById("reportPeriodButtons"+suffix);
   if (!el) return;
+  const period = REPORT_PERIOD[site];
   el.innerHTML = [["day","Сутки"],["week","Неделя"]].map(([key,label]) => `
-    <button class="btn ${REPORT_PERIOD===key?'btn-gold':'btn-ghost'}" style="width:auto;padding:8px 12px;font-size:12px"
-      onclick="setReportPeriod('${key}')">${label}</button>
+    <button class="btn ${period===key?'btn-gold':'btn-ghost'}" style="width:auto;padding:8px 12px;font-size:12px"
+      onclick="setReportPeriod('${site}','${key}')">${label}</button>
   `).join("");
 
-  const sel = document.getElementById("reportTrendEquipment");
+  const sel = document.getElementById("reportTrendEquipment"+suffix);
   if (sel && sel.options.length <= 1) {
     const prevVal = sel.value;
     sel.innerHTML = `<option value="">— не выбрано —</option>` +
-      (DATA.equipment||[]).slice().sort((a,b)=>String(a.equipmentId).localeCompare(String(b.equipmentId)))
+      (DATA.equipment||[]).filter(e => (e.site||"").trim() === site)
+        .slice().sort((a,b)=>String(a.equipmentId).localeCompare(String(b.equipmentId)))
         .map(e => `<option value="${e.equipmentId}">${e.equipmentId} — ${e.model}</option>`).join("");
     sel.value = prevVal;
   }
@@ -4191,9 +4291,11 @@ function computeConsumptionRate(equipmentId, start, end) {
 }
 
 // ── Топ проблемной техники за всё время (не только за период) ──
-function allTimeTopDefective(limit) {
+function allTimeTopDefective(limit, site) {
+  const eqIds = site ? new Set((DATA.equipment||[]).filter(e => (e.site||"").trim() === site).map(e => String(e.equipmentId))) : null;
   const counts = {};
   (DATA.checklistRecords||[]).forEach(rec => {
+    if (eqIds && !eqIds.has(String(rec.equipmentId))) return;
     (rec.items||[]).forEach(it => {
       if (it.status === "defect") counts[rec.equipmentId] = (counts[rec.equipmentId]||0) + 1;
     });
@@ -4238,8 +4340,9 @@ function shiftDefects(recCur) {
   return out;
 }
 
-function generateReport() {
-  const period = REPORT_PERIOD;
+function generateReport(site) {
+  const suffix = site === "Ашыктас" ? "Ashyktas" : "Almaty";
+  const period = REPORT_PERIOD[site];
   const periodLabel = period === "day" ? "сутки" : "неделю";
   const [start, end] = reportRange(period, 0);
   const [prevStart, prevEnd] = reportRange(period, -1);
@@ -4247,9 +4350,13 @@ function generateReport() {
   const fmtShort = d => `${String(d.getDate()).padStart(2,"0")}.${String(d.getMonth()+1).padStart(2,"0")}`;
   const rangeLabel = `${fmtShort(start)}–${fmtShort(new Date(end - 1))}`;
 
+  const siteEquipment = (DATA.equipment||[]).filter(e => (e.site||"").trim() === site);
+  const eqIds = new Set(siteEquipment.map(e => String(e.equipmentId)));
+
   // ── ТОПЛИВО ──
-  const fuelCur  = (DATA.fuel||[]).filter(f => inRange(f.date, start, end));
-  const fuelPrev = (DATA.fuel||[]).filter(f => inRange(f.date, prevStart, prevEnd));
+  const fuelAll  = (DATA.fuel||[]).filter(f => eqIds.has(String(f.equipmentId)));
+  const fuelCur  = fuelAll.filter(f => inRange(f.date, start, end));
+  const fuelPrev = fuelAll.filter(f => inRange(f.date, prevStart, prevEnd));
   const litersCur  = fuelCur.reduce((s,f)=>s+(Number(f.amountLiters)||0),0);
   const litersPrev = fuelPrev.reduce((s,f)=>s+(Number(f.amountLiters)||0),0);
 
@@ -4258,8 +4365,9 @@ function generateReport() {
   const topFuel = Object.entries(fuelByEq).sort((a,b)=>b[1]-a[1]).slice(0,3);
 
   // ── ОСМОТРЫ ──
-  const recCur  = (DATA.checklistRecords||[]).filter(r => inRange(r.date, start, end));
-  const recPrev = (DATA.checklistRecords||[]).filter(r => inRange(r.date, prevStart, prevEnd));
+  const chkAll = (DATA.checklistRecords||[]).filter(r => eqIds.has(String(r.equipmentId)));
+  const recCur  = chkAll.filter(r => inRange(r.date, start, end));
+  const recPrev = chkAll.filter(r => inRange(r.date, prevStart, prevEnd));
 
   let defectsCur = 0, itemsCur = 0;
   const defectTextCounts = {};
@@ -4279,12 +4387,12 @@ function generateReport() {
   let defectsPrev = 0, itemsPrev = 0;
   recPrev.forEach(r => (r.items||[]).forEach(it => { itemsPrev++; if (it.status==="defect") defectsPrev++; }));
 
-  const activeEquipment = (DATA.equipment||[]).filter(e => e.templateId);
+  const activeEquipment = siteEquipment.filter(e => e.templateId);
   const notInspected = activeEquipment.filter(e => !inspectedEquipmentIds.has(e.equipmentId));
 
   // ── СБОРКА: карточки + таблицы вместо абзацев ──
   const lines = [];
-  lines.push(`<div style="font-size:15px;font-weight:800;color:var(--navy);margin-bottom:4px">Отчёт за ${periodLabel} (${rangeLabel})</div>`);
+  lines.push(`<div style="font-size:15px;font-weight:800;color:var(--navy);margin-bottom:4px">Отчёт за ${periodLabel} (${rangeLabel}) — ${site}</div>`);
   lines.push(`<div style="font-size:11px;color:var(--gray);margin-bottom:16px">Сформирован ${fmtRecordDateTime(new Date().toISOString())}</div>`);
 
   // ⛽ Топливо
@@ -4338,7 +4446,7 @@ function generateReport() {
 
   // 🏆 Топ проблемной техники за всё время
   lines.push(reportSectionTitle("🏆","Топ проблемной техники за всё время"));
-  const allTimeTop = allTimeTopDefective(5);
+  const allTimeTop = allTimeTopDefective(5, site);
   lines.push(reportTable(
     ["Техника","Неисправностей"],
     allTimeTop.map(([id,c]) => [eqLabel(id), `<b>${c}</b>`]),
@@ -4346,7 +4454,7 @@ function generateReport() {
   ));
 
   // 📈 Тренд по выбранной машине
-  const trendEqId = (document.getElementById("reportTrendEquipment")||{}).value;
+  const trendEqId = (document.getElementById("reportTrendEquipment"+suffix)||{}).value;
   if (trendEqId) {
     lines.push(reportSectionTitle("📈",`Тренд по машине ${eqLabel(trendEqId)} — по неделям`));
     const trend = equipmentTrend(trendEqId, 6);
@@ -4379,13 +4487,14 @@ function generateReport() {
     ["🌙 Ночь — % дефектных", `${nightRate}%`, nightRate ? "var(--red)" : "var(--gold)"],
   ]));
 
-  document.getElementById("reportOutput").innerHTML = lines.join("\n");
-  document.getElementById("reportOutputPanel").style.display = "block";
-  document.getElementById("reportOutputPanel").scrollIntoView({ behavior:"smooth", block:"start" });
+  document.getElementById("reportOutput"+suffix).innerHTML = lines.join("\n");
+  document.getElementById("reportOutputPanel"+suffix).style.display = "block";
+  document.getElementById("reportOutputPanel"+suffix).scrollIntoView({ behavior:"smooth", block:"start" });
 }
 
-function copyReportText() {
-  const el = document.getElementById("reportOutput");
+function copyReportText(site) {
+  const suffix = site === "Ашыктас" ? "Ashyktas" : "Almaty";
+  const el = document.getElementById("reportOutput"+suffix);
   const text = el.innerText;
   navigator.clipboard.writeText(text).then(() => {
     alert("Текст отчёта скопирован в буфер обмена.");
@@ -4400,16 +4509,26 @@ function copyReportText() {
 // Считает по DATA, которая уже загружена в loadAll() — без
 // дополнительных запросов к серверу.
 // ══════════════════════════════════════════════════════
-function generateFullSystemReport() {
-  const emp   = DATA.employees || [];
-  const eq    = DATA.equipment || [];
-  const chk   = DATA.checklistRecords || [];
-  const fuel  = DATA.fuel || [];
-  const surv  = DATA.surveys || [];
-  const train = DATA.training || [];
-  const res   = DATA.results || [];
-  const pe    = DATA.personnelEvents || [];
-  const tpl   = DATA.checklistTemplates || [];
+function generateFullSystemReport(site) {
+  const suffix = site === "Ашыктас" ? "Ashyktas" : "Almaty";
+
+  const emp   = (DATA.employees||[]).filter(e => (e.site||"").trim() === site);
+  const eq    = (DATA.equipment||[]).filter(e => (e.site||"").trim() === site);
+  const eqIds = new Set(eq.map(e => String(e.equipmentId)));
+  const chk   = (DATA.checklistRecords||[]).filter(r => eqIds.has(String(r.equipmentId)));
+  const fuel  = (DATA.fuel||[]).filter(f => eqIds.has(String(f.equipmentId)));
+  const surv  = (DATA.surveys||[]).filter(s => (s.site||"").trim() === site);
+  const tpl   = DATA.checklistTemplates || []; // общие для всех участков, не фильтруем
+
+  // Обучение/тесты/личное дело привязаны к сотруднику, а не к технике —
+  // фильтруем по тому, чей это сотрудник этого участка (по empId, с
+  // подстраховкой по имени, если id почему-то не совпал).
+  const empIds = new Set(emp.map(e => String(e.id)));
+  const empNames = new Set(emp.map(e => e.name));
+  const belongsToSite = r => empIds.has(String(r.empId)) || empNames.has(r.empName);
+  const train = (DATA.training||[]).filter(belongsToSite);
+  const res   = (DATA.results||[]).filter(r => empIds.has(String(r.empId)) || empNames.has(getField(r,"empName","Сотрудник")));
+  const pe    = (DATA.personnelEvents||[]).filter(belongsToSite);
 
   const pct = (n, total) => total ? Math.round(n/total*100) : 0;
   const isTabelny = id => /^(SRC|CL|КУ)-/.test(String(id||""));
@@ -4430,8 +4549,6 @@ function generateFullSystemReport() {
 
   const tooCounts = {};
   emp.forEach(e => { const k = e.tooPrimary || "(не указано)"; tooCounts[k] = (tooCounts[k]||0)+1; });
-  const siteCounts = {};
-  emp.forEach(e => { const k = (e.site||"(не указано)").trim() || "(не указано)"; siteCounts[k] = (siteCounts[k]||0)+1; });
   const posCounts = {};
   emp.forEach(e => { const k = e.position || "(не указано)"; posCounts[k] = (posCounts[k]||0)+1; });
   const topPositions = Object.entries(posCounts).sort((a,b)=>b[1]-a[1]).slice(0,5);
@@ -4439,7 +4556,6 @@ function generateFullSystemReport() {
   // ── ТЕХНИКА ──
   const totalEq = eq.length;
   const withTpl = eq.filter(e => e.templateId).length;
-  const withSite = eq.filter(e => e.site).length;
   const typeCounts = {};
   eq.forEach(e => { const k = e.type || "(не указан)"; typeCounts[k] = (typeCounts[k]||0)+1; });
 
@@ -4454,7 +4570,7 @@ function generateFullSystemReport() {
   });
 
   // ── ТЕСТЫ ──
-  const passedTests = res.filter(r => String(r.result||"").includes("Сдал")).length;
+  const passedTests = res.filter(r => isPassed(r)).length;
 
   // ── АНКЕТЫ: динамика по часам ──
   const surveysByHour = {};
@@ -4468,7 +4584,7 @@ function generateFullSystemReport() {
   // ── СБОРКА: карточки + таблицы вместо абзацев ──
   const L = [];
 
-  L.push(`<div style="font-size:16px;font-weight:800;color:var(--navy)">Сводный отчёт по системе «Допуск в карьер»</div>`);
+  L.push(`<div style="font-size:16px;font-weight:800;color:var(--navy)">Сводный отчёт — ${site}</div>`);
   L.push(`<div style="font-size:11px;color:var(--gray);margin-bottom:8px">Снимок на ${fmtRecordDateTime(new Date().toISOString())}</div>`);
 
   // 👥 Кадры
@@ -4485,10 +4601,7 @@ function generateFullSystemReport() {
     ["Без фото", `${noPhoto} (${pct(noPhoto,totalEmp)}%)`, "var(--gray)"],
     ["Анкет в очереди", surv.length, surv.length ? "var(--gold)" : "var(--gray)"],
   ]));
-  L.push(`<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:8px">
-    <div>${reportTable(["ТОО","Человек"], Object.entries(tooCounts).sort((a,b)=>b[1]-a[1]).map(([k,v])=>[k,v]))}</div>
-    <div>${reportTable(["Участок","Человек"], Object.entries(siteCounts).sort((a,b)=>b[1]-a[1]).map(([k,v])=>[k,v]))}</div>
-  </div>`);
+  L.push(reportTable(["ТОО","Человек"], Object.entries(tooCounts).sort((a,b)=>b[1]-a[1]).map(([k,v])=>[k,v])));
   L.push(reportTable(["Должность","Человек"], topPositions.map(([k,v])=>[k, `<b>${v}</b>`])));
   if (hourKeys.length) {
     L.push(`<div style="font-size:12px;color:var(--gray);margin:-6px 0 14px">Подача анкет идёт с ${hourKeys[0]}:00 по ${hourKeys[hourKeys.length-1]}:00.</div>`);
@@ -4499,8 +4612,7 @@ function generateFullSystemReport() {
   L.push(reportStatGrid([
     ["Всего единиц", totalEq],
     ["С шаблоном чек-листа", `${withTpl} (${pct(withTpl,totalEq)}%)`, withTpl===totalEq?"var(--green,#2E7D32)":"var(--gold)"],
-    ["С указанным участком", `${withSite} (${pct(withSite,totalEq)}%)`, withSite===totalEq?"var(--green,#2E7D32)":"var(--gray)"],
-    ["Шаблонов чек-листов", tpl.length],
+    ["Шаблонов чек-листов доступно", tpl.length],
   ]));
   L.push(reportTable(["Тип техники","Единиц"], Object.entries(typeCounts).sort((a,b)=>b[1]-a[1]).map(([k,v])=>[k, `<b>${v}</b>`])));
 
@@ -4526,11 +4638,10 @@ function generateFullSystemReport() {
   // ⚠️ Что стоит проверить руками
   L.push(reportSectionTitle("⚠️","Что стоит проверить руками"));
   const flags = [];
-  if (pe.length === 0) flags.push("«Личное дело» сейчас пусто — если раньше там были записи, стоит проверить, не удалено ли что-то по ошибке.");
+  if (pe.length === 0) flags.push("«Личное дело» по этому участку сейчас пусто — если раньше там были записи, стоит проверить, не удалено ли что-то по ошибке.");
   if (lowerKatok > 0) flags.push(`${lowerKatok} ед. техники с типом «каток» в нижнем регистре — не смёржено с «Каток» в аналитике по типам.`);
   if (trimSite > 0) flags.push(`${trimSite} карточек сотрудников с лишними пробелами в названии участка — считаются отдельно от остальных.`);
   if (pct(noPass,totalEmp) > 50) flags.push(`${pct(noPass,totalEmp)}% сотрудников без сданного теста в системе — стоит явно решить, это реальный пробел или хвост миграции со старого учёта.`);
-  if (totalEq && pct(withSite,totalEq) < 20) flags.push("Участок почти не заполнен у техники — аналитика «по участкам» для техники сейчас невозможна.");
   if (chk.length && pct(inspectedEqIds.size,totalEq) < 30) flags.push("Осмотрена лишь малая часть техники — большая часть аналитики по топливу/неисправностям пока не наберёт данных.");
   if (flags.length) {
     L.push(`<div style="display:flex;flex-direction:column;gap:6px">${flags.map(f=>
@@ -4540,13 +4651,14 @@ function generateFullSystemReport() {
     L.push(`<div style="padding:9px 12px;background:var(--greenbg,#EAF7ED);border-radius:8px;font-size:13px;color:var(--green,#2E7D32)">✓ Явных нестыковок в данных на этот момент не найдено.</div>`);
   }
 
-  document.getElementById("fullReportOutput").innerHTML = L.join("\n");
-  document.getElementById("fullReportOutputPanel").style.display = "block";
-  document.getElementById("fullReportOutputPanel").scrollIntoView({ behavior:"smooth", block:"start" });
+  document.getElementById("fullReportOutput"+suffix).innerHTML = L.join("\n");
+  document.getElementById("fullReportOutputPanel"+suffix).style.display = "block";
+  document.getElementById("fullReportOutputPanel"+suffix).scrollIntoView({ behavior:"smooth", block:"start" });
 }
 
-function copyFullReportText() {
-  const el = document.getElementById("fullReportOutput");
+function copyFullReportText(site) {
+  const suffix = site === "Ашыктас" ? "Ashyktas" : "Almaty";
+  const el = document.getElementById("fullReportOutput"+suffix);
   navigator.clipboard.writeText(el.innerText).then(() => {
     alert("Текст сводного отчёта скопирован в буфер обмена.");
   }).catch(() => {
