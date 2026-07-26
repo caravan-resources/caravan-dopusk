@@ -337,6 +337,8 @@ tr:hover td { background:#FAFBFD; }
             <option value="warning">Истекает</option>
             <option value="ok">Действителен</option>
           </select>
+          <input type="date" id="filterPassDate" onchange="renderAccessTable()" style="max-width:160px" title="Дата прохождения">
+          <button class="btn btn-ghost" id="clearPassDateBtn" onclick="document.getElementById('filterPassDate').value='';renderAccessTable()" style="display:none">✕ Дата</button>
           <button class="btn btn-ghost" onclick="exportAccessCSV()">📥 CSV</button>
         </div>
         <div class="tbl-wrap">
@@ -1542,11 +1544,15 @@ function renderAccessTable() {
   const q  = document.getElementById("searchAccess").value.toLowerCase();
   const fs = document.getElementById("filterSite").value;
   const fst= document.getElementById("filterStatus").value;
+  const fpd= document.getElementById("filterPassDate").value;
+
+  document.getElementById("clearPassDateBtn").style.display = fpd ? "inline-block" : "none";
 
   let emps = DATA.employees.filter(e => {
     if (q && !(e.name||"").toLowerCase().includes(q)) return false;
     if (fs!=="all" && (e.site||"").trim()!==fs) return false;
     if (fst!=="all" && statusOf(e)!==fst) return false;
+    if (fpd && !passDateMatches(e, fpd)) return false;
     return true;
   }).sort((a,b)=>(daysLeft(a.validUntil)||999)-(daysLeft(b.validUntil)||999));
 
