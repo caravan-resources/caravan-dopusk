@@ -146,6 +146,14 @@ input:focus, select:focus, textarea:focus { border-color:var(--gold); }
         <option value="CL">ТОО «Караван Логистик»</option>
       </select>
 
+      <label style="display:flex;align-items:center;gap:8px;margin:14px 0 0;cursor:pointer;user-select:none">
+        <input type="checkbox" id="fIsContractor" onchange="toggleContractorField()"
+          style="width:18px;height:18px;accent-color:var(--gold)">
+        <span style="font-size:14px;color:var(--navy);font-weight:600">Я из подрядной организации</span>
+      </label>
+      <input type="text" id="fContractorName" placeholder="Название подрядной организации"
+        style="display:none;margin-top:8px">
+
       <label class="label">Участок</label>
       <select id="fSite">
         <option value="">— выберите —</option>
@@ -345,6 +353,22 @@ function togglePositionOther(val, ctx) {
   if (val !== "__other__") other.value = "";
 }
 
+// Подрядная организация — галочка открывает поле для названия.
+// Основное ТОО при этом становится необязательным: у подрядчика его нет.
+function toggleContractorField() {
+  const cb = document.getElementById("fIsContractor");
+  const field = document.getElementById("fContractorName");
+  const tooSel = document.getElementById("fToo");
+  if (!cb || !field) return;
+  field.style.display = cb.checked ? "block" : "none";
+  if (!cb.checked) field.value = "";
+  // Подсказать, что ТОО теперь не нужно
+  const tooLabel = tooSel ? tooSel.previousElementSibling : null;
+  if (tooLabel && tooLabel.classList.contains("label")) {
+    tooLabel.textContent = cb.checked ? "Основное ТОО (не обязательно для подрядчиков)" : "Основное ТОО";
+  }
+}
+
 function getPositionValue(prefix) {
   const sel = document.getElementById(prefix + "Position").value;
   if (sel === "__other__") return document.getElementById(prefix + "PositionOther").value.trim();
@@ -475,6 +499,8 @@ async function submitForm() {
   const name = document.getElementById("fName").value.trim();
   const too  = document.getElementById("fToo").value;
   const site = document.getElementById("fSite").value;
+  const isContractor = document.getElementById("fIsContractor").checked;
+  const contractorName = document.getElementById("fContractorName").value.trim();
   const checkedSpecs = Array.from(document.querySelectorAll(".spec-check:checked")).map(c=>c.value);
 
   // Должность и специальности для рабочих позиций — одно и то же (по факту
@@ -485,7 +511,11 @@ async function submitForm() {
   if (!position && checkedSpecs.length) position = checkedSpecs[0];
 
   if (!name) { alert("Укажите ФИО"); return; }
-  if (!too)  { alert("Выберите основное ТОО"); return; }
+  if (isContractor) {
+    if (!contractorName) { alert("Укажите название подрядной организации"); return; }
+  } else {
+    if (!too) { alert("Выберите основное ТОО"); return; }
+  }
   if (!site) { alert("Выберите участок"); return; }
   if (!position && checkedSpecs.length === 0) {
     alert("Укажите должность или отметьте хотя бы одну специальность");
@@ -528,7 +558,10 @@ async function submitForm() {
     empId: selected && selected.id ? selected.id : "",
     empName: name,
     position,
-    too,
+    // У подрядчика своего ТОО из наших трёх нет — пишем название его
+    // организации в то же поле с пометкой, чтобы было видно везде, где
+    // отображается ТОО, без отдельной колонки в таблице.
+    too: isContractor ? ("Подрядчик: " + contractorName) : too,
     tooSecondary: document.getElementById("fTooSecondary").value,
     site,
     hireDate: document.getElementById("fHireDate").value,
