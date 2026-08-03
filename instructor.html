@@ -215,6 +215,7 @@ tr:hover td { background:#FAFBFD; }
     <button id="navFuelAshyktas" onclick="showTab('fuelAshyktas')">⛽ Топливо (Ашыктас)</button>
     <button id="navReportsAlmaty"   onclick="showTab('reportsAlmaty')">📄 Отчёты (Алмалы)</button>
     <button id="navReportsAshyktas" onclick="showTab('reportsAshyktas')">📄 Отчёты (Ашыктас)</button>
+    <button id="navOperatorRating" onclick="showTab('operatorRating')">🏅 Рейтинг операторов</button>
     <button id="navShift1"   onclick="showTab('shift1')">👷 Вахта 1 (Алмалы)</button>
     <button id="navShift2"   onclick="showTab('shift2')">👷 Вахта 2 (Алмалы)</button>
     <button id="navShift1a"  onclick="showTab('shift1a')">👷 Вахта 1 (Ашыктас)</button>
@@ -696,6 +697,56 @@ tr:hover td { background:#FAFBFD; }
           <button class="btn btn-ghost" onclick="copyFullReportText('Ашыктас')">📋 Скопировать текст</button>
         </div>
         <div id="fullReportOutputAshyktas" style="font-size:13px;line-height:1.7;color:var(--navy)"></div>
+      </div>
+    </div>
+
+    <!-- ══ РЕЙТИНГ ОПЕРАТОРОВ ══ -->
+    <div id="tabOperatorRating" class="screen">
+      <div class="panel">
+        <div class="panel-title">
+          🏅 Рейтинг операторов по осмотрам
+          <div style="display:flex;gap:8px;align-items:center">
+            <select id="ratingSite" onchange="renderOperatorRating()" style="max-width:170px">
+              <option value="all">Оба участка</option>
+              <option value="Алмалы">Алмалы</option>
+              <option value="Ашыктас">Ашыктас</option>
+            </select>
+            <select id="ratingPeriod" onchange="renderOperatorRating()" style="max-width:150px">
+              <option value="30">За 30 дней</option>
+              <option value="7">За 7 дней</option>
+              <option value="all">За всё время</option>
+            </select>
+          </div>
+        </div>
+        <div class="hint">
+          Оценивается не количество осмотров, а внимательность: находит ли человек неисправности,
+          пишет ли комментарии, регулярно ли работает и отмечает ли заправки.
+          Много осмотров подряд без единого замечания — обычно признак формального осмотра, а не исправной техники.
+        </div>
+      </div>
+
+      <div id="ratingSummary"></div>
+
+      <div class="panel">
+        <div class="panel-title">👀 Внимательные — находят неисправности и пишут комментарии</div>
+        <div id="ratingAttentive"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">⚠️ Формальный осмотр — много проверок, ни одного замечания</div>
+        <div class="hint" style="margin-bottom:10px">
+          Это не обвинение: техника может быть исправной. Но если человек провёл много осмотров
+          и ни разу ничего не отметил — стоит выборочно проверить его машину лично.
+        </div>
+        <div id="ratingFormal"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">
+          📋 Все операторы
+          <button class="btn btn-ghost" onclick="exportRatingCSV()">⬇️ Скачать CSV</button>
+        </div>
+        <div id="ratingTable"></div>
       </div>
     </div>
 
@@ -1212,6 +1263,7 @@ function renderAll() {
   renderFuelRecordsList("Ашыктас");
   renderReportPeriodButtons("Алмалы");
   renderReportPeriodButtons("Ашыктас");
+  renderOperatorRating();
   renderShiftFormation(1, "shift1Formation", "Алмалы");
   renderShiftFormation(2, "shift2Formation", "Алмалы");
   renderShiftFormation(1, "shift1FormationAshyktas", "Ашыктас");
@@ -1222,7 +1274,7 @@ function renderAll() {
 // НАВИГАЦИЯ
 // ══════════════════════════════════════════════════════
 function showTab(name) {
-  ["dash","tests","access","print","certPrintProfession","training","personnel","surveys","equipmentAlmaty","equipmentAshyktas","checklistTemplates","fuelAlmaty","fuelAshyktas","reportsAlmaty","reportsAshyktas","shift1","shift2","shift1a","shift2a","import"].forEach(t => {
+  ["dash","tests","access","print","certPrintProfession","training","personnel","surveys","equipmentAlmaty","equipmentAshyktas","checklistTemplates","fuelAlmaty","fuelAshyktas","reportsAlmaty","reportsAshyktas","operatorRating","shift1","shift2","shift1a","shift2a","import"].forEach(t => {
     document.getElementById("tab"+cap(t)).classList.remove("active");
     document.getElementById("nav"+cap(t)).classList.remove("active");
   });
@@ -4151,6 +4203,193 @@ function equipmentFuelChecklistLines(equipmentId) {
     <div style="color:var(--gray)">${fuelLine}</div>
     <div style="color:${chkColor}">${chkLine}</div>
   </div>`;
+}
+
+// ══════════════════════════════════════════════════════
+// РЕЙТИНГ ОПЕРАТОРОВ ПО ОСМОТРАМ
+// Считается на лету из чек-листов и заправок — ничего не хранится отдельно.
+// Ключевая мысль: количество осмотров само по себе ни о чём не говорит.
+// Человек может «прокликать» 20 осмотров за минуту, отметив всё исправным.
+// Поэтому смотрим на внимательность: находит ли неисправности, пишет ли
+// комментарии, работает ли регулярно, отмечает ли заправки.
+// ══════════════════════════════════════════════════════
+function computeOperatorRating() {
+  const site = document.getElementById("ratingSite")?.value || "all";
+  const periodVal = document.getElementById("ratingPeriod")?.value || "30";
+
+  let since = null;
+  if (periodVal !== "all") {
+    since = new Date();
+    since.setDate(since.getDate() - Number(periodVal));
+  }
+
+  // Техника нужного участка — по ней фильтруем осмотры и заправки
+  const eqIds = new Set((DATA.equipment||[])
+    .filter(e => site === "all" || (e.site||"").trim() === site)
+    .map(e => String(e.equipmentId)));
+
+  const inScope = (rec) => {
+    if (!eqIds.has(String(rec.equipmentId))) return false;
+    if (!since) return true;
+    const d = parseRecordDate(rec.date);
+    return d && d >= since;
+  };
+
+  const stats = {};
+  const get = (name, empId) => {
+    if (!stats[name]) stats[name] = {
+      name, empId: empId || "", osmotrs: 0, items: 0, defects: 0,
+      comments: 0, days: new Set(), equipment: new Set(), fuel: 0,
+    };
+    if (empId && !stats[name].empId) stats[name].empId = empId;
+    return stats[name];
+  };
+
+  (DATA.checklistRecords||[]).filter(inScope).forEach(rec => {
+    const s = get(rec.empName || "—", rec.empId);
+    s.osmotrs += 1;
+    s.equipment.add(rec.equipmentId);
+    const d = parseRecordDate(rec.date);
+    if (d) s.days.add(`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`);
+    (rec.items||[]).forEach(it => {
+      s.items += 1;
+      if (it.status === "defect") s.defects += 1;
+      if (String(it.comment||"").trim()) s.comments += 1;
+    });
+  });
+
+  (DATA.fuel||[]).filter(inScope).forEach(f => {
+    const s = get(f.empName || "—", f.empId);
+    s.fuel += 1;
+  });
+
+  return Object.values(stats).map(s => {
+    const daysCount = s.days.size;
+    const defectRate = s.items ? s.defects / s.items * 100 : 0;
+    const commentRate = s.items ? s.comments / s.items * 100 : 0;
+
+    // Балл внимательности: находки и комментарии весят больше, чем вал.
+    // Регулярность (в скольких разных днях работал) — против «настрелял за раз».
+    const score =
+        Math.min(s.defects, 40) * 2.5      // до 100 — нашёл неисправности
+      + Math.min(s.comments, 40) * 1.5     // до 60  — пояснил словами
+      + Math.min(daysCount, 25) * 2        // до 50  — работал регулярно
+      + Math.min(s.fuel, 25) * 1.2         // до 30  — отмечал заправки
+      + Math.min(s.osmotrs, 30) * 0.5;     // до 15  — сам объём, но с малым весом
+
+    // Формальный осмотр: много проверок, ноль замечаний и ноль комментариев
+    const formal = s.osmotrs >= 5 && s.defects === 0 && s.comments === 0;
+
+    return { ...s, daysCount, defectRate, commentRate, score: Math.round(score), formal,
+             equipmentCount: s.equipment.size };
+  }).sort((a,b) => b.score - a.score);
+}
+
+function renderOperatorRating() {
+  const rows = computeOperatorRating();
+  const sum = document.getElementById("ratingSummary");
+  const att = document.getElementById("ratingAttentive");
+  const frm = document.getElementById("ratingFormal");
+  const tbl = document.getElementById("ratingTable");
+  if (!tbl) return;
+
+  if (!rows.length) {
+    if (sum) sum.innerHTML = "";
+    att.innerHTML = `<div class="empty"><div class="empty-icon">📊</div>Нет данных за выбранный период</div>`;
+    frm.innerHTML = `<div class="empty"><div class="empty-icon">📊</div>Нет данных</div>`;
+    tbl.innerHTML = `<div class="empty"><div class="empty-icon">📊</div>Нет данных</div>`;
+    return;
+  }
+
+  const totalDefects = rows.reduce((n,r)=>n+r.defects,0);
+  const totalComments = rows.reduce((n,r)=>n+r.comments,0);
+  const formalList = rows.filter(r => r.formal);
+  const attentive = rows.filter(r => r.defects > 0 || r.comments > 0).slice(0, 10);
+
+  if (sum) {
+    sum.innerHTML = `<div class="stats-grid" style="margin-bottom:16px">
+      ${[
+        {lbl:"Операторов в периоде", val:rows.length, acc:"var(--navy2)"},
+        {lbl:"Нашли неисправности", val:rows.filter(r=>r.defects>0).length, acc:"var(--green,#2E7D32)"},
+        {lbl:"Формальных осмотров", val:formalList.length, acc:formalList.length?"var(--red)":"var(--gray)"},
+        {lbl:"Всего найдено / комментариев", val:`${totalDefects} / ${totalComments}`, acc:"var(--gold)"},
+      ].map(s=>`
+        <div class="stat-card" style="border-left-color:${s.acc}">
+          <div class="stat-val" style="color:${s.acc};${String(s.val).length>6?'font-size:20px':''}">${s.val}</div>
+          <div class="stat-lbl">${s.lbl}</div>
+        </div>`).join("")}
+    </div>`;
+  }
+
+  const medal = i => ["🥇","🥈","🥉"][i] || `${i+1}.`;
+  const clickable = (r, inner) => r.empId
+    ? `<span style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted"
+         onclick="goToEmployeeProfile('${String(r.empId).replace(/'/g,"\\'")}')">${inner}</span>`
+    : inner;
+
+  att.innerHTML = attentive.length ? attentive.map((r,i)=>`
+    <div style="display:flex;justify-content:space-between;align-items:center;
+      padding:10px 0;border-bottom:1px solid var(--border)">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:16px;min-width:28px">${medal(i)}</span>
+        <div>
+          <div style="font-size:13px;font-weight:700;color:var(--navy)">${clickable(r, r.name)}</div>
+          <div style="font-size:11px;color:var(--gray)">
+            ${r.osmotrs} осмотр(ов) · ${r.daysCount} дн. · ${r.equipmentCount} ед. техники${r.fuel?` · ${r.fuel} заправ.`:""}
+          </div>
+        </div>
+      </div>
+      <div style="text-align:right;font-size:12px">
+        <div><b style="color:var(--red)">${r.defects}</b> неиспр. · <b style="color:var(--navy2)">${r.comments}</b> комм.</div>
+        <div style="color:var(--gray);font-size:11px">балл ${r.score}</div>
+      </div>
+    </div>`).join("")
+    : `<div class="empty" style="padding:16px"><div class="empty-icon">🔍</div>Пока никто не отметил ни одной неисправности</div>`;
+
+  frm.innerHTML = formalList.length ? formalList
+    .sort((a,b)=>b.osmotrs-a.osmotrs).map(r=>`
+    <div style="display:flex;justify-content:space-between;align-items:center;
+      padding:10px 12px;background:var(--redbg,#FEECEC);border-radius:8px;margin-bottom:6px">
+      <div>
+        <div style="font-size:13px;font-weight:700;color:var(--navy)">${clickable(r, r.name)}</div>
+        <div style="font-size:11px;color:var(--gray)">${r.equipmentCount} ед. техники · ${r.daysCount} дн.</div>
+      </div>
+      <div style="text-align:right;font-size:12px;color:var(--red)">
+        <b>${r.osmotrs}</b> осмотр(ов)<br>
+        <span style="font-size:11px">ни одного замечания</span>
+      </div>
+    </div>`).join("")
+    : `<div style="padding:10px 12px;background:var(--greenbg,#EAF7ED);border-radius:8px;font-size:13px;color:var(--green,#2E7D32)">
+        ✓ Формальных осмотров не выявлено — все, кто проводил 5+ проверок, что-то отмечали
+      </div>`;
+
+  tbl.innerHTML = `<div class="tbl-wrap"><table style="font-size:13px">
+    <thead><tr>
+      <th>#</th><th>Оператор</th><th>Осмотров</th><th>Дней</th>
+      <th>Неисправ.</th><th>Коммент.</th><th>Заправок</th><th>Балл</th>
+    </tr></thead>
+    <tbody>${rows.map((r,i)=>`
+      <tr${r.formal?' style="background:var(--redbg,#FEECEC)"':''}>
+        <td>${i+1}</td>
+        <td><b>${clickable(r, r.name)}</b>${r.formal?' <span style="font-size:10px;color:var(--red)">формально</span>':''}</td>
+        <td>${r.osmotrs}</td>
+        <td>${r.daysCount}</td>
+        <td${r.defects?' style="font-weight:700;color:var(--red)"':''}>${r.defects}</td>
+        <td${r.comments?' style="font-weight:700;color:var(--navy2)"':''}>${r.comments}</td>
+        <td>${r.fuel}</td>
+        <td><b>${r.score}</b></td>
+      </tr>`).join("")}</tbody>
+  </table></div>`;
+}
+
+function exportRatingCSV() {
+  const rows = computeOperatorRating();
+  const headers = ["#","Оператор","Осмотров","Дней","Неисправностей","Комментариев","Заправок","Единиц техники","Балл","Формальный осмотр"];
+  const data = rows.map((r,i)=>[
+    i+1, r.name, r.osmotrs, r.daysCount, r.defects, r.comments, r.fuel, r.equipmentCount, r.score,
+    r.formal ? "да" : "",
+  ]);
+  downloadCSV([headers, ...data], `Рейтинг_операторов_${today()}.csv`);
 }
 
 function renderShiftFormation(vahtaNum, containerId, site) {
