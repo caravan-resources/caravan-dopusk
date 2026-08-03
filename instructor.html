@@ -1098,25 +1098,45 @@ function initApp() {
 }
 
 // JSONP — единственный способ обойти CORS в Apps Script
-function jsonpFetch(url, callbackName) {
+// timeoutMs задаётся вызывающим: тяжёлые запросы (осмотры — уже 4+ МБ)
+// не укладываются в общий короткий таймаут, особенно на слабой связи.
+function jsonpFetch(url, callbackName, timeoutMs) {
   return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      delete window[callbackName];
-      reject(new Error("timeout"));
-    }, 8000);
-    window[callbackName] = (data) => {
-      clearTimeout(timeout);
-      delete window[callbackName];
-      resolve(data);
-    };
+    // Уникальное имя коллбэка на каждую попытку: иначе при повторе после
+    // таймаута опоздавший ответ первой попытки дёргал бы уже удалённую
+    // функцию — в консоли это выглядело как "cb_... is not defined".
+    const cb = `${callbackName}_${Date.now()}_${Math.floor(Math.random()*1e6)}`;
     const script = document.createElement("script");
+    const cleanup = () => {
+      clearTimeout(timer);
+      delete window[cb];
+      if (script.parentNode) script.parentNode.removeChild(script);
+    };
+    const timer = setTimeout(() => { cleanup(); reject(new Error("timeout")); }, timeoutMs || 8000);
+    window[cb] = (data) => { cleanup(); resolve(data); };
     // _=Date.now() — метка времени против кэширования браузером: без неё
     // повторный запрос на тот же URL иногда отдавался из кэша <script>-тега,
     // а не реально ходил на сервер за свежими данными.
-    script.src = `${url}&callback=${callbackName}&_=${Date.now()}`;
-    script.onerror = () => { clearTimeout(timeout); reject(new Error("script error")); };
+    script.src = `${url}&callback=${cb}&_=${Date.now()}`;
+    script.onerror = () => { cleanup(); reject(new Error("script error")); };
     document.head.appendChild(script);
   });
+}
+
+// Повторяет запрос при неудаче — сетевые сбои и разовые 503 от Google
+// перестают ронять целый раздел данных.
+async function jsonpFetchRetry(url, callbackName, timeoutMs, attempts) {
+  const tries = attempts || 2;
+  let lastErr;
+  for (let i = 0; i < tries; i++) {
+    try {
+      return await jsonpFetch(url, callbackName, timeoutMs);
+    } catch (e) {
+      lastErr = e;
+      if (i < tries - 1) await new Promise(r => setTimeout(r, 1200));
+    }
+  }
+  throw lastErr;
 }
 
 async function loadAll() {
@@ -1126,8 +1146,10 @@ async function loadAll() {
   // Все запросы уходят параллельно, а не по очереди — раньше полная загрузка
   // ждала каждый ответ по отдельности (11 запросов подряд), теперь все летят
   // разом и ждём самый медленный, а не сумму всех.
+  // heavy: осмотры и смены растут быстрее всех (осмотры уже 4+ МБ) и переставали
+  // укладываться в общий 8-секундный таймаут — раздел молча оставался пустым.
   const fetches = [
-    { key: "employees",         action: "list",                    cb: "cb_employees",           critical: true  },
+    { key: "employees",         action: "list",                    cb: "cb_employees",           critical: true, heavy: true },
     { key: "results",           action: "getResults",              cb: "cb_results",              critical: true  },
     { key: "training",          action: "getTraining",             cb: "cb_training"                              },
     { key: "requirements",      action: "getRequirements",         cb: "cb_requirements"                          },
@@ -1136,13 +1158,17 @@ async function loadAll() {
     { key: "surveys",           action: "getSurveys",              cb: "cb_surveys"                               },
     { key: "equipment",         action: "getEquipment",            cb: "cb_equipment"                             },
     { key: "checklistTemplates",action: "getChecklistTemplates",   cb: "cb_checklist_templates"                   },
-    { key: "checklistRecords",  action: "getChecklistRecords",     cb: "cb_checklist_records"                     },
+    { key: "checklistRecords",  action: "getChecklistRecords",     cb: "cb_checklist_records",    heavy: true     },
     { key: "fuel",              action: "getFuelRecords",          cb: "cb_fuel_records"                          },
-    { key: "shiftAssignments",  action: "getShiftAssignments",     cb: "cb_shift_assignments"                     },
+    { key: "shiftAssignments",  action: "getShiftAssignments",     cb: "cb_shift_assignments",    heavy: true     },
   ];
 
   const settled = await Promise.allSettled(
-    fetches.map(f => jsonpFetch(`${CFG.SHEET_URL}?action=${f.action}`, f.cb))
+    fetches.map(f => jsonpFetchRetry(
+      `${CFG.SHEET_URL}?action=${f.action}`, f.cb,
+      f.heavy ? 45000 : 15000,   // тяжёлым — больше времени
+      2                          // и вторая попытка при сбое
+    ))
   );
 
   settled.forEach((res, i) => {
@@ -1610,7 +1636,10 @@ function renderAccessTable() {
       <td style="padding:8px 12px">
         <div style="display:flex;align-items:center;gap:6px">
           ${e.photoUrl && e.photoUrl !== "—" && e.photoUrl !== ""
-            ? `<img src="${e.photoUrl}" style="width:36px;height:36px;border-radius:50%;object-fit:cover;border:2px solid var(--border)">`
+            ? `<img src="${e.photoUrl}" loading="lazy" decoding="async" referrerpolicy="no-referrer"
+                 onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"
+                 style="width:36px;height:36px;border-radius:50%;object-fit:cover;border:2px solid var(--border)">
+               <div style="display:none;width:36px;height:36px;border-radius:50%;background:var(--light);border:2px solid var(--border);align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--gray)">${initials}</div>`
             : `<div style="width:36px;height:36px;border-radius:50%;background:var(--light);border:2px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--gray)">${initials}</div>`
           }
           <label style="cursor:pointer;font-size:16px;line-height:1" title="Загрузить фото">
@@ -2789,7 +2818,7 @@ function selectPersonnelEmployee(id) {
         <div style="display:flex;gap:12px;align-items:flex-start">
           <label style="position:relative;cursor:pointer;flex-shrink:0" title="Нажмите, чтобы сменить фото">
             ${emp.photoUrl
-              ? `<img src="${emp.photoUrl}" style="width:168px;height:168px;border-radius:50%;object-fit:cover;border:2px solid var(--border)">`
+              ? `<img src="${emp.photoUrl}" loading="lazy" decoding="async" referrerpolicy="no-referrer" style="width:168px;height:168px;border-radius:50%;object-fit:cover;border:2px solid var(--border)">`
               : `<div style="width:168px;height:168px;border-radius:50%;background:var(--light);border:2px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--gray)">фото</div>`}
             <span style="position:absolute;bottom:2px;right:2px;background:var(--navy);color:#fff;font-size:20px;
               width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;border:2px solid #fff">✏</span>
@@ -3290,7 +3319,7 @@ function renderSurveysList() {
     <div style="padding:14px;border:1px solid var(--border);border-radius:10px;margin-bottom:10px;background:#fff">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
         <div style="display:flex;gap:10px;align-items:flex-start">
-          ${s.photoUrl ? `<img src="${s.photoUrl}" style="width:44px;height:44px;border-radius:50%;object-fit:cover;flex-shrink:0;border:1.5px solid var(--border)">` : ""}
+          ${s.photoUrl ? `<img src="${s.photoUrl}" loading="lazy" decoding="async" referrerpolicy="no-referrer" style="width:44px;height:44px;border-radius:50%;object-fit:cover;flex-shrink:0;border:1.5px solid var(--border)">` : ""}
           <div>
             <div style="font-weight:700;color:var(--navy);font-size:14px">${s.empName}</div>
             <div style="font-size:11px;color:var(--gray)">
