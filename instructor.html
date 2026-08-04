@@ -727,6 +727,19 @@ tr:hover td { background:#FAFBFD; }
 
       <div id="ratingSummary"></div>
 
+      <!-- Итоги недели — награда «Отличник ДГР» -->
+      <div class="panel" style="border-top:3px solid var(--gold)">
+        <div class="panel-title">
+          🏅 Итоги недели — «Отличник ДГР»
+          <button class="btn btn-ghost" onclick="renderWeeklyAward()">🔄 Пересчитать</button>
+        </div>
+        <div class="hint" style="margin-bottom:12px">
+          Считается за последние 7 дней по тем же правилам: важнее внимательность, а не количество.
+          Награда добавляется в личное дело — там она останется навсегда, с датой и периодом.
+        </div>
+        <div id="weeklyAward"></div>
+      </div>
+
       <div class="panel">
         <div class="panel-title">👀 Внимательные — находят неисправности и пишут комментарии</div>
         <div id="ratingAttentive"></div>
@@ -1013,6 +1026,12 @@ tr:hover td { background:#FAFBFD; }
     background:#fff;
     -webkit-print-color-adjust:exact;
     print-color-adjust:exact;
+  }
+  /* Грамота — целый лист А4, своя сетка вместо двухколоночной под карточки */
+  #printArea.award-sheet {
+    display:block !important;
+    grid-template-columns:none;
+    gap:0; padding:0;
   }
   #modalOverlay {
     position: fixed; inset: 0; background: #fff !important;
@@ -4251,9 +4270,12 @@ function computeOperatorRating() {
     s.equipment.add(rec.equipmentId);
     const d = parseRecordDate(rec.date);
     if (d) s.days.add(`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`);
+    if (!s.byEquipment) s.byEquipment = {};
+    if (!s.byEquipment[rec.equipmentId]) s.byEquipment[rec.equipmentId] = { osmotrs:0, defects:0 };
+    s.byEquipment[rec.equipmentId].osmotrs += 1;
     (rec.items||[]).forEach(it => {
       s.items += 1;
-      if (it.status === "defect") s.defects += 1;
+      if (it.status === "defect") { s.defects += 1; s.byEquipment[rec.equipmentId].defects += 1; }
       if (String(it.comment||"").trim()) s.comments += 1;
     });
   });
@@ -4280,12 +4302,322 @@ function computeOperatorRating() {
     // Формальный осмотр: много проверок, ноль замечаний и ноль комментариев
     const formal = s.osmotrs >= 5 && s.defects === 0 && s.comments === 0;
 
+    // Подпись техники: у большинства операторов одна машина, тогда пишем её
+    // полностью; если несколько — показываем основную и число остальных.
+    const eqEntries = Object.entries(s.byEquipment||{})
+      .sort((a,b) => b[1].osmotrs - a[1].osmotrs);
+    const eqLabelOf = id => {
+      const e = (DATA.equipment||[]).find(x => String(x.equipmentId)===String(id));
+      return e ? `${e.equipmentId} ${e.model||""}`.trim() : String(id);
+    };
+    let equipmentLabel = "—";
+    if (eqEntries.length === 1) equipmentLabel = eqLabelOf(eqEntries[0][0]);
+    else if (eqEntries.length > 1) equipmentLabel = `${eqLabelOf(eqEntries[0][0])} и ещё ${eqEntries.length-1}`;
+
     return { ...s, daysCount, defectRate, commentRate, score: Math.round(score), formal,
-             equipmentCount: s.equipment.size };
+             equipmentCount: s.equipment.size, equipmentLabel,
+             equipmentList: eqEntries.map(([id,v]) => ({ id, label: eqLabelOf(id), ...v })) };
   }).sort((a,b) => b.score - a.score);
 }
 
+// ══════════════════════════════════════════════════════
+// ИТОГИ НЕДЕЛИ — награда «Отличник ДГР»
+// Считаем за последние 7 дней по тем же правилам, что и общий рейтинг,
+// и предлагаем занести победителей в личное дело как награду.
+// ══════════════════════════════════════════════════════
+function weekPeriodLabel() {
+  const to = new Date();
+  const from = new Date(); from.setDate(from.getDate() - 7);
+  const f = d => `${String(d.getDate()).padStart(2,"0")}.${String(d.getMonth()+1).padStart(2,"0")}.${d.getFullYear()}`;
+  return `${f(from)}–${f(to)}`;
+}
+
+function computeWeeklyWinners(limit) {
+  // Считаем строго за 7 дней, независимо от выбранного на экране периода
+  const since = new Date(); since.setDate(since.getDate() - 7);
+  const site = document.getElementById("ratingSite")?.value || "all";
+  const eqIds = new Set((DATA.equipment||[])
+    .filter(e => site === "all" || (e.site||"").trim() === site)
+    .map(e => String(e.equipmentId)));
+
+  const inScope = rec => {
+    if (!eqIds.has(String(rec.equipmentId))) return false;
+    const d = parseRecordDate(rec.date);
+    return d && d >= since;
+  };
+
+  const stats = {};
+  const get = (name, empId) => {
+    if (!stats[name]) stats[name] = { name, empId: empId||"", osmotrs:0, items:0, defects:0, comments:0, days:new Set(), fuel:0 };
+    if (empId && !stats[name].empId) stats[name].empId = empId;
+    return stats[name];
+  };
+  (DATA.checklistRecords||[]).filter(inScope).forEach(rec => {
+    const s = get(rec.empName||"—", rec.empId);
+    s.osmotrs++;
+    const d = parseRecordDate(rec.date);
+    if (d) s.days.add(`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`);
+    if (!s.byEquipment) s.byEquipment = {};
+    if (!s.byEquipment[rec.equipmentId]) s.byEquipment[rec.equipmentId] = { osmotrs:0, defects:0 };
+    s.byEquipment[rec.equipmentId].osmotrs++;
+    (rec.items||[]).forEach(it => {
+      s.items++;
+      if (it.status === "defect") { s.defects++; s.byEquipment[rec.equipmentId].defects++; }
+      if (String(it.comment||"").trim()) s.comments++;
+    });
+  });
+  (DATA.fuel||[]).filter(inScope).forEach(f => { get(f.empName||"—", f.empId).fuel++; });
+
+  return Object.values(stats)
+    .map(s => ({
+      ...s, daysCount: s.days.size,
+      equipmentLabel: (() => {
+        const en = Object.entries(s.byEquipment||{}).sort((a,b)=>b[1].osmotrs-a[1].osmotrs);
+        const lab = id => {
+          const e = (DATA.equipment||[]).find(x => String(x.equipmentId)===String(id));
+          return e ? `${e.equipmentId} ${e.model||""}`.trim() : String(id);
+        };
+        if (!en.length) return "—";
+        return en.length === 1 ? lab(en[0][0]) : `${lab(en[0][0])} и ещё ${en.length-1}`;
+      })(),
+      score: Math.round(
+        Math.min(s.defects,40)*2.5 + Math.min(s.comments,40)*1.5 +
+        Math.min(s.days.size,7)*3 + Math.min(s.fuel,25)*1.2 + Math.min(s.osmotrs,30)*0.5
+      ),
+    }))
+    // В победители — только те, кто реально что-то находил: формальный
+    // осмотр награждать нельзя, иначе смысл награды теряется
+    .filter(s => s.defects > 0 || s.comments > 0)
+    .sort((a,b) => b.score - a.score)
+    .slice(0, limit || 3);
+}
+
+function renderWeeklyAward() {
+  const el = document.getElementById("weeklyAward");
+  if (!el) return;
+  const winners = computeWeeklyWinners(3);
+  const period = weekPeriodLabel();
+
+  if (!winners.length) {
+    el.innerHTML = `<div class="empty" style="padding:20px">
+      <div class="empty-icon">🏅</div>
+      За последние 7 дней никто не отметил ни одной неисправности и не оставил комментариев — награждать пока некого.
+    </div>`;
+    return;
+  }
+
+  const medals = ["🥇","🥈","🥉"];
+  el.innerHTML = winners.map((w,i) => {
+    const emp = (DATA.employees||[]).find(e => String(e.id)===String(w.empId)) ||
+                (DATA.employees||[]).find(e => e.name === w.name);
+    const photo = emp && emp.photoUrl
+      ? `<img src="${emp.photoUrl}" loading="lazy" decoding="async" referrerpolicy="no-referrer"
+           style="width:56px;height:56px;border-radius:50%;object-fit:cover;border:2px solid var(--gold)">`
+      : `<div style="width:56px;height:56px;border-radius:50%;background:var(--light);border:2px solid var(--gold);display:flex;align-items:center;justify-content:center;font-size:20px">🏅</div>`;
+    const already = (DATA.personnelEvents||[]).some(ev =>
+      String(ev.type||"").toLowerCase()==="награда" &&
+      String(ev.description||"").includes(period) &&
+      (String(ev.empId)===String(w.empId) || ev.empName===w.name));
+
+    return `<div style="display:flex;align-items:center;gap:14px;padding:14px;
+      border:1.5px solid ${i===0?'var(--gold)':'var(--border)'};border-radius:12px;margin-bottom:10px;
+      background:${i===0?'#FFFBEB':'#fff'}">
+      <div style="font-size:26px;min-width:36px">${medals[i]}</div>
+      ${photo}
+      <div style="flex:1">
+        <div style="font-size:15px;font-weight:800;color:var(--navy)">${w.name}</div>
+        <div style="font-size:12px;color:var(--gray);margin-top:2px">
+          ${emp ? (emp.position||"") + " · " + (emp.site||"") : ""}
+        </div>
+        <div style="font-size:12px;color:var(--navy2);margin-top:4px">
+          🚜 <b>${w.equipmentLabel}</b>
+        </div>
+        <div style="font-size:12px;color:var(--navy2);margin-top:2px">
+          Нашёл <b style="color:var(--red)">${w.defects}</b> неисправност(ей) ·
+          <b>${w.comments}</b> комментари(ев) ·
+          ${w.osmotrs} осмотр(ов) за ${w.daysCount} дн.${w.fuel?` · ${w.fuel} заправ.`:""}
+        </div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-size:11px;color:var(--gray);margin-bottom:6px">балл ${w.score}</div>
+        <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
+          ${already
+            ? `<span style="font-size:12px;color:var(--green,#2E7D32);font-weight:700">✓ уже в личном деле</span>`
+            : `<button class="btn btn-gold" style="width:auto;padding:8px 14px;font-size:12px"
+                 onclick="awardExcellent('${String(w.empId).replace(/'/g,"\\'")}','${w.name.replace(/'/g,"\\'")}',${i+1},${w.defects},${w.comments},${w.osmotrs},'${String(w.equipmentLabel||"").replace(/'/g,"\\'")}')">
+                 🏅 В личное дело</button>`}
+          <button class="btn btn-ghost" style="width:auto;padding:7px 14px;font-size:12px"
+            onclick="printAwardCertificate('${String(w.empId).replace(/'/g,"\\'")}','${w.name.replace(/'/g,"\\'")}',${i+1},${w.defects},${w.comments},${w.osmotrs},'${String(w.equipmentLabel||"").replace(/'/g,"\\'")}')">
+            🖨 Печать грамоты</button>
+        </div>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+async function awardExcellent(empId, empName, place, defects, comments, osmotrs, equipmentLabel) {
+  const period = weekPeriodLabel();
+  const placeText = place === 1 ? "1 место" : place === 2 ? "2 место" : "3 место";
+  const description =
+    `Отличник ДГР — лучший по эксплуатации техники (${placeText}), период ${period}. ` +
+    (equipmentLabel && equipmentLabel !== "—" ? `Техника: ${equipmentLabel}. ` : "") +
+    `Выявлено неисправностей: ${defects}, комментариев к осмотрам: ${comments}, осмотров: ${osmotrs}.`;
+
+  if (!confirm(`Внести награду в личное дело?\n\n${empName}\n${description}`)) return;
+
+  try {
+    const res = await fetch(CFG.SHEET_URL, { method:"POST", body: JSON.stringify({
+      action: "savePersonnelEvent",
+      empId: empId || "",
+      empName,
+      type: "награда",
+      date: "",
+      description,
+      issuedBy: "Отдел обучения и развития ДГР",
+    })});
+    const data = await res.json();
+    if (data.ok) {
+      await loadAll();
+      alert("Награда внесена в личное дело.");
+    } else {
+      alert("Ошибка: " + (data.error || "неизвестная"));
+    }
+  } catch(e) {
+    alert("Ошибка сети: " + e.message);
+  }
+}
+
+// ══════════════════════════════════════════════════════
+// ПЕЧАТНАЯ ГРАМОТА «ОТЛИЧНИК ДГР» — полный лист А4, вертикально.
+// Цифровая копия того же текста уходит в личное дело (savePersonnelEvent).
+// ══════════════════════════════════════════════════════
+function awardCertificateHTML(w, place, period) {
+  const emp = (DATA.employees||[]).find(e => String(e.id)===String(w.empId)) ||
+              (DATA.employees||[]).find(e => e.name === w.name) || {};
+  const placeText = place === 1 ? "I МЕСТО" : place === 2 ? "II МЕСТО" : "III МЕСТО";
+  const photo = emp.photoUrl
+    ? `<img src="${emp.photoUrl}" referrerpolicy="no-referrer"
+         style="width:38mm;height:38mm;border-radius:50%;object-fit:cover;object-position:center top;
+                border:1.2mm solid #F4A52A;display:block;margin:0 auto">`
+    : `<div style="width:38mm;height:38mm;border-radius:50%;background:#F1F5F9;
+         border:1.2mm solid #F4A52A;margin:0 auto;display:flex;align-items:center;
+         justify-content:center;font-size:20mm">🏅</div>`;
+
+  return `<div style="
+    width:210mm;height:297mm;box-sizing:border-box;position:relative;
+    background:#fff;padding:16mm 14mm;break-inside:avoid;page-break-inside:avoid;
+    font-family:'Segoe UI',Roboto,Arial,sans-serif;overflow:hidden">
+
+    <!-- Рамка -->
+    <div style="position:absolute;top:8mm;left:8mm;right:8mm;bottom:8mm;
+      border:1mm solid #0B1A35;pointer-events:none"></div>
+    <div style="position:absolute;top:10.5mm;left:10.5mm;right:10.5mm;bottom:10.5mm;
+      border:.4mm solid #F4A52A;pointer-events:none"></div>
+
+    <!-- Шапка -->
+    <div style="text-align:center;position:relative">
+      <img src="${CR_LOGO_SRC}" style="height:12mm;display:block;margin:0 auto 3mm">
+      <div style="font-size:9pt;font-weight:700;color:#1B3B6F;letter-spacing:.12em;text-transform:uppercase">
+        Caravan Resources
+      </div>
+      <div style="font-size:8pt;color:#64748B;letter-spacing:.06em;margin-top:1mm">
+        Отдел обучения и развития · Департамент горных работ
+      </div>
+    </div>
+
+    <!-- Заголовок -->
+    <div style="text-align:center;margin-top:12mm">
+      <div style="font-size:34pt;font-weight:900;color:#0B1A35;letter-spacing:.04em;line-height:1.1">
+        ОТЛИЧНИК ДГР
+      </div>
+      <div style="width:52mm;height:.8mm;background:#F4A52A;margin:4mm auto"></div>
+      <div style="font-size:12pt;color:#1B3B6F;font-weight:600;letter-spacing:.03em">
+        Лучший по эксплуатации техники
+      </div>
+      <div style="display:inline-block;margin-top:4mm;padding:1.5mm 8mm;
+        background:#0B1A35;color:#F4A52A;font-size:11pt;font-weight:800;
+        border-radius:99px;letter-spacing:.08em">${placeText}</div>
+    </div>
+
+    <!-- Фото и имя -->
+    <div style="text-align:center;margin-top:10mm">
+      ${photo}
+      <div style="font-size:20pt;font-weight:800;color:#0B1A35;margin-top:5mm;line-height:1.25">
+        ${w.name}
+      </div>
+      <div style="font-size:10pt;color:#64748B;margin-top:1.5mm">
+        ${[emp.position, emp.site].filter(Boolean).join(" · ")}
+      </div>
+      ${w.equipmentLabel && w.equipmentLabel !== "—" ? `
+<div style="display:inline-block;margin-top:4mm;padding:1.5mm 6mm;
+        border:.3mm solid #F4A52A;border-radius:99px;font-size:10pt;
+        color:#0B1A35;font-weight:700;letter-spacing:.02em">
+        🚜 ${w.equipmentLabel}
+      </div>` : ""}
+    </div>
+
+    <!-- Показатели -->
+    <div style="margin-top:11mm;display:flex;justify-content:center;gap:6mm">
+      ${[
+        ["Выявлено неисправностей", w.defects, "#DC2626"],
+        ["Комментариев к осмотрам", w.comments, "#1B3B6F"],
+        ["Проведено осмотров", w.osmotrs, "#0B1A35"],
+      ].map(([lbl,val,color]) => `
+        <div style="border:.3mm solid #E2E8F0;border-radius:3mm;padding:4mm 6mm;
+          text-align:center;min-width:38mm">
+          <div style="font-size:22pt;font-weight:900;color:${color};line-height:1">${val}</div>
+          <div style="font-size:7.5pt;color:#64748B;margin-top:1.5mm;line-height:1.3">${lbl}</div>
+        </div>`).join("")}
+    </div>
+
+    <!-- Текст -->
+    <div style="text-align:center;margin-top:10mm;font-size:10.5pt;color:#334155;line-height:1.7;
+      max-width:150mm;margin-left:auto;margin-right:auto">
+      Награждается за внимательное отношение к техническому состоянию оборудования,
+      добросовестное проведение предпусковых осмотров и своевременное выявление
+      неисправностей, обеспечивающее безопасность работ на карьере.
+    </div>
+
+    <!-- Низ -->
+    <div style="position:absolute;bottom:22mm;left:14mm;right:14mm;text-align:center">
+      <div style="font-size:10pt;font-weight:700;color:#0B1A35;letter-spacing:.04em">
+        Период: ${period}
+      </div>
+      <div style="font-size:9pt;color:#64748B;margin-top:2mm">
+        Отдел обучения и развития Департамента горных работ
+      </div>
+    </div>
+  </div>`;
+}
+
+async function printAwardCertificate(empId, empName, place, defects, comments, osmotrs, equipmentLabel) {
+  const period = weekPeriodLabel();
+  const w = { empId, name: empName, defects, comments, osmotrs, equipmentLabel: equipmentLabel || "—" };
+
+  let area = document.getElementById("printArea");
+  if (area) area.remove();
+  area = document.createElement("div");
+  area.id = "printArea";
+  area.className = "award-sheet";
+  area.style.cssText = "display:none";
+  area.innerHTML = awardCertificateHTML(w, place, period);
+  document.body.appendChild(area);
+
+  const images = Array.from(area.querySelectorAll("img"));
+  await Promise.all(images.map(img => {
+    if (img.complete) return Promise.resolve();
+    return new Promise(resolve => {
+      img.addEventListener("load", resolve, { once:true });
+      img.addEventListener("error", resolve, { once:true });
+      setTimeout(resolve, 4000);
+    });
+  }));
+  await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+  window.print();
+}
+
 function renderOperatorRating() {
+  renderWeeklyAward();
   const rows = computeOperatorRating();
   const sum = document.getElementById("ratingSummary");
   const att = document.getElementById("ratingAttentive");
@@ -4335,7 +4667,7 @@ function renderOperatorRating() {
         <div>
           <div style="font-size:13px;font-weight:700;color:var(--navy)">${clickable(r, r.name)}</div>
           <div style="font-size:11px;color:var(--gray)">
-            ${r.osmotrs} осмотр(ов) · ${r.daysCount} дн. · ${r.equipmentCount} ед. техники${r.fuel?` · ${r.fuel} заправ.`:""}
+            🚜 ${r.equipmentLabel} · ${r.osmotrs} осмотр(ов) · ${r.daysCount} дн.${r.fuel?` · ${r.fuel} заправ.`:""}
           </div>
         </div>
       </div>
@@ -4352,7 +4684,7 @@ function renderOperatorRating() {
       padding:10px 12px;background:var(--redbg,#FEECEC);border-radius:8px;margin-bottom:6px">
       <div>
         <div style="font-size:13px;font-weight:700;color:var(--navy)">${clickable(r, r.name)}</div>
-        <div style="font-size:11px;color:var(--gray)">${r.equipmentCount} ед. техники · ${r.daysCount} дн.</div>
+        <div style="font-size:11px;color:var(--gray)">🚜 ${r.equipmentLabel} · ${r.daysCount} дн.</div>
       </div>
       <div style="text-align:right;font-size:12px;color:var(--red)">
         <b>${r.osmotrs}</b> осмотр(ов)<br>
@@ -4365,13 +4697,14 @@ function renderOperatorRating() {
 
   tbl.innerHTML = `<div class="tbl-wrap"><table style="font-size:13px">
     <thead><tr>
-      <th>#</th><th>Оператор</th><th>Осмотров</th><th>Дней</th>
+      <th>#</th><th>Оператор</th><th>Техника</th><th>Осмотров</th><th>Дней</th>
       <th>Неисправ.</th><th>Коммент.</th><th>Заправок</th><th>Балл</th>
     </tr></thead>
     <tbody>${rows.map((r,i)=>`
       <tr${r.formal?' style="background:var(--redbg,#FEECEC)"':''}>
         <td>${i+1}</td>
         <td><b>${clickable(r, r.name)}</b>${r.formal?' <span style="font-size:10px;color:var(--red)">формально</span>':''}</td>
+        <td style="font-size:12px;color:var(--gray)">${r.equipmentLabel}</td>
         <td>${r.osmotrs}</td>
         <td>${r.daysCount}</td>
         <td${r.defects?' style="font-weight:700;color:var(--red)"':''}>${r.defects}</td>
@@ -4384,9 +4717,9 @@ function renderOperatorRating() {
 
 function exportRatingCSV() {
   const rows = computeOperatorRating();
-  const headers = ["#","Оператор","Осмотров","Дней","Неисправностей","Комментариев","Заправок","Единиц техники","Балл","Формальный осмотр"];
+  const headers = ["#","Оператор","Техника","Осмотров","Дней","Неисправностей","Комментариев","Заправок","Единиц техники","Балл","Формальный осмотр"];
   const data = rows.map((r,i)=>[
-    i+1, r.name, r.osmotrs, r.daysCount, r.defects, r.comments, r.fuel, r.equipmentCount, r.score,
+    i+1, r.name, r.equipmentLabel, r.osmotrs, r.daysCount, r.defects, r.comments, r.fuel, r.equipmentCount, r.score,
     r.formal ? "да" : "",
   ]);
   downloadCSV([headers, ...data], `Рейтинг_операторов_${today()}.csv`);
