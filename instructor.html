@@ -730,13 +730,15 @@ tr:hover td { background:#FAFBFD; }
       <!-- Итоги недели — награда «Отличник ДГР» -->
       <div class="panel" style="border-top:3px solid var(--gold)">
         <div class="panel-title">
-          🏅 Итоги недели — «Отличник ДГР»
-          <button class="btn btn-ghost" onclick="renderWeeklyAward()">🔄 Пересчитать</button>
+          🏅 Итоги периода — «Отличник ДГР»
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap" id="awardPeriodSwitch"></div>
         </div>
         <div class="hint" style="margin-bottom:12px">
-          Считается за последние 7 дней по тем же правилам: важнее внимательность, а не количество.
+          Периоды календарные: неделя — строго с понедельника по воскресенье, месяц и квартал — полные.
+          Стрелками можно посмотреть предыдущие периоды и наградить задним числом.
           Награда добавляется в личное дело — там она останется навсегда, с датой и периодом.
         </div>
+        <div id="awardPeriodLabel" style="font-size:13px;font-weight:700;color:var(--navy);margin-bottom:10px"></div>
         <div id="weeklyAward"></div>
       </div>
 
@@ -4325,16 +4327,70 @@ function computeOperatorRating() {
 // Считаем за последние 7 дней по тем же правилам, что и общий рейтинг,
 // и предлагаем занести победителей в личное дело как награду.
 // ══════════════════════════════════════════════════════
+// Календарные периоды подведения итогов. Раньше было скользящее окно
+// «последние 7 дней от сегодня» — из-за этого период плавал при каждом
+// открытии и победители менялись. Теперь границы фиксированные:
+// неделя — с понедельника по воскресенье, месяц и квартал — календарные.
+let AWARD_PERIOD = "week";   // week | month | quarter
+let AWARD_OFFSET = 0;        // 0 — текущий период, -1 — предыдущий, и т.д.
+
+function awardPeriodRange(kind, offset) {
+  const now = new Date();
+  const off = offset || 0;
+  let from, to;
+
+  if (kind === "month") {
+    from = new Date(now.getFullYear(), now.getMonth() + off, 1);
+    to   = new Date(now.getFullYear(), now.getMonth() + off + 1, 1);
+  } else if (kind === "quarter") {
+    const q = Math.floor(now.getMonth() / 3) + off;
+    from = new Date(now.getFullYear(), q * 3, 1);
+    to   = new Date(now.getFullYear(), q * 3 + 3, 1);
+  } else {
+    // Неделя с понедельника: getDay() отдаёт 0 для воскресенья, приводим к 7
+    const dow = now.getDay() === 0 ? 7 : now.getDay();
+    from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - dow + 1 + off*7);
+    to   = new Date(from.getFullYear(), from.getMonth(), from.getDate() + 7);
+  }
+  return [from, to];
+}
+
 function weekPeriodLabel() {
-  const to = new Date();
-  const from = new Date(); from.setDate(from.getDate() - 7);
+  const [from, to] = awardPeriodRange(AWARD_PERIOD, AWARD_OFFSET);
+  const last = new Date(to.getTime() - 1);   // последний день периода включительно
   const f = d => `${String(d.getDate()).padStart(2,"0")}.${String(d.getMonth()+1).padStart(2,"0")}.${d.getFullYear()}`;
-  return `${f(from)}–${f(to)}`;
+  if (AWARD_PERIOD === "month") {
+    const months = ["январь","февраль","март","апрель","май","июнь","июль","август","сентябрь","октябрь","ноябрь","декабрь"];
+    return `${months[from.getMonth()]} ${from.getFullYear()} (${f(from)}–${f(last)})`;
+  }
+  if (AWARD_PERIOD === "quarter") {
+    return `${Math.floor(from.getMonth()/3)+1} квартал ${from.getFullYear()} (${f(from)}–${f(last)})`;
+  }
+  return `${f(from)}–${f(last)}`;
+}
+
+// Период считается завершённым, только если его конец уже в прошлом.
+// Награждать за незакончившийся период нельзя: итоги ещё изменятся.
+function isAwardPeriodClosed() {
+  const [, to] = awardPeriodRange(AWARD_PERIOD, AWARD_OFFSET);
+  return new Date() >= to;
+}
+
+function setAwardPeriod(kind) {
+  AWARD_PERIOD = kind;
+  AWARD_OFFSET = 0;
+  renderWeeklyAward();
+}
+
+function shiftAwardPeriod(delta) {
+  AWARD_OFFSET += delta;
+  if (AWARD_OFFSET > 0) AWARD_OFFSET = 0;   // в будущее не уходим
+  renderWeeklyAward();
 }
 
 function computeWeeklyWinners(limit) {
-  // Считаем строго за 7 дней, независимо от выбранного на экране периода
-  const since = new Date(); since.setDate(since.getDate() - 7);
+  // Календарный период (неделя пн–вс / месяц / квартал), а не «последние 7 дней»
+  const [from, to] = awardPeriodRange(AWARD_PERIOD, AWARD_OFFSET);
   const site = document.getElementById("ratingSite")?.value || "all";
   const eqIds = new Set((DATA.equipment||[])
     .filter(e => site === "all" || (e.site||"").trim() === site)
@@ -4343,7 +4399,7 @@ function computeWeeklyWinners(limit) {
   const inScope = rec => {
     if (!eqIds.has(String(rec.equipmentId))) return false;
     const d = parseRecordDate(rec.date);
-    return d && d >= since;
+    return d && d >= from && d < to;
   };
 
   const stats = {};
@@ -4368,6 +4424,10 @@ function computeWeeklyWinners(limit) {
   });
   (DATA.fuel||[]).filter(inScope).forEach(f => { get(f.empName||"—", f.empId).fuel++; });
 
+  // Норма «регулярности» зависит от длины периода: за неделю максимум 7 дней,
+  // за месяц — больше, иначе месячный рейтинг упрётся в тот же потолок
+  const periodDays = Math.round((to - from) / 86400000);
+
   return Object.values(stats)
     .map(s => ({
       ...s, daysCount: s.days.size,
@@ -4382,7 +4442,7 @@ function computeWeeklyWinners(limit) {
       })(),
       score: Math.round(
         Math.min(s.defects,40)*2.5 + Math.min(s.comments,40)*1.5 +
-        Math.min(s.days.size,7)*3 + Math.min(s.fuel,25)*1.2 + Math.min(s.osmotrs,30)*0.5
+        Math.min(s.days.size, periodDays)*3 + Math.min(s.fuel,25)*1.2 + Math.min(s.osmotrs,30)*0.5
       ),
     }))
     // В победители — только те, кто реально что-то находил: формальный
@@ -4395,13 +4455,38 @@ function computeWeeklyWinners(limit) {
 function renderWeeklyAward() {
   const el = document.getElementById("weeklyAward");
   if (!el) return;
+
+  const sw = document.getElementById("awardPeriodSwitch");
+  if (sw) {
+    sw.innerHTML =
+      [["week","Неделя"],["month","Месяц"],["quarter","Квартал"]].map(([k,lbl])=>`
+        <button class="btn ${AWARD_PERIOD===k?'btn-gold':'btn-ghost'}"
+          style="width:auto;padding:7px 12px;font-size:12px" onclick="setAwardPeriod('${k}')">${lbl}</button>
+      `).join("") +
+      `<button class="btn btn-ghost" style="width:auto;padding:7px 10px;font-size:12px"
+         onclick="shiftAwardPeriod(-1)" title="Предыдущий период">←</button>
+       <button class="btn btn-ghost" style="width:auto;padding:7px 10px;font-size:12px;${AWARD_OFFSET>=0?'opacity:.4':''}"
+         onclick="shiftAwardPeriod(1)" title="Следующий период">→</button>`;
+  }
+
   const winners = computeWeeklyWinners(3);
   const period = weekPeriodLabel();
+
+  const lbl = document.getElementById("awardPeriodLabel");
+  const closed = isAwardPeriodClosed();
+  const [, periodTo] = awardPeriodRange(AWARD_PERIOD, AWARD_OFFSET);
+  const lastDay = new Date(periodTo.getTime() - 1);
+  const periodEndLabel = `${String(lastDay.getDate()).padStart(2,"0")}.${String(lastDay.getMonth()+1).padStart(2,"0")}.${lastDay.getFullYear()}`;
+  if (lbl) {
+    lbl.innerHTML = closed
+      ? `Период: ${period} <span style="color:var(--green,#2E7D32);font-weight:600">· завершён</span>`
+      : `Период: ${period} <span style="color:var(--gold);font-weight:600">· ещё идёт, награждать рано</span>`;
+  }
 
   if (!winners.length) {
     el.innerHTML = `<div class="empty" style="padding:20px">
       <div class="empty-icon">🏅</div>
-      За последние 7 дней никто не отметил ни одной неисправности и не оставил комментариев — награждать пока некого.
+      За этот период никто не отметил ни одной неисправности и не оставил комментариев — награждать пока некого.
     </div>`;
     return;
   }
@@ -4443,12 +4528,16 @@ function renderWeeklyAward() {
         <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
           ${already
             ? `<span style="font-size:12px;color:var(--green,#2E7D32);font-weight:700">✓ уже в личном деле</span>`
-            : `<button class="btn btn-gold" style="width:auto;padding:8px 14px;font-size:12px"
-                 onclick="awardExcellent('${String(w.empId).replace(/'/g,"\\'")}','${w.name.replace(/'/g,"\\'")}',${i+1},${w.defects},${w.comments},${w.osmotrs},'${String(w.equipmentLabel||"").replace(/'/g,"\\'")}')">
-                 🏅 В личное дело</button>`}
-          <button class="btn btn-ghost" style="width:auto;padding:7px 14px;font-size:12px"
+            : closed
+              ? `<button class="btn btn-gold" style="width:auto;padding:8px 14px;font-size:12px"
+                   onclick="awardExcellent('${String(w.empId).replace(/'/g,"\\'")}','${w.name.replace(/'/g,"\\'")}',${i+1},${w.defects},${w.comments},${w.osmotrs},'${String(w.equipmentLabel||"").replace(/'/g,"\\'")}')">
+                   🏅 В личное дело</button>`
+              : `<span style="font-size:11px;color:var(--gray);text-align:right;max-width:150px">
+                   Период не завершён — награждать можно после ${periodEndLabel}
+                 </span>`}
+          ${closed ? `<button class="btn btn-ghost" style="width:auto;padding:7px 14px;font-size:12px"
             onclick="printAwardCertificate('${String(w.empId).replace(/'/g,"\\'")}','${w.name.replace(/'/g,"\\'")}',${i+1},${w.defects},${w.comments},${w.osmotrs},'${String(w.equipmentLabel||"").replace(/'/g,"\\'")}')">
-            🖨 Печать грамоты</button>
+            🖨 Печать грамоты</button>` : ""}
         </div>
       </div>
     </div>`;
@@ -4456,6 +4545,10 @@ function renderWeeklyAward() {
 }
 
 async function awardExcellent(empId, empName, place, defects, comments, osmotrs, equipmentLabel) {
+  if (!isAwardPeriodClosed()) {
+    alert("Период ещё не завершён — итоги могут измениться. Награждать можно после его окончания.");
+    return;
+  }
   const period = weekPeriodLabel();
   const placeText = place === 1 ? "1 место" : place === 2 ? "2 место" : "3 место";
   const description =
@@ -4591,6 +4684,10 @@ function awardCertificateHTML(w, place, period) {
 }
 
 async function printAwardCertificate(empId, empName, place, defects, comments, osmotrs, equipmentLabel) {
+  if (!isAwardPeriodClosed()) {
+    alert("Период ещё не завершён — грамоту печатать рано, итоги могут измениться.");
+    return;
+  }
   const period = weekPeriodLabel();
   const w = { empId, name: empName, defects, comments, osmotrs, equipmentLabel: equipmentLabel || "—" };
 
