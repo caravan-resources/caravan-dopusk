@@ -518,6 +518,10 @@ function renderAnalytics() {
   if (!records.length) {
     byEqEl.innerHTML = `<div class="empty" style="padding:16px"><div class="empty-icon">📊</div>Пока нет данных</div>`;
     byItemEl.innerHTML = `<div class="empty" style="padding:16px"><div class="empty-icon">📊</div>Пока нет данных</div>`;
+    // Комментарии тоже нужно очистить: иначе при переключении участка здесь
+    // остаётся список от предыдущего — с чужой техникой
+    const cEl = document.getElementById("analyticsComments");
+    if (cEl) cEl.innerHTML = `<div class="empty" style="padding:16px"><div class="empty-icon">💬</div>Комментариев нет</div>`;
     return;
   }
 
