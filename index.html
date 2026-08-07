@@ -321,7 +321,7 @@ document.addEventListener("DOMContentLoaded", () => {
       Отдел обучения и развития Департамента горных работ
     </div>
     <div style="font-size:22px;font-weight:900;color:var(--navy);margin-bottom:4px">
-      Сдача теста
+      <span id="screenSubtitle">Сдача теста</span>
     </div>
     <div style="font-size:13px;color:var(--gray)">
       Caravan Resources · Карьер
@@ -678,6 +678,14 @@ let state = {
 // ИНИЦИАЛИЗАЦИЯ
 // ══════════════════════════════════════════════════════
 window.addEventListener("DOMContentLoaded", ()=>{
+  // Подпись под заголовком — по какому QR пришёл человек
+  const sub = document.getElementById("screenSubtitle");
+  if (sub) {
+    const k = currentTestKind();
+    sub.textContent = k === "profession" ? "Тест по профессии"
+                    : k === "instruktazh" ? "Инструктаж"
+                    : "Сдача теста";
+  }
   renderEmployees("");
   renderTests();
   renderHistory();
@@ -811,9 +819,26 @@ function clearEmployee() {
 // ══════════════════════════════════════════════════════
 // ТЕСТЫ
 // ══════════════════════════════════════════════════════
+// Какой набор тестов показывать — задаётся в адресе: ?kind=profession
+// (тесты по профессиям) или ?kind=instruktazh (инструктажи). Без параметра
+// показываются все — так работают старые QR-коды, они не ломаются.
+function currentTestKind() {
+  const k = new URLSearchParams(location.search).get("kind");
+  return (k === "profession" || k === "instruktazh" || k === "dopusk") ? k : null;
+}
+
 function renderTests() {
   const el = document.getElementById("testList");
-  const active = TESTS.filter(t=>t.active);
+  const kind = currentTestKind();
+  const active = TESTS.filter(t => {
+    if (!t.active) return false;
+    if (!kind) return true;
+    const tt = t.testType || "dopusk";
+    // «Допуск в карьер» нужен и в наборе профессий: без него человека
+    // всё равно не допустят к работе на технике
+    if (kind === "profession") return tt === "profession" || tt === "dopusk";
+    return tt === kind;
+  });
   el.innerHTML = active.map(t=>`
     <div class="test-card ${state.selectedTest?.id===t.id?"selected":""}"
       onclick="selectTest('${t.id}')">
