@@ -1000,6 +1000,8 @@ tr:hover td { background:#FAFBFD; }
           Анкеты на проверку
           <div style="display:flex;gap:8px">
             <button class="btn btn-ghost" onclick="showAnketaQR()">📱 QR для анкеты</button>
+            <button class="btn btn-ghost" onclick="showTestQR('profession')">🎓 QR тесты по профессиям</button>
+            <button class="btn btn-ghost" onclick="showTestQR('instruktazh')">🦺 QR инструктажи</button>
             <button class="btn btn-ghost" onclick="loadAll()">🔄 Обновить</button>
           </div>
         </div>
@@ -1181,7 +1183,11 @@ function jsonpFetch(url, callbackName, timeoutMs) {
     const script = document.createElement("script");
     const cleanup = () => {
       clearTimeout(timer);
-      delete window[cb];
+      // Не удаляем, а глушим: ответ, опоздавший после таймаута, всё равно
+      // придёт и вызовет функцию по имени. Если её удалить — в консоли
+      // будет «cb_... is not defined». Заглушка тихо проглатывает такой ответ.
+      window[cb] = function(){};
+      setTimeout(() => { try { delete window[cb]; } catch(e){} }, 60000);
       if (script.parentNode) script.parentNode.removeChild(script);
     };
     const timer = setTimeout(() => { cleanup(); reject(new Error("timeout")); }, timeoutMs || 8000);
@@ -3664,6 +3670,35 @@ function showAnketaQR() {
     <div class="hint" style="text-align:center;margin-bottom:14px">
       Один и тот же QR для всех — не привязан к конкретному человеку или технике.
       Раздайте, повесьте на стенд, отправьте в рабочий чат. PIN не нужен.
+    </div>
+    <button class="btn btn-gold" onclick="window.print()">🖨 Печать</button>
+    <button class="btn btn-ghost" style="margin-top:8px" onclick="closeModal()">Закрыть</button>
+  `);
+  const container = document.getElementById("qrContainer");
+  if (container && window.QRCode) {
+    new QRCode(container, { text: url, width: 220, height: 220 });
+  } else {
+    container.innerHTML = `<div style="color:var(--red);font-size:13px">Не удалось загрузить библиотеку QR. Проверьте интернет и обновите страницу.</div>`;
+  }
+}
+
+// QR для входа в тесты. kind: "profession" — тесты по профессиям,
+// "instruktazh" — инструктажи. Разные QR ведут на один и тот же index.html,
+// но показывают разные наборы тестов.
+function showTestQR(kind) {
+  const isProf = kind === "profession";
+  const url = `${location.origin}${location.pathname.replace(/instructor\.html$/, "")}index.html?kind=${kind}`;
+  const title = isProf ? "Тесты по профессиям" : "Инструктажи";
+  openModal(`
+    <div style="font-size:16px;font-weight:800;color:var(--navy);margin-bottom:6px;text-align:center">QR — ${title}</div>
+    <div style="font-size:12px;color:var(--gray);text-align:center;margin-bottom:14px">
+      ${isProf ? "Откроется список тестов по профессиям и допуск в карьер" : "Откроется список инструктажей"}
+    </div>
+    <div id="qrContainer" style="display:flex;justify-content:center;margin-bottom:14px"></div>
+    <div style="font-size:11px;color:var(--gray);word-break:break-all;text-align:center;margin-bottom:14px">${url}</div>
+    <div class="hint" style="text-align:center;margin-bottom:14px">
+      Один QR для всех, не привязан к человеку. Повесьте на стенд или отправьте в рабочий чат.
+      Человек сканирует камерой телефона, выбирает себя и сдаёт.
     </div>
     <button class="btn btn-gold" onclick="window.print()">🖨 Печать</button>
     <button class="btn btn-ghost" style="margin-top:8px" onclick="closeModal()">Закрыть</button>
