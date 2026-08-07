@@ -235,40 +235,79 @@ tr:hover td { background:#FAFBFD; }
 
     <!-- ══ ДАШБОРД ══ -->
     <div id="tabDash" class="screen">
-      <div style="font-size:15px;font-weight:800;color:var(--navy);margin-bottom:12px">👥 Кадры и допуск</div>
-      <div class="stats-grid" id="statsGridPersonnel"></div>
-
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px">
-        <!-- Требует внимания — допуски (просроченные + истекающие) + несданные
-             тесты + вакансии по вахтам, в одном месте. Компактный баннер, если
-             всё чисто, развёрнуто — если есть что показать. -->
-        <div class="panel" style="grid-column:1/-1">
-          <div class="panel-title">
-            🔔 Требует внимания
-            <button class="btn btn-ghost" onclick="copyAttentionList()">📋 Скопировать</button>
-          </div>
-          <div id="attentionList"></div>
-        </div>
-        <!-- Последние тесты -->
-        <div class="panel">
-          <div class="panel-title">
-            📋 Последние сдачи тестов
-            <span style="font-size:12px;color:var(--gray)" id="lastTestsDate"></span>
-          </div>
-          <div id="lastTestsList"></div>
-        </div>
-      </div>
-
-      <div style="font-size:15px;font-weight:800;color:var(--navy);margin:28px 0 12px;padding-top:20px;border-top:2px solid var(--border)">🚜 Техника и осмотры</div>
+      <!-- ГЛАВНОЕ: предсменный контроль техники -->
+      <div style="font-size:15px;font-weight:800;color:var(--navy);margin-bottom:12px">🔧 Предсменный осмотр техники</div>
       <div class="stats-grid" id="statsGridEquipment"></div>
       <div id="noTemplateBanner" style="display:none;margin-top:12px;padding:10px 12px;background:var(--yellowbg,#FFF8E1);border-radius:8px;font-size:13px;color:var(--yellow)"></div>
 
       <div class="panel" style="margin-top:16px">
         <div class="panel-title">
+          ⚠️ Техника с открытыми замечаниями
+          <span id="openDefectsCount" style="font-size:12px;color:var(--red)"></span>
+        </div>
+        <div class="hint" style="margin-bottom:10px">
+          В последнем осмотре были отмечены неисправности — значит проблема, скорее всего, ещё не устранена.
+        </div>
+        <div id="openDefectsList"></div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+        <div class="panel">
+          <div class="panel-title">🔩 Слабые места парка — по узлам</div>
+          <div id="dashBySection"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-title">🔁 Повторяющиеся неисправности</div>
+          <div id="dashTopDefects"></div>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+        <div class="panel">
+          <div class="panel-title">👷 Кто осматривает внимательно</div>
+          <div class="hint" style="margin-bottom:10px">Находят неисправности и поясняют замечания</div>
+          <div id="dashTopOperators"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-title">⚠️ Формальный осмотр</div>
+          <div class="hint" style="margin-bottom:10px">5+ проверок и ни одного замечания — требует внимания руководителя</div>
+          <div id="dashFormalOperators"></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">
+          📅 Динамика осмотров по дням
+        </div>
+        <div id="dashByDay"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">
           ⚠ Свежие неисправности
           <span id="defectsCount" style="font-size:12px;color:var(--red)"></span>
         </div>
         <div id="defectsList"></div>
+      </div>
+
+      <!-- НИЖЕ: кадры, допуск и обучение -->
+      <div style="font-size:15px;font-weight:800;color:var(--navy);margin:28px 0 12px;padding-top:20px;border-top:2px solid var(--border)">👥 Кадры, допуск и обучение</div>
+      <div class="stats-grid" id="statsGridPersonnel"></div>
+
+      <div class="panel" style="margin-top:16px">
+        <div class="panel-title">
+          🔔 Требует внимания
+          <button class="btn btn-ghost" onclick="copyAttentionList()">📋 Скопировать</button>
+        </div>
+        <div id="attentionList"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">
+          📋 Последние сдачи тестов
+          <span style="font-size:12px;color:var(--gray)" id="lastTestsDate"></span>
+        </div>
+        <div id="lastTestsList"></div>
       </div>
     </div>
 
@@ -1348,6 +1387,192 @@ function fmtRecordDateTime(s) {
   return `${dd}.${mm}.${yy} ${hh}:${min}`;
 }
 
+
+// ══════════════════════════════════════════════════════
+// АНАЛИТИКА ЧЕК-ЛИСТОВ НА ДАШБОРДЕ — приоритетный блок.
+// Всё считается на лету из уже загруженных осмотров.
+// ══════════════════════════════════════════════════════
+function eqLabelFull(id) {
+  const e = (DATA.equipment||[]).find(x => String(x.equipmentId)===String(id));
+  return e ? `${e.equipmentId} — ${e.model||""}`.trim() : String(id);
+}
+
+// Техника, у которой в ПОСЛЕДНЕМ осмотре есть неисправности
+function renderOpenDefects() {
+  const el = document.getElementById("openDefectsList");
+  if (!el) return;
+  const records = DATA.checklistRecords || [];
+  const last = {};
+  records.forEach(r => {
+    const id = String(r.equipmentId), d = parseRecordDate(r.date);
+    if (!last[id] || (d && parseRecordDate(last[id].date) < d)) last[id] = r;
+  });
+  const open = Object.values(last)
+    .map(r => ({ rec:r, defects:(r.items||[]).filter(i=>i.status==="defect") }))
+    .filter(x => x.defects.length)
+    .sort((a,b) => b.defects.length - a.defects.length);
+
+  const cnt = document.getElementById("openDefectsCount");
+  if (cnt) cnt.textContent = open.length ? `${open.length} ед.` : "";
+
+  el.innerHTML = open.length ? open.map(({rec,defects}) => `
+    <div style="padding:11px 12px;border:1.5px solid var(--red);background:var(--redbg);
+      border-radius:10px;margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px">
+        <span style="font-size:14px;font-weight:800;color:var(--navy)">${eqLabelFull(rec.equipmentId)}</span>
+        <span style="font-size:11px;color:var(--gray)">${rec.empName||"—"} · ${fmtRecordDateTime(rec.date)}</span>
+      </div>
+      ${defects.map(d => `<div style="font-size:12px;color:var(--red);padding:2px 0">
+        ✗ ${d.itemText}${d.comment?` <span style="color:var(--gray)">— ${d.comment}</span>`:""}
+      </div>`).join("")}
+    </div>`).join("")
+    : `<div style="padding:10px 12px;background:var(--greenbg,#EAF7ED);border-radius:8px;font-size:13px;color:var(--green,#2E7D32);font-weight:700">
+        ✓ Вся осмотренная техника без открытых замечаний</div>`;
+}
+
+// Слабые места парка — по разделам чек-листа
+function renderDashBySection() {
+  const el = document.getElementById("dashBySection");
+  if (!el) return;
+  const records = DATA.checklistRecords || [];
+  const sec = {};
+  records.forEach(r => (r.items||[]).forEach(it => {
+    const s = it.section || "Без раздела";
+    if (!sec[s]) sec[s] = { total:0, defects:0 };
+    sec[s].total++;
+    if (it.status === "defect") sec[s].defects++;
+  }));
+  const rows = Object.entries(sec).filter(r=>r[1].defects>0)
+    .sort((a,b)=>b[1].defects-a[1].defects).slice(0,8);
+  if (!rows.length) { el.innerHTML = `<div class="empty" style="padding:16px"><div class="empty-icon">✓</div>Замечаний нет</div>`; return; }
+  const max = Math.max(...rows.map(r=>r[1].defects),1);
+  el.innerHTML = rows.map(([name,s]) => `
+    <div style="padding:7px 0;border-bottom:1px solid var(--border)">
+      <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
+        <span style="color:var(--navy);font-weight:600">${name}</span>
+        <span style="color:var(--red);font-weight:700">${s.defects} из ${s.total}</span>
+      </div>
+      <div style="background:var(--light);border-radius:6px;height:6px;overflow:hidden">
+        <div style="background:var(--red);height:100%;width:${Math.round(s.defects/max*100)}%"></div>
+      </div>
+    </div>`).join("");
+}
+
+// Топ повторяющихся неисправностей
+function renderDashTopDefects() {
+  const el = document.getElementById("dashTopDefects");
+  if (!el) return;
+  const cnt = {};
+  (DATA.checklistRecords||[]).forEach(r => (r.items||[]).forEach(it => {
+    if (it.status === "defect") cnt[it.itemText] = (cnt[it.itemText]||0)+1;
+  }));
+  const rows = Object.entries(cnt).sort((a,b)=>b[1]-a[1]).slice(0,10);
+  el.innerHTML = rows.length ? rows.map(([t,c]) => `
+    <div style="display:flex;justify-content:space-between;align-items:center;
+      padding:7px 0;border-bottom:1px solid var(--border);font-size:13px;gap:10px">
+      <span style="color:var(--navy)">${t}</span>
+      <span style="background:var(--redbg);color:var(--red);font-weight:700;
+        padding:2px 10px;border-radius:99px;flex-shrink:0">${c}×</span>
+    </div>`).join("")
+    : `<div class="empty" style="padding:16px"><div class="empty-icon">✓</div>Неисправностей нет</div>`;
+}
+
+// Операторы: кто осматривает внимательно / кто формально
+function operatorInspectionStats() {
+  const ops = {};
+  (DATA.checklistRecords||[]).forEach(r => {
+    const n = r.empName || "—";
+    if (!ops[n]) ops[n] = { name:n, empId:r.empId||"", osmotrs:0, defects:0, comments:0, eq:new Set() };
+    if (r.empId && !ops[n].empId) ops[n].empId = r.empId;
+    ops[n].osmotrs++;
+    ops[n].eq.add(r.equipmentId);
+    (r.items||[]).forEach(i => {
+      if (i.status === "defect") ops[n].defects++;
+      if (String(i.comment||"").trim()) ops[n].comments++;
+    });
+  });
+  return Object.values(ops);
+}
+
+function renderDashOperators() {
+  const stats = operatorInspectionStats();
+  const link = (o, txt) => o.empId
+    ? `<span style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted"
+         onclick="goToEmployeeProfile('${String(o.empId).replace(/'/g,"\\'")}')">${txt}</span>` : txt;
+
+  const top = document.getElementById("dashTopOperators");
+  if (top) {
+    const best = stats.filter(o=>o.defects>0||o.comments>0)
+      .sort((a,b)=>(b.defects*2+b.comments)-(a.defects*2+a.comments)).slice(0,8);
+    top.innerHTML = best.length ? best.map((o,i)=>`
+      <div style="display:flex;justify-content:space-between;align-items:center;
+        padding:8px 0;border-bottom:1px solid var(--border)">
+        <div style="display:flex;gap:8px;align-items:center">
+          <span style="font-size:14px;min-width:24px">${["🥇","🥈","🥉"][i]||(i+1)+"."}</span>
+          <div>
+            <div style="font-size:13px;font-weight:700;color:var(--navy)">${link(o,o.name)}</div>
+            <div style="font-size:11px;color:var(--gray)">${o.osmotrs} осм. · ${o.eq.size} ед. техники</div>
+          </div>
+        </div>
+        <div style="text-align:right;font-size:12px">
+          <b style="color:var(--red)">${o.defects}</b> неиспр. · <b style="color:var(--navy2)">${o.comments}</b> комм.
+        </div>
+      </div>`).join("")
+      : `<div class="empty" style="padding:16px"><div class="empty-icon">🔍</div>Пока никто не отметил неисправностей</div>`;
+  }
+
+  const frm = document.getElementById("dashFormalOperators");
+  if (frm) {
+    const formal = stats.filter(o=>o.osmotrs>=5 && o.defects===0 && o.comments===0)
+      .sort((a,b)=>b.osmotrs-a.osmotrs);
+    frm.innerHTML = formal.length ? formal.slice(0,10).map(o=>`
+      <div style="display:flex;justify-content:space-between;align-items:center;
+        padding:9px 11px;background:var(--redbg);border-radius:8px;margin-bottom:6px">
+        <div>
+          <div style="font-size:13px;font-weight:700;color:var(--navy)">${link(o,o.name)}</div>
+          <div style="font-size:11px;color:var(--gray)">${o.eq.size} ед. техники</div>
+        </div>
+        <div style="text-align:right;font-size:12px;color:var(--red)">
+          <b>${o.osmotrs}</b> осм.<br><span style="font-size:11px">без замечаний</span>
+        </div>
+      </div>`).join("") + (formal.length>10?`<div style="font-size:11px;color:var(--gray);margin-top:4px">…и ещё ${formal.length-10}</div>`:"")
+      : `<div style="padding:10px 12px;background:var(--greenbg,#EAF7ED);border-radius:8px;font-size:13px;color:var(--green,#2E7D32)">
+          ✓ Формальных осмотров не выявлено</div>`;
+  }
+}
+
+// Динамика осмотров по дням
+function renderDashByDay() {
+  const el = document.getElementById("dashByDay");
+  if (!el) return;
+  const days = {};
+  (DATA.checklistRecords||[]).forEach(r => {
+    const d = parseRecordDate(r.date);
+    if (!d) return;
+    const k = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+    if (!days[k]) days[k] = { osmotrs:0, defects:0, eq:new Set() };
+    days[k].osmotrs++;
+    days[k].eq.add(r.equipmentId);
+    (r.items||[]).forEach(i => { if (i.status==="defect") days[k].defects++; });
+  });
+  const rows = Object.entries(days).sort((a,b)=>b[0].localeCompare(a[0])).slice(0,14);
+  if (!rows.length) { el.innerHTML = `<div class="empty" style="padding:16px"><div class="empty-icon">📅</div>Осмотров нет</div>`; return; }
+  const max = Math.max(...rows.map(r=>r[1].osmotrs),1);
+  el.innerHTML = rows.map(([k,v]) => {
+    const [y,m,d] = k.split("-");
+    return `<div style="padding:6px 0;border-bottom:1px solid var(--border)">
+      <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
+        <span style="color:var(--navy);font-weight:600">${d}.${m}.${y}</span>
+        <span style="color:var(--gray)">${v.osmotrs} осм. · ${v.eq.size} ед. ·
+          <b style="color:${v.defects?'var(--red)':'var(--green,#2E7D32)'}">${v.defects} неиспр.</b></span>
+      </div>
+      <div style="background:var(--light);border-radius:6px;height:6px;overflow:hidden">
+        <div style="background:var(--gold);height:100%;width:${Math.round(v.osmotrs/max*100)}%"></div>
+      </div>
+    </div>`;
+  }).join("");
+}
+
 function renderDashboard() {
   const emps = DATA.employees;
   const instr = instruktazhAsAccessLike();
@@ -1474,12 +1699,26 @@ function renderDashboard() {
   // отражает нехватку людей прямо сейчас).
   const shiftVacancies = (DATA.shiftAssignments||[]).filter(a => a.status === "вакансия").length;
 
+  // Техника с открытыми замечаниями — по последнему осмотру каждой единицы.
+  // Для выпуска на линию это главная цифра: что нельзя выпускать прямо сейчас.
+  const lastByEq = {};
+  records.forEach(r => {
+    const id = String(r.equipmentId), d = parseRecordDate(r.date);
+    if (!lastByEq[id] || (d && parseRecordDate(lastByEq[id].date) < d)) lastByEq[id] = r;
+  });
+  const openDefectRecs = Object.values(lastByEq)
+    .filter(r => (r.items||[]).some(i => i.status === "defect"));
+  const inspectedCount = Object.keys(lastByEq).length;
+  const defects7 = recentDefects.reduce((n,r)=>n+(r.items||[]).filter(i=>i.status==="defect").length,0);
+  const itemsTotal = records.reduce((n,r)=>n+(r.items||[]).length,0);
+
   document.getElementById("statsGridEquipment").innerHTML = [
-    {lbl:"Единиц техники",        val:equipment.length,      acc:"var(--navy2)"},
-    {lbl:"Вакансий на линии",     val:shiftVacancies,        acc:shiftVacancies?"var(--gold)":"var(--green,#2E7D32)"},
-    {lbl:"Осмотров проведено",    val:records.length,        acc:"var(--gold)"},
-    {lbl:"Неисправностей за 7 дней", val:recentDefects.length, acc:"var(--red)"},
-    {lbl:"Топливо за 7 дней, л",  val:fuelWeekLiters.toLocaleString("ru-RU"), acc:"var(--navy2)"},
+    {lbl:"Единиц техники",           val:equipment.length, acc:"var(--navy2)"},
+    {lbl:"Осмотрено хотя бы раз",    val:`${inspectedCount} из ${equipment.length}`, acc:"var(--navy2)"},
+    {lbl:"С открытыми замечаниями",  val:openDefectRecs.length, acc:openDefectRecs.length?"var(--red)":"var(--green,#2E7D32)"},
+    {lbl:"Осмотров всего",           val:records.length, acc:"var(--gold)"},
+    {lbl:"Проверено пунктов",        val:itemsTotal.toLocaleString("ru-RU"), acc:"var(--gray)"},
+    {lbl:"Неисправностей за 7 дней", val:defects7, acc:defects7?"var(--red)":"var(--green,#2E7D32)"},
   ].map(s=>`
     <div class="stat-card" style="border-left-color:${s.acc}">
       <div class="stat-val" style="color:${s.acc}">${s.val}</div>
@@ -1499,6 +1738,12 @@ function renderDashboard() {
   }
 
   document.getElementById("defectsCount").textContent = recentDefects.length ? `${recentDefects.length} осмотр(ов)` : "";
+  renderOpenDefects();
+  renderDashBySection();
+  renderDashTopDefects();
+  renderDashOperators();
+  renderDashByDay();
+
   document.getElementById("defectsList").innerHTML = recentDefects.length
     ? recentDefects.slice(0,8).map(r => {
         const defects = r.items.filter(it=>it.status==="defect");
