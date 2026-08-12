@@ -1315,7 +1315,9 @@ async function jsonpFetchRetry(url, callbackName, timeoutMs, attempts) {
       return await jsonpFetch(url, callbackName, timeoutMs);
     } catch (e) {
       lastErr = e;
-      if (i < tries - 1) await new Promise(r => setTimeout(r, 1200));
+      // Пауза растёт с каждой попыткой: если канал перегружен или рвётся,
+      // немедленный повтор только усугубляет — 1.5с, 3с, 4.5с
+      if (i < tries - 1) await new Promise(r => setTimeout(r, 1500 * (i + 1)));
     }
   }
   throw lastErr;
@@ -1347,13 +1349,29 @@ async function loadAll() {
     { key: "shiftAssignments",  action: "getShiftAssignments",     cb: "cb_shift_assignments",    heavy: true     },
   ];
 
-  const settled = await Promise.allSettled(
-    fetches.map(f => jsonpFetchRetry(
-      `${CFG.SHEET_URL}?action=${f.action}`, f.cb,
-      f.heavy ? 45000 : 15000,   // тяжёлым — больше времени
-      2                          // и вторая попытка при сбое
-    ))
-  );
+  // Грузим пачками по 3, а не все 12 разом. Браузер держит к одному домену
+  // ограниченное число соединений, и на слабой связи (мобильный интернет в
+  // карьере, прокси) одновременные запросы душат друг друга — часть обрывается
+  // с «script error», часть не укладывается в таймаут. Пачками медленнее на
+  // хорошем канале, но доходит на плохом.
+  const BATCH = 3;
+  const settled = [];
+  const loadMsg = document.getElementById("loadingMsg");
+  for (let i = 0; i < fetches.length; i += BATCH) {
+    const part = fetches.slice(i, i + BATCH);
+    // Показываем прогресс: загрузка пачками идёт дольше, и без этого
+    // экран выглядит зависшим
+    if (loadMsg) loadMsg.textContent =
+      `⏳ Загрузка данных... ${Math.min(i + BATCH, fetches.length)} из ${fetches.length}`;
+    const res = await Promise.allSettled(
+      part.map(f => jsonpFetchRetry(
+        `${CFG.SHEET_URL}?action=${f.action}`, f.cb,
+        f.heavy ? 90000 : 40000,   // на слабой связи нужен запас
+        3                          // три попытки вместо двух
+      ))
+    );
+    settled.push(...res);
+  }
 
   settled.forEach((res, i) => {
     const f = fetches[i];
