@@ -1332,21 +1332,27 @@ async function loadAll() {
   // разом и ждём самый медленный, а не сумму всех.
   // heavy: осмотры и смены растут быстрее всех (осмотры уже 4+ МБ) и переставали
   // укладываться в общий 8-секундный таймаут — раздел молча оставался пустым.
+  // Порядок важен: грузим пачками по 3, и первыми — то, без чего вкладки
+  // выглядят пустыми (сотрудники, техника, смены). Иначе, открыв «График
+  // обучения» или «Вахту» до конца загрузки, человек видит нули.
   const fetches = [
     { key: "employees",         action: "list",                    cb: "cb_employees",           critical: true, heavy: true },
-    { key: "results",           action: "getResults",              cb: "cb_results",              critical: true  },
-    { key: "training",          action: "getTraining",             cb: "cb_training"                              },
-    { key: "requirements",      action: "getRequirements",         cb: "cb_requirements"                          },
-    { key: "tests",             action: "getTests",                cb: "cb_tests"                                 },
-    { key: "personnelEvents",   action: "getPersonnelEvents",      cb: "cb_personnel_events"                      },
-    { key: "surveys",           action: "getSurveys",              cb: "cb_surveys"                               },
     { key: "equipment",         action: "getEquipment",            cb: "cb_equipment"                             },
-    { key: "checklistTemplates",action: "getChecklistTemplates",   cb: "cb_checklist_templates"                   },
+    { key: "shiftAssignments",  action: "getShiftAssignments",     cb: "cb_shift_assignments",    heavy: true     },
+
+    { key: "training",          action: "getTraining",             cb: "cb_training"                              },
+    { key: "results",           action: "getResults",              cb: "cb_results",              critical: true  },
+    { key: "tests",             action: "getTests",                cb: "cb_tests"                                 },
+
     // Осмотры грузим за 30 дней: полная история выросла до ~7 МБ и переставала
     // доходить на слабой связи. Всю историю можно поднять кнопкой (loadFullHistory).
     { key: "checklistRecords",  action: "getChecklistRecords&days=30", cb: "cb_checklist_records", heavy: true },
+    { key: "checklistTemplates",action: "getChecklistTemplates",   cb: "cb_checklist_templates"                   },
     { key: "fuel",              action: "getFuelRecords",          cb: "cb_fuel_records"                          },
-    { key: "shiftAssignments",  action: "getShiftAssignments",     cb: "cb_shift_assignments",    heavy: true     },
+
+    { key: "requirements",      action: "getRequirements",         cb: "cb_requirements"                          },
+    { key: "personnelEvents",   action: "getPersonnelEvents",      cb: "cb_personnel_events"                      },
+    { key: "surveys",           action: "getSurveys",              cb: "cb_surveys"                               },
   ];
 
   // Грузим пачками по 3, а не все 12 разом. Браузер держит к одному домену
@@ -1357,6 +1363,7 @@ async function loadAll() {
   const BATCH = 3;
   const settled = [];
   const loadMsg = document.getElementById("loadingMsg");
+  let firstBatchDone = false;
   for (let i = 0; i < fetches.length; i += BATCH) {
     const part = fetches.slice(i, i + BATCH);
     // Показываем прогресс: загрузка пачками идёт дольше, и без этого
@@ -1371,6 +1378,16 @@ async function loadAll() {
       ))
     );
     settled.push(...res);
+
+    // Раскладываем пришедшее сразу и перерисовываем — вкладки наполняются
+    // по мере загрузки, а не ждут самого медленного запроса. Иначе, открыв
+    // вкладку раньше времени, человек видит пустой экран.
+    res.forEach((r, j) => {
+      const f = part[j];
+      if (r.status === "fulfilled" && Array.isArray(r.value)) DATA[f.key] = r.value;
+    });
+    try { renderAll(); } catch(e) { console.error("Отрисовка:", e); }
+    firstBatchDone = true;
   }
 
   settled.forEach((res, i) => {
@@ -5399,6 +5416,23 @@ function buildTrainingPlan() {
 }
 
 function renderTrainingPlan() {
+  // Если смены ещё не загрузились (или не дошли) — график будет пустым.
+  // Честно говорим об этом, а не показываем нули как реальное состояние.
+  const noShifts = !(DATA.shiftAssignments||[]).length;
+  const warnEl = document.getElementById("planSummary");
+  if (noShifts && warnEl) {
+    warnEl.innerHTML = `<div style="padding:12px;background:var(--yellowbg,#FFF8E1);
+      border-radius:8px;font-size:13px;color:var(--yellow);margin-bottom:16px">
+      ⏳ Данные по сменам ещё не загрузились. Если сообщение осталось после
+      полной загрузки — нажмите «Обновить» вверху страницы.
+    </div>`;
+    ["planNoTraining","planByMonth","planTable"].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.innerHTML = "";
+    });
+    return;
+  }
+
   const rows = buildTrainingPlan();
   const sum  = document.getElementById("planSummary");
   const noTr = document.getElementById("planNoTraining");
