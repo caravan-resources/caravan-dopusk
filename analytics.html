@@ -204,7 +204,9 @@ async function fetchWithRetry(url, timeoutMs, attempts) {
     } catch (e) {
       clearTimeout(timer);
       lastErr = e;
-      if (i < tries - 1) await new Promise(res => setTimeout(res, 1200));
+      // Пауза растёт с каждой попыткой — немедленный повтор на рвущемся
+      // канале только усугубляет
+      if (i < tries - 1) await new Promise(res => setTimeout(res, 1500 * (i + 1)));
     }
   }
   throw lastErr;
@@ -214,12 +216,15 @@ async function loadAll() {
   const banner = document.getElementById("loadErrorBanner");
   if (banner) banner.style.display = "none";
   // Топливо здесь не грузим: механику по выпуску нужны только осмотры
-  const res = await Promise.allSettled([
-    fetchWithRetry(`${CFG.SHEET_URL}?action=getEquipment`, 20000, 2),
+  // Последовательно, а не параллельно: на слабой связи одновременные запросы
+  // рвут друг друга. Здесь их всего два, так что потеря скорости небольшая.
+  const eq = await Promise.allSettled(
+    [fetchWithRetry(`${CFG.SHEET_URL}?action=getEquipment`, 40000, 3)]
+  ).then(a => a[0]);
+  const records = await Promise.allSettled(
     // 30 дней вместо всей истории: полная выгрузка ~7 МБ не доходит на слабой связи
-    fetchWithRetry(`${CFG.SHEET_URL}?action=getChecklistRecords&days=30`, 45000, 2),
-  ]);
-  const [eq, records] = res;
+    [fetchWithRetry(`${CFG.SHEET_URL}?action=getChecklistRecords&days=30`, 90000, 3)]
+  ).then(a => a[0]);
   let failed = false;
 
   if (eq.status === "fulfilled" && Array.isArray(eq.value)) DATA.equipment = eq.value;
