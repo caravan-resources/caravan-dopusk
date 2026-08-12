@@ -237,7 +237,14 @@ tr:hover td { background:#FAFBFD; }
     <!-- ══ ДАШБОРД ══ -->
     <div id="tabDash" class="screen">
       <!-- ГЛАВНОЕ: предсменный контроль техники -->
-      <div style="font-size:15px;font-weight:800;color:var(--navy);margin-bottom:12px">🔧 Предсменный осмотр техники</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:10px;flex-wrap:wrap">
+        <span style="font-size:15px;font-weight:800;color:var(--navy)">🔧 Предсменный осмотр техники</span>
+        <span style="display:flex;gap:8px;align-items:center">
+          <span style="font-size:11px;color:var(--gray)" id="historyHint">показаны последние 30 дней</span>
+          <button class="btn btn-ghost" style="width:auto;padding:6px 12px;font-size:12px"
+            onclick="loadFullHistory(this)">📜 Вся история</button>
+        </span>
+      </div>
       <div class="stats-grid" id="statsGridEquipment"></div>
       <div id="noTemplateBanner" style="display:none;margin-top:12px;padding:10px 12px;background:var(--yellowbg,#FFF8E1);border-radius:8px;font-size:13px;color:var(--yellow)"></div>
 
@@ -1333,7 +1340,9 @@ async function loadAll() {
     { key: "surveys",           action: "getSurveys",              cb: "cb_surveys"                               },
     { key: "equipment",         action: "getEquipment",            cb: "cb_equipment"                             },
     { key: "checklistTemplates",action: "getChecklistTemplates",   cb: "cb_checklist_templates"                   },
-    { key: "checklistRecords",  action: "getChecklistRecords",     cb: "cb_checklist_records",    heavy: true     },
+    // Осмотры грузим за 30 дней: полная история выросла до ~7 МБ и переставала
+    // доходить на слабой связи. Всю историю можно поднять кнопкой (loadFullHistory).
+    { key: "checklistRecords",  action: "getChecklistRecords&days=30", cb: "cb_checklist_records", heavy: true },
     { key: "fuel",              action: "getFuelRecords",          cb: "cb_fuel_records"                          },
     { key: "shiftAssignments",  action: "getShiftAssignments",     cb: "cb_shift_assignments",    heavy: true     },
   ];
@@ -1501,6 +1510,9 @@ function renderDashBySection() {
     sec[s].total++;
     if (it.status === "defect") sec[s].defects++;
   }));
+  // Исправные пункты приходят общим счётчиком без привязки к разделу,
+  // поэтому в разбивке по разделам показываем абсолютное число неисправностей,
+  // а не долю — иначе процент был бы завышен.
   const rows = Object.entries(sec).filter(r=>r[1].defects>0)
     .sort((a,b)=>b[1].defects-a[1].defects).slice(0,8);
   if (!rows.length) { el.innerHTML = `<div class="empty" style="padding:16px"><div class="empty-icon">✓</div>Замечаний нет</div>`; return; }
@@ -1509,7 +1521,7 @@ function renderDashBySection() {
     <div style="padding:7px 0;border-bottom:1px solid var(--border)">
       <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
         <span style="color:var(--navy);font-weight:600">${name}</span>
-        <span style="color:var(--red);font-weight:700">${s.defects} из ${s.total}</span>
+        <span style="color:var(--red);font-weight:700">${s.defects} неиспр.</span>
       </div>
       <div style="background:var(--light);border-radius:6px;height:6px;overflow:hidden">
         <div style="background:var(--red);height:100%;width:${Math.round(s.defects/max*100)}%"></div>
@@ -1630,6 +1642,33 @@ function renderDashByDay() {
       </div>
     </div>`;
   }).join("");
+}
+
+
+// Подгрузка полной истории осмотров по требованию — не грузится при каждом
+// входе, чтобы не тащить лишние мегабайты.
+let FULL_HISTORY_LOADED = false;
+
+async function loadFullHistory(btn) {
+  if (FULL_HISTORY_LOADED) return;
+  const old = btn ? btn.textContent : "";
+  if (btn) { btn.disabled = true; btn.textContent = "⏳ Загружаю всю историю..."; }
+  try {
+    const d = await jsonpFetchRetry(
+      `${CFG.SHEET_URL}?action=getChecklistRecords`, "cb_full_history", 90000, 2);
+    if (Array.isArray(d) && d.length) {
+      DATA.checklistRecords = d;
+      FULL_HISTORY_LOADED = true;
+      renderAll();
+      if (btn) { btn.textContent = `✓ Загружено ${d.length} осмотров за всё время`; }
+    } else {
+      if (btn) { btn.disabled = false; btn.textContent = old; }
+      alert("Не удалось загрузить историю — попробуйте ещё раз.");
+    }
+  } catch(e) {
+    if (btn) { btn.disabled = false; btn.textContent = old; }
+    alert("Не удалось загрузить историю: " + e.message);
+  }
 }
 
 function renderDashboard() {
@@ -1769,7 +1808,9 @@ function renderDashboard() {
     .filter(r => (r.items||[]).some(i => i.status === "defect"));
   const inspectedCount = Object.keys(lastByEq).length;
   const defects7 = recentDefects.reduce((n,r)=>n+(r.items||[]).filter(i=>i.status==="defect").length,0);
-  const itemsTotal = records.reduce((n,r)=>n+(r.items||[]).length,0);
+  // totalItems — полное число пунктов осмотра (исправные не передаются
+  // по отдельности ради объёма, только счётчиком)
+  const itemsTotal = records.reduce((n,r)=>n+(r.totalItems ?? (r.items||[]).length),0);
 
   document.getElementById("statsGridEquipment").innerHTML = [
     {lbl:"Единиц техники",           val:equipment.length, acc:"var(--navy2)"},
@@ -5838,7 +5879,10 @@ function equipmentTrend(equipmentId, weeks) {
     const start = new Date(end); start.setDate(start.getDate()-7);
     const recs = (DATA.checklistRecords||[]).filter(r => String(r.equipmentId)===String(equipmentId) && inRange(r.date, start, end));
     let defects = 0, items = 0;
-    recs.forEach(r => (r.items||[]).forEach(it => { items++; if (it.status==="defect") defects++; }));
+    recs.forEach(r => {
+      items += (r.totalItems ?? 0) - (r.items||[]).length;     // исправные счётчиком
+      (r.items||[]).forEach(it => { items++; if (it.status==="defect") defects++; });
+    });
     buckets.push({ start, osmotrs: recs.length, defects, items });
   }
   return buckets;
@@ -5900,6 +5944,7 @@ function generateReport(site) {
   const inspectedEquipmentIds = new Set();
   recCur.forEach(r => {
     inspectedEquipmentIds.add(r.equipmentId);
+    itemsCur += (r.totalItems ?? 0) - (r.items||[]).length;   // исправные счётчиком
     (r.items||[]).forEach(it => {
       itemsCur++;
       if (it.status === "defect") {
@@ -5911,7 +5956,10 @@ function generateReport(site) {
   const topDefects = Object.entries(defectTextCounts).sort((a,b)=>b[1]-a[1]).slice(0,3);
 
   let defectsPrev = 0, itemsPrev = 0;
-  recPrev.forEach(r => (r.items||[]).forEach(it => { itemsPrev++; if (it.status==="defect") defectsPrev++; }));
+  recPrev.forEach(r => {
+    itemsPrev += (r.totalItems ?? 0) - (r.items||[]).length;   // исправные счётчиком
+    (r.items||[]).forEach(it => { itemsPrev++; if (it.status==="defect") defectsPrev++; });
+  });
 
   const activeEquipment = siteEquipment.filter(e => e.templateId);
   const notInspected = activeEquipment.filter(e => !inspectedEquipmentIds.has(e.equipmentId));
