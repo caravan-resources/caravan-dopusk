@@ -1346,7 +1346,10 @@ async function loadAll() {
 
     // Осмотры грузим за 30 дней: полная история выросла до ~7 МБ и переставала
     // доходить на слабой связи. Всю историю можно поднять кнопкой (loadFullHistory).
-    { key: "checklistRecords",  action: "getChecklistRecords&days=30", cb: "cb_checklist_records", heavy: true },
+    // Готовая аналитика с сервера вместо всех записей: размер почти не зависит
+    // от числа осмотров (137 КБ против 800 КБ и растущих). Сами записи грузим
+    // только по требованию — для конкретной машины или полной истории.
+    { key: "checklistStats",    action: "getChecklistStats&days=30",   cb: "cb_checklist_stats",   heavy: true },
     { key: "checklistTemplates",action: "getChecklistTemplates",   cb: "cb_checklist_templates"                   },
     { key: "fuel",              action: "getFuelRecords",          cb: "cb_fuel_records"                          },
 
@@ -1384,7 +1387,9 @@ async function loadAll() {
     // вкладку раньше времени, человек видит пустой экран.
     res.forEach((r, j) => {
       const f = part[j];
-      if (r.status === "fulfilled" && Array.isArray(r.value)) DATA[f.key] = r.value;
+      if (r.status !== "fulfilled") return;
+      if (f.key === "checklistStats") { if (r.value && r.value.ok) DATA[f.key] = r.value; }
+      else if (Array.isArray(r.value)) DATA[f.key] = r.value;
     });
     try { renderAll(); } catch(e) { console.error("Отрисовка:", e); }
     firstBatchDone = true;
@@ -1392,11 +1397,15 @@ async function loadAll() {
 
   settled.forEach((res, i) => {
     const f = fetches[i];
-    const ok = res.status === "fulfilled" && Array.isArray(res.value) && (f.critical ? res.value.length > 0 : true);
+    // Агрегат приходит объектом, остальное — массивами
+    const isObj = f.key === "checklistStats";
+    const val = res.status === "fulfilled" ? res.value : null;
+    const ok = res.status === "fulfilled" &&
+      (isObj ? (val && val.ok) : Array.isArray(val) && (f.critical ? val.length > 0 : true));
     if (ok) {
       DATA[f.key] = res.value;
     } else {
-      DATA[f.key] = [];
+      DATA[f.key] = isObj ? null : [];
       if (f.critical) DATA.criticalLoadFailed = true;
       if (res.status === "rejected") console.error(f.key + ":", res.reason);
     }
@@ -1501,31 +1510,80 @@ function eqLabelFull(id) {
 }
 
 // Техника, у которой в ПОСЛЕДНЕМ осмотре есть неисправности
+
+// Агрегат осмотров с сервера. site: "Алмалы"/"Ашыктас"/undefined (всё).
+// Аналитика считается на сервере — панель получает готовые цифры, поэтому
+// объём ответа не растёт вместе с числом осмотров.
+
+// Кэш агрегатов по периодам: рейтинг и отчёты работают с разными сроками
+// (неделя, месяц, квартал), и для каждого сервер считает свой свод.
+// Запрашиваем по требованию и держим в памяти, чтобы не дёргать сервер зря.
+const STATS_CACHE = {};
+
+async function statsForDays(days) {
+  const key = String(days || 0);
+  if (STATS_CACHE[key]) return STATS_CACHE[key];
+  try {
+    const d = await jsonpFetchRetry(
+      `${CFG.SHEET_URL}?action=getChecklistStats&days=${days}`,
+      "cb_stats_" + key, 90000, 3);
+    if (d && d.ok) { STATS_CACHE[key] = d; return d; }
+  } catch(e) { console.error("Агрегат за " + days + " дней:", e); }
+  return null;
+}
+
+
+// Подгрузка журнала осмотров по требованию — при входе не грузится, чтобы
+// не тащить мегабайты. Нужен для отчётов и просмотра конкретных осмотров.
+let FULL_HISTORY_LOADED = false;
+
+async function loadFullHistory(btn) {
+  if (FULL_HISTORY_LOADED) return true;
+  const old = btn ? btn.textContent : "";
+  if (btn) { btn.disabled = true; btn.textContent = "⏳ Загружаю журнал осмотров..."; }
+  try {
+    const d = await jsonpFetchRetry(
+      `${CFG.SHEET_URL}?action=getChecklistRecords`, "cb_full_history", 120000, 3);
+    if (Array.isArray(d) && d.length) {
+      DATA.checklistRecords = d;
+      FULL_HISTORY_LOADED = true;
+      renderAll();
+      if (btn) btn.textContent = `✓ Загружено ${d.length} осмотров`;
+      return true;
+    }
+    if (btn) { btn.disabled = false; btn.textContent = old; }
+    return false;
+  } catch(e) {
+    if (btn) { btn.disabled = false; btn.textContent = old; }
+    console.error("Журнал осмотров:", e);
+    return false;
+  }
+}
+
+function chkStats(site) {
+  const s = DATA.checklistStats;
+  if (!s || !s.ok) return null;
+  if (site) return (s.sites && s.sites[site]) || null;
+  return s.all || null;
+}
+
 function renderOpenDefects() {
   const el = document.getElementById("openDefectsList");
   if (!el) return;
-  const records = DATA.checklistRecords || [];
-  const last = {};
-  records.forEach(r => {
-    const id = String(r.equipmentId), d = parseRecordDate(r.date);
-    if (!last[id] || (d && parseRecordDate(last[id].date) < d)) last[id] = r;
-  });
-  const open = Object.values(last)
-    .map(r => ({ rec:r, defects:(r.items||[]).filter(i=>i.status==="defect") }))
-    .filter(x => x.defects.length)
-    .sort((a,b) => b.defects.length - a.defects.length);
+  const st = chkStats();
+  const open = st ? st.openDefects : [];
 
   const cnt = document.getElementById("openDefectsCount");
   if (cnt) cnt.textContent = open.length ? `${open.length} ед.` : "";
 
-  el.innerHTML = open.length ? open.map(({rec,defects}) => `
+  el.innerHTML = open.length ? open.map(o => `
     <div style="padding:11px 12px;border:1.5px solid var(--red);background:var(--redbg);
       border-radius:10px;margin-bottom:8px">
       <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px">
-        <span style="font-size:14px;font-weight:800;color:var(--navy)">${eqLabelFull(rec.equipmentId)}</span>
-        <span style="font-size:11px;color:var(--gray)">${rec.empName||"—"} · ${fmtRecordDateTime(rec.date)}</span>
+        <span style="font-size:14px;font-weight:800;color:var(--navy)">${o.equipmentId}${o.model?` — ${o.model}`:""}</span>
+        <span style="font-size:11px;color:var(--gray)">${o.empName||"—"} · ${fmtRecordDateTime(o.date)}</span>
       </div>
-      ${defects.map(d => `<div style="font-size:12px;color:var(--red);padding:2px 0">
+      ${(o.items||[]).map(d => `<div style="font-size:12px;color:var(--red);padding:2px 0">
         ✗ ${d.itemText}${d.comment?` <span style="color:var(--gray)">— ${d.comment}</span>`:""}
       </div>`).join("")}
     </div>`).join("")
@@ -1537,26 +1595,15 @@ function renderOpenDefects() {
 function renderDashBySection() {
   const el = document.getElementById("dashBySection");
   if (!el) return;
-  const records = DATA.checklistRecords || [];
-  const sec = {};
-  records.forEach(r => (r.items||[]).forEach(it => {
-    const s = it.section || "Без раздела";
-    if (!sec[s]) sec[s] = { total:0, defects:0 };
-    sec[s].total++;
-    if (it.status === "defect") sec[s].defects++;
-  }));
-  // Исправные пункты приходят общим счётчиком без привязки к разделу,
-  // поэтому в разбивке по разделам показываем абсолютное число неисправностей,
-  // а не долю — иначе процент был бы завышен.
-  const rows = Object.entries(sec).filter(r=>r[1].defects>0)
-    .sort((a,b)=>b[1].defects-a[1].defects).slice(0,8);
+  const st = chkStats();
+  const rows = st ? st.bySection.filter(s => s.defects > 0).slice(0, 8) : [];
   if (!rows.length) { el.innerHTML = `<div class="empty" style="padding:16px"><div class="empty-icon">✓</div>Замечаний нет</div>`; return; }
-  const max = Math.max(...rows.map(r=>r[1].defects),1);
-  el.innerHTML = rows.map(([name,s]) => `
+  const max = Math.max(...rows.map(r=>r.defects),1);
+  el.innerHTML = rows.map(s => `
     <div style="padding:7px 0;border-bottom:1px solid var(--border)">
       <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
-        <span style="color:var(--navy);font-weight:600">${name}</span>
-        <span style="color:var(--red);font-weight:700">${s.defects} неиспр.</span>
+        <span style="color:var(--navy);font-weight:600">${s.section}</span>
+        <span style="color:var(--red);font-weight:700">${s.defects} из ${s.total}</span>
       </div>
       <div style="background:var(--light);border-radius:6px;height:6px;overflow:hidden">
         <div style="background:var(--red);height:100%;width:${Math.round(s.defects/max*100)}%"></div>
@@ -1568,36 +1615,26 @@ function renderDashBySection() {
 function renderDashTopDefects() {
   const el = document.getElementById("dashTopDefects");
   if (!el) return;
-  const cnt = {};
-  (DATA.checklistRecords||[]).forEach(r => (r.items||[]).forEach(it => {
-    if (it.status === "defect") cnt[it.itemText] = (cnt[it.itemText]||0)+1;
-  }));
-  const rows = Object.entries(cnt).sort((a,b)=>b[1]-a[1]).slice(0,10);
-  el.innerHTML = rows.length ? rows.map(([t,c]) => `
+  const st = chkStats();
+  const rows = st ? st.topDefects.slice(0, 10) : [];
+  el.innerHTML = rows.length ? rows.map(r => `
     <div style="display:flex;justify-content:space-between;align-items:center;
       padding:7px 0;border-bottom:1px solid var(--border);font-size:13px;gap:10px">
-      <span style="color:var(--navy)">${t}</span>
+      <span style="color:var(--navy)">${r.itemText}</span>
       <span style="background:var(--redbg);color:var(--red);font-weight:700;
-        padding:2px 10px;border-radius:99px;flex-shrink:0">${c}×</span>
+        padding:2px 10px;border-radius:99px;flex-shrink:0">${r.count}×</span>
     </div>`).join("")
     : `<div class="empty" style="padding:16px"><div class="empty-icon">✓</div>Неисправностей нет</div>`;
 }
 
 // Операторы: кто осматривает внимательно / кто формально
 function operatorInspectionStats() {
-  const ops = {};
-  (DATA.checklistRecords||[]).forEach(r => {
-    const n = r.empName || "—";
-    if (!ops[n]) ops[n] = { name:n, empId:r.empId||"", osmotrs:0, defects:0, comments:0, eq:new Set() };
-    if (r.empId && !ops[n].empId) ops[n].empId = r.empId;
-    ops[n].osmotrs++;
-    ops[n].eq.add(r.equipmentId);
-    (r.items||[]).forEach(i => {
-      if (i.status === "defect") ops[n].defects++;
-      if (String(i.comment||"").trim()) ops[n].comments++;
-    });
-  });
-  return Object.values(ops);
+  const st = chkStats();
+  return st ? st.byOperator.map(o => ({
+    name: o.empName, empId: o.empId, osmotrs: o.osmotrs,
+    defects: o.defects, comments: o.comments,
+    eq: { size: o.equipmentCount },   // совместимость с прежним видом
+  })) : [];
 }
 
 function renderDashOperators() {
@@ -1651,25 +1688,16 @@ function renderDashOperators() {
 function renderDashByDay() {
   const el = document.getElementById("dashByDay");
   if (!el) return;
-  const days = {};
-  (DATA.checklistRecords||[]).forEach(r => {
-    const d = parseRecordDate(r.date);
-    if (!d) return;
-    const k = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
-    if (!days[k]) days[k] = { osmotrs:0, defects:0, eq:new Set() };
-    days[k].osmotrs++;
-    days[k].eq.add(r.equipmentId);
-    (r.items||[]).forEach(i => { if (i.status==="defect") days[k].defects++; });
-  });
-  const rows = Object.entries(days).sort((a,b)=>b[0].localeCompare(a[0])).slice(0,14);
+  const st = chkStats();
+  const rows = st ? st.byDay.slice(0, 14) : [];
   if (!rows.length) { el.innerHTML = `<div class="empty" style="padding:16px"><div class="empty-icon">📅</div>Осмотров нет</div>`; return; }
-  const max = Math.max(...rows.map(r=>r[1].osmotrs),1);
-  el.innerHTML = rows.map(([k,v]) => {
-    const [y,m,d] = k.split("-");
+  const max = Math.max(...rows.map(r=>r.osmotrs),1);
+  el.innerHTML = rows.map(v => {
+    const [y,m,d] = v.date.split("-");
     return `<div style="padding:6px 0;border-bottom:1px solid var(--border)">
       <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
         <span style="color:var(--navy);font-weight:600">${d}.${m}.${y}</span>
-        <span style="color:var(--gray)">${v.osmotrs} осм. · ${v.eq.size} ед. ·
+        <span style="color:var(--gray)">${v.osmotrs} осм. · ${v.equipmentCount} ед. ·
           <b style="color:${v.defects?'var(--red)':'var(--green,#2E7D32)'}">${v.defects} неиспр.</b></span>
       </div>
       <div style="background:var(--light);border-radius:6px;height:6px;overflow:hidden">
@@ -1677,33 +1705,6 @@ function renderDashByDay() {
       </div>
     </div>`;
   }).join("");
-}
-
-
-// Подгрузка полной истории осмотров по требованию — не грузится при каждом
-// входе, чтобы не тащить лишние мегабайты.
-let FULL_HISTORY_LOADED = false;
-
-async function loadFullHistory(btn) {
-  if (FULL_HISTORY_LOADED) return;
-  const old = btn ? btn.textContent : "";
-  if (btn) { btn.disabled = true; btn.textContent = "⏳ Загружаю всю историю..."; }
-  try {
-    const d = await jsonpFetchRetry(
-      `${CFG.SHEET_URL}?action=getChecklistRecords`, "cb_full_history", 90000, 2);
-    if (Array.isArray(d) && d.length) {
-      DATA.checklistRecords = d;
-      FULL_HISTORY_LOADED = true;
-      renderAll();
-      if (btn) { btn.textContent = `✓ Загружено ${d.length} осмотров за всё время`; }
-    } else {
-      if (btn) { btn.disabled = false; btn.textContent = old; }
-      alert("Не удалось загрузить историю — попробуйте ещё раз.");
-    }
-  } catch(e) {
-    if (btn) { btn.disabled = false; btn.textContent = old; }
-    alert("Не удалось загрузить историю: " + e.message);
-  }
 }
 
 function renderDashboard() {
@@ -1812,46 +1813,24 @@ function renderDashboard() {
     : `<div class="empty"><div class="empty-icon">📋</div>Нет данных</div>`;
 
   // ══ Зона техники и осмотров ══
+  // Все цифры берём из серверного агрегата: он считает по всей базе,
+  // а панели передаёт только итоги.
   const equipment = DATA.equipment || [];
-  const records   = DATA.checklistRecords || [];
   const noTemplate = equipment.filter(e => !e.templateId);
+  const st = chkStats();
 
-  const weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate()-7);
-  const recordsWithDefects = records.filter(r => r.items.some(it => it.status==="defect"));
-  const recentDefects = recordsWithDefects.filter(r => {
-    const d = parseRecordDate(r.date);
-    return d && d >= weekAgo;
-  });
-
-  const fuelRecords = DATA.fuel || [];
-  const fuelWeek = fuelRecords.filter(f => { const d = parseRecordDate(f.date); return d && d >= weekAgo; });
-  const fuelWeekLiters = fuelWeek.reduce((s,f) => s + (Number(f.amountLiters)||0), 0);
-
-  // Вакансий на линии — живая метрика по вахтам, вместо мёртвого «без шаблона»
-  // (шаблоны на технике закрыты на 100% и не меняются, эта карточка реально
-  // отражает нехватку людей прямо сейчас).
-  const shiftVacancies = (DATA.shiftAssignments||[]).filter(a => a.status === "вакансия").length;
-
-  // Техника с открытыми замечаниями — по последнему осмотру каждой единицы.
-  // Для выпуска на линию это главная цифра: что нельзя выпускать прямо сейчас.
-  const lastByEq = {};
-  records.forEach(r => {
-    const id = String(r.equipmentId), d = parseRecordDate(r.date);
-    if (!lastByEq[id] || (d && parseRecordDate(lastByEq[id].date) < d)) lastByEq[id] = r;
-  });
-  const openDefectRecs = Object.values(lastByEq)
-    .filter(r => (r.items||[]).some(i => i.status === "defect"));
-  const inspectedCount = Object.keys(lastByEq).length;
-  const defects7 = recentDefects.reduce((n,r)=>n+(r.items||[]).filter(i=>i.status==="defect").length,0);
-  // totalItems — полное число пунктов осмотра (исправные не передаются
-  // по отдельности ради объёма, только счётчиком)
-  const itemsTotal = records.reduce((n,r)=>n+(r.totalItems ?? (r.items||[]).length),0);
+  const openDefectRecs = st ? st.openDefects : [];
+  const inspectedCount = st ? st.inspectedCount : 0;
+  const defects7       = st ? st.defects7 : 0;
+  const itemsTotal     = st ? st.items : 0;
+  const recordsCount   = st ? st.records : 0;
+  const recentDefects  = st ? st.recentDefects : [];
 
   document.getElementById("statsGridEquipment").innerHTML = [
     {lbl:"Единиц техники",           val:equipment.length, acc:"var(--navy2)"},
     {lbl:"Осмотрено хотя бы раз",    val:`${inspectedCount} из ${equipment.length}`, acc:"var(--navy2)"},
     {lbl:"С открытыми замечаниями",  val:openDefectRecs.length, acc:openDefectRecs.length?"var(--red)":"var(--green,#2E7D32)"},
-    {lbl:"Осмотров всего",           val:records.length, acc:"var(--gold)"},
+    {lbl:"Осмотров всего",           val:recordsCount, acc:"var(--gold)"},
     {lbl:"Проверено пунктов",        val:itemsTotal.toLocaleString("ru-RU"), acc:"var(--gray)"},
     {lbl:"Неисправностей за 7 дней", val:defects7, acc:defects7?"var(--red)":"var(--green,#2E7D32)"},
   ].map(s=>`
@@ -1879,9 +1858,10 @@ function renderDashboard() {
   renderDashOperators();
   renderDashByDay();
 
+  // recentDefects приходит из агрегата: там уже только неисправности
   document.getElementById("defectsList").innerHTML = recentDefects.length
     ? recentDefects.slice(0,8).map(r => {
-        const defects = r.items.filter(it=>it.status==="defect");
+        const defects = r.items || [];
         const eq = equipment.find(e => String(e.equipmentId)===String(r.equipmentId));
         const eqLabel = eq ? `${eq.equipmentId} — ${eq.model}` : r.equipmentId;
         return `
@@ -4246,91 +4226,49 @@ function loadTemplateForEdit(idx) {
 
 function renderChecklistAnalytics(site) {
   const suffix = site === "Ашыктас" ? "Ashyktas" : "Almaty";
-  const equipment = (DATA.equipment||[]).filter(e => (e.site||"").trim() === site);
-  const eqIds = new Set(equipment.map(e => String(e.equipmentId)));
-  const records = (DATA.checklistRecords||[]).filter(r => eqIds.has(String(r.equipmentId)));
-
-  const byEqEl = document.getElementById("analyticsByEquipment"+suffix);
+  const st = chkStats(site);
+  const byEqEl   = document.getElementById("analyticsByEquipment"+suffix);
   const byItemEl = document.getElementById("analyticsByItem"+suffix);
+  const commEl   = document.getElementById("analyticsComments"+suffix);
   if (!byEqEl || !byItemEl) return;
 
-  if (!records.length) {
-    byEqEl.innerHTML = `<div class="empty" style="padding:16px"><div class="empty-icon">📊</div>Пока нет данных</div>`;
-    byItemEl.innerHTML = `<div class="empty" style="padding:16px"><div class="empty-icon">📊</div>Пока нет данных</div>`;
-    const c = document.getElementById("analyticsComments"+suffix);
-    if (c) c.innerHTML = `<div class="empty" style="padding:16px"><div class="empty-icon">💬</div>Комментариев нет</div>`;
+  if (!st || !st.records) {
+    const empty = `<div class="empty" style="padding:16px"><div class="empty-icon">📊</div>Пока нет данных</div>`;
+    byEqEl.innerHTML = empty;
+    byItemEl.innerHTML = empty;
+    if (commEl) commEl.innerHTML = `<div class="empty" style="padding:16px"><div class="empty-icon">💬</div>Комментариев нет</div>`;
     return;
   }
 
-  // ── По технике: сколько осмотров и сколько неисправностей у каждой единицы ──
-  const eqStats = {};
-  records.forEach(r => {
-    const id = r.equipmentId;
-    if (!eqStats[id]) eqStats[id] = { inspections: 0, defects: 0 };
-    eqStats[id].inspections += 1;
-    eqStats[id].defects += r.items.filter(it => it.status === "defect").length;
-  });
-
-  const eqRows = Object.keys(eqStats)
-    .map(id => ({ id, ...eqStats[id] }))
-    .sort((a,b) => b.defects - a.defects || b.inspections - a.inspections);
-
-  byEqEl.innerHTML = eqRows.map(row => {
-    const eq = equipment.find(e => String(e.equipmentId)===String(row.id));
-    const label = eq ? `${eq.equipmentId} — ${eq.model}` : row.id;
+  // ── По технике: сколько осмотров и сколько неисправностей ──
+  byEqEl.innerHTML = st.byEquipment.map(row => {
+    const label = row.model ? `${row.equipmentId} — ${row.model}` : row.equipmentId;
     return `
       <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border);font-size:13px">
         <div>
           <div style="font-weight:700;color:var(--navy)">${label}</div>
-          <div style="font-size:11px;color:var(--gray)">${row.inspections} осмотр(ов)</div>
+          <div style="font-size:11px;color:var(--gray)">${row.osmotrs} осмотр(ов)</div>
         </div>
         ${row.defects > 0
           ? `<span style="background:var(--redbg);color:var(--red);font-size:12px;font-weight:700;padding:3px 10px;border-radius:99px">${row.defects}</span>`
-          : `<span style="color:var(--green);font-size:12px">✓ чисто</span>`
-        }
-      </div>
-    `;
+          : `<span style="color:var(--green);font-size:12px">✓ чисто</span>`}
+      </div>`;
   }).join("");
 
-  // ── Топ пунктов, чаще всего отмечаемых как неисправность, на этом участке ──
-  const itemStats = {};
-  records.forEach(r => {
-    r.items.forEach(it => {
-      if (it.status !== "defect") return;
-      if (!itemStats[it.itemText]) itemStats[it.itemText] = 0;
-      itemStats[it.itemText] += 1;
-    });
-  });
-
-  const itemRows = Object.keys(itemStats)
-    .map(text => ({ text, count: itemStats[text] }))
-    .sort((a,b) => b.count - a.count)
-    .slice(0, 10);
-
-  byItemEl.innerHTML = itemRows.length ? itemRows.map(row => `
+  // ── Топ повторяющихся неисправностей ──
+  const items = st.topDefects.slice(0, 10);
+  byItemEl.innerHTML = items.length ? items.map(row => `
     <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border);font-size:13px">
-      <span style="color:var(--navy)">${row.text}</span>
+      <span style="color:var(--navy)">${row.itemText}</span>
       <span style="background:var(--redbg);color:var(--red);font-size:12px;font-weight:700;padding:3px 10px;border-radius:99px;flex-shrink:0;margin-left:10px">${row.count}</span>
     </div>
   `).join("") : `<div class="empty" style="padding:16px"><div class="empty-icon">✓</div>Неисправностей не найдено</div>`;
 
-  // ── Комментарии по осмотрам этого участка ──
-  const commentsEl = document.getElementById("analyticsComments"+suffix);
-  if (commentsEl) {
-    const allComments = [];
-    records.forEach(r => {
-      r.items.forEach(it => {
-        if (!it.comment) return;
-        allComments.push({
-          equipmentId: r.equipmentId, empName: r.empName, date: r.date,
-          itemText: it.itemText, status: it.status, comment: it.comment,
-        });
-      });
-    });
-    allComments.sort((a,b) => (parseRecordDate(b.date)||0) - (parseRecordDate(a.date)||0));
-
-    commentsEl.innerHTML = allComments.length ? allComments.slice(0,15).map(c => {
-      const eq = equipment.find(e => String(e.equipmentId)===String(c.equipmentId));
+  // ── Комментарии операторов ──
+  if (commEl) {
+    const cm = st.comments || [];
+    commEl.innerHTML = cm.length ? cm.slice(0,15).map(c => {
+      const eq = (DATA.equipment||[]).find(e => String(e.equipmentId)===String(c.equipmentId));
       const eqLabel = eq ? `${eq.equipmentId} — ${eq.model}` : c.equipmentId;
       return `
         <div style="padding:8px 0;border-bottom:1px solid var(--border);font-size:13px">
@@ -4340,8 +4278,7 @@ function renderChecklistAnalytics(site) {
           </div>
           <div style="font-size:11px;color:var(--gray);margin-top:2px">${c.itemText}${c.status==='defect'?' (неисправно)':''}</div>
           <div style="margin-top:2px">${c.comment}</div>
-        </div>
-      `;
+        </div>`;
     }).join("") : `<div class="empty" style="padding:16px"><div class="empty-icon">💬</div>Комментариев нет</div>`;
   }
 }
@@ -4350,6 +4287,27 @@ function renderChecklistRecordsList(site) {
   const suffix = site === "Ашыктас" ? "Ashyktas" : "Almaty";
   const el = document.getElementById("checklistRecordsList"+suffix);
   if (!el) return;
+
+  // Сами записи осмотров не грузятся при входе — их объём растёт каждый день.
+  // Здесь показываем сводку из агрегата, а полный журнал — по кнопке.
+  const loaded = (DATA.checklistRecords||[]).length > 0;
+  if (!loaded) {
+    const st = chkStats(site);
+    el.innerHTML = st && st.records
+      ? `<div style="padding:14px;background:var(--light);border-radius:10px;text-align:center">
+           <div style="font-size:13px;color:var(--navy);margin-bottom:4px">
+             <b>${st.records}</b> осмотр(ов) за период · <b style="color:var(--red)">${st.defects}</b> неисправност(ей)
+           </div>
+           <div style="font-size:11px;color:var(--gray);margin-bottom:10px">
+             Журнал осмотров не загружается автоматически — он тяжёлый и растёт каждый день
+           </div>
+           <button class="btn btn-ghost" style="width:auto;padding:8px 16px;font-size:12px"
+             onclick="loadFullHistory(this)">📜 Показать журнал осмотров</button>
+         </div>`
+      : `<div class="empty"><div class="empty-icon">📋</div>Осмотров пока нет</div>`;
+    return;
+  }
+
   const eqIds = new Set((DATA.equipment||[]).filter(e => (e.site||"").trim() === site).map(e => String(e.equipmentId)));
   const list = (DATA.checklistRecords||[]).filter(r => eqIds.has(String(r.equipmentId)));
   if (!list.length) {
@@ -4358,10 +4316,11 @@ function renderChecklistRecordsList(site) {
   }
 
   el.innerHTML = list.map((r, idx) => {
-    const defects = r.items.filter(it => it.status === "defect");
+    const defects = (r.items||[]).filter(it => it.status === "defect");
     const eq = (DATA.equipment||[]).find(e => String(e.equipmentId)===String(r.equipmentId));
     const eqLabel = eq ? `${eq.equipmentId} — ${eq.model}` : r.equipmentId;
     const detailId = `checklistRecordDetail${suffix}${idx}`;
+    const okCount = r.okCount ?? 0;
 
     return `
       <div style="padding:12px;border:1px solid var(--border);border-radius:10px;margin-bottom:8px;background:#fff">
@@ -4376,13 +4335,14 @@ function renderChecklistRecordsList(site) {
           }
         </div>
         <div id="${detailId}" style="display:none;margin-top:12px;border-top:1px solid var(--border);padding-top:10px">
-          ${r.items.map(it => `
+          ${(r.items||[]).map(it => `
             <div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px;gap:10px">
               <span style="color:${it.status==='defect'?'var(--red)':'var(--navy)'}">${it.itemText}</span>
               <span style="color:var(--gray);white-space:nowrap">${it.status==='defect'?'✗ неисправно':it.status==='ok'?'✓ исправно':it.status}</span>
             </div>
             ${it.comment ? `<div style="font-size:11px;color:var(--gray);margin-bottom:4px">${it.comment}</div>` : ""}
           `).join("")}
+          ${okCount ? `<div style="font-size:11px;color:var(--green,#2E7D32);padding-top:4px">✓ Ещё ${okCount} пункт(ов) исправны</div>` : ""}
         </div>
       </div>
     `;
@@ -4697,6 +4657,17 @@ function lastFuelOf(equipmentId) {
 }
 
 function lastChecklistOf(equipmentId) {
+  // Берём из агрегата: там уже есть данные последнего осмотра по каждой
+  // единице. Сами записи при входе не грузятся.
+  const st = chkStats();
+  if (st) {
+    const row = (st.byEquipment||[]).find(e => String(e.equipmentId)===String(equipmentId));
+    if (row && row.lastDate) {
+      return { equipmentId, date: row.lastDate, empName: row.lastEmpName,
+               items: [], defectCount: row.lastDefects };
+    }
+  }
+  // Если журнал всё же загружен (кнопкой) — используем его
   const recs = (DATA.checklistRecords||[]).filter(r => String(r.equipmentId)===String(equipmentId));
   if (!recs.length) return null;
   recs.sort((a,b) => new Date(b.date)-new Date(a.date));
@@ -4713,7 +4684,9 @@ function equipmentFuelChecklistLines(equipmentId) {
 
   let chkLine, chkColor = "var(--gray)";
   if (lastChk) {
-    const hasDefect = (lastChk.items||[]).some(it => it.status === "defect");
+    const hasDefect = lastChk.defectCount !== undefined
+      ? lastChk.defectCount > 0
+      : (lastChk.items||[]).some(it => it.status === "defect");
     chkColor = hasDefect ? "var(--red)" : "var(--gray)";
     chkLine = `📋 ${fmtRecordDateTime(lastChk.date)} · <span style="color:var(--navy)">${lastChk.empName||"—"}</span> ${hasDefect?"⚠":"✓"}`;
   } else {
@@ -4735,90 +4708,36 @@ function equipmentFuelChecklistLines(equipmentId) {
 // комментарии, работает ли регулярно, отмечает ли заправки.
 // ══════════════════════════════════════════════════════
 function computeOperatorRating() {
+  // Считаем из серверного агрегата за выбранный период
   const site = document.getElementById("ratingSite")?.value || "all";
   const periodVal = document.getElementById("ratingPeriod")?.value || "30";
+  const days = periodVal === "all" ? 0 : Number(periodVal);
 
-  let since = null;
-  if (periodVal !== "all") {
-    since = new Date();
-    since.setDate(since.getDate() - Number(periodVal));
-  }
+  const pack = STATS_CACHE[String(days)];
+  if (!pack || !pack.ok) return [];
+  const st = site === "all" ? pack.all : (pack.sites && pack.sites[site]);
+  if (!st) return [];
 
-  // Техника нужного участка — по ней фильтруем осмотры и заправки
-  const eqIds = new Set((DATA.equipment||[])
-    .filter(e => site === "all" || (e.site||"").trim() === site)
-    .map(e => String(e.equipmentId)));
+  const periodDays = days || 365;
 
-  const inScope = (rec) => {
-    if (!eqIds.has(String(rec.equipmentId))) return false;
-    if (!since) return true;
-    const d = parseRecordDate(rec.date);
-    return d && d >= since;
-  };
-
-  const stats = {};
-  const get = (name, empId) => {
-    if (!stats[name]) stats[name] = {
-      name, empId: empId || "", osmotrs: 0, items: 0, defects: 0,
-      comments: 0, days: new Set(), equipment: new Set(), fuel: 0,
-    };
-    if (empId && !stats[name].empId) stats[name].empId = empId;
-    return stats[name];
-  };
-
-  (DATA.checklistRecords||[]).filter(inScope).forEach(rec => {
-    const s = get(rec.empName || "—", rec.empId);
-    s.osmotrs += 1;
-    s.equipment.add(rec.equipmentId);
-    const d = parseRecordDate(rec.date);
-    if (d) s.days.add(`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`);
-    if (!s.byEquipment) s.byEquipment = {};
-    if (!s.byEquipment[rec.equipmentId]) s.byEquipment[rec.equipmentId] = { osmotrs:0, defects:0 };
-    s.byEquipment[rec.equipmentId].osmotrs += 1;
-    (rec.items||[]).forEach(it => {
-      s.items += 1;
-      if (it.status === "defect") { s.defects += 1; s.byEquipment[rec.equipmentId].defects += 1; }
-      if (String(it.comment||"").trim()) s.comments += 1;
-    });
-  });
-
-  (DATA.fuel||[]).filter(inScope).forEach(f => {
-    const s = get(f.empName || "—", f.empId);
-    s.fuel += 1;
-  });
-
-  return Object.values(stats).map(s => {
-    const daysCount = s.days.size;
-    const defectRate = s.items ? s.defects / s.items * 100 : 0;
-    const commentRate = s.items ? s.comments / s.items * 100 : 0;
-
-    // Балл внимательности: находки и комментарии весят больше, чем вал.
-    // Регулярность (в скольких разных днях работал) — против «настрелял за раз».
+  return (st.byOperator||[]).map(o => {
+    // Дней работы агрегат по операторам не отдаёт — оцениваем по числу
+    // осмотров, но не выше длины периода
+    const daysCount = Math.min(o.osmotrs, periodDays);
     const score =
-        Math.min(s.defects, 40) * 2.5      // до 100 — нашёл неисправности
-      + Math.min(s.comments, 40) * 1.5     // до 60  — пояснил словами
-      + Math.min(daysCount, 25) * 2        // до 50  — работал регулярно
-      + Math.min(s.fuel, 25) * 1.2         // до 30  — отмечал заправки
-      + Math.min(s.osmotrs, 30) * 0.5;     // до 15  — сам объём, но с малым весом
+        Math.min(o.defects, 40) * 2.5
+      + Math.min(o.comments, 40) * 1.5
+      + Math.min(daysCount, 25) * 2
+      + Math.min(o.osmotrs, 30) * 0.5;
 
-    // Формальный осмотр: много проверок, ноль замечаний и ноль комментариев
-    const formal = s.osmotrs >= 5 && s.defects === 0 && s.comments === 0;
-
-    // Подпись техники: у большинства операторов одна машина, тогда пишем её
-    // полностью; если несколько — показываем основную и число остальных.
-    const eqEntries = Object.entries(s.byEquipment||{})
-      .sort((a,b) => b[1].osmotrs - a[1].osmotrs);
-    const eqLabelOf = id => {
-      const e = (DATA.equipment||[]).find(x => String(x.equipmentId)===String(id));
-      return e ? `${e.equipmentId} ${e.model||""}`.trim() : String(id);
+    return {
+      name: o.empName, empId: o.empId, osmotrs: o.osmotrs, items: 0,
+      defects: o.defects, comments: o.comments, fuel: 0,
+      daysCount, equipmentCount: o.equipmentCount,
+      equipmentLabel: o.equipmentCount === 1 ? "1 ед. техники" : `${o.equipmentCount} ед. техники`,
+      score: Math.round(score),
+      formal: o.osmotrs >= 5 && o.defects === 0 && o.comments === 0,
     };
-    let equipmentLabel = "—";
-    if (eqEntries.length === 1) equipmentLabel = eqLabelOf(eqEntries[0][0]);
-    else if (eqEntries.length > 1) equipmentLabel = `${eqLabelOf(eqEntries[0][0])} и ещё ${eqEntries.length-1}`;
-
-    return { ...s, daysCount, defectRate, commentRate, score: Math.round(score), formal,
-             equipmentCount: s.equipment.size, equipmentLabel,
-             equipmentList: eqEntries.map(([id,v]) => ({ id, label: eqLabelOf(id), ...v })) };
   }).sort((a,b) => b.score - a.score);
 }
 
@@ -4889,72 +4808,43 @@ function shiftAwardPeriod(delta) {
 }
 
 function computeWeeklyWinners(limit) {
-  // Календарный период (неделя пн–вс / месяц / квартал), а не «последние 7 дней»
+  // Победители за календарный период — из серверного агрегата.
+  // Агрегат считает за N последних дней, поэтому берём срок от начала периода.
   const [from, to] = awardPeriodRange(AWARD_PERIOD, AWARD_OFFSET);
+  const days = Math.max(1, Math.ceil((new Date() - from) / 86400000));
   const site = document.getElementById("ratingSite")?.value || "all";
-  const eqIds = new Set((DATA.equipment||[])
-    .filter(e => site === "all" || (e.site||"").trim() === site)
-    .map(e => String(e.equipmentId)));
 
-  const inScope = rec => {
-    if (!eqIds.has(String(rec.equipmentId))) return false;
-    const d = parseRecordDate(rec.date);
-    return d && d >= from && d < to;
-  };
+  const pack = STATS_CACHE[String(days)] || DATA.checklistStats;
+  if (!pack || !pack.ok) return [];
+  const st = site === "all" ? pack.all : (pack.sites && pack.sites[site]);
+  if (!st) return [];
 
-  const stats = {};
-  const get = (name, empId) => {
-    if (!stats[name]) stats[name] = { name, empId: empId||"", osmotrs:0, items:0, defects:0, comments:0, days:new Set(), fuel:0 };
-    if (empId && !stats[name].empId) stats[name].empId = empId;
-    return stats[name];
-  };
-  (DATA.checklistRecords||[]).filter(inScope).forEach(rec => {
-    const s = get(rec.empName||"—", rec.empId);
-    s.osmotrs++;
-    const d = parseRecordDate(rec.date);
-    if (d) s.days.add(`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`);
-    if (!s.byEquipment) s.byEquipment = {};
-    if (!s.byEquipment[rec.equipmentId]) s.byEquipment[rec.equipmentId] = { osmotrs:0, defects:0 };
-    s.byEquipment[rec.equipmentId].osmotrs++;
-    (rec.items||[]).forEach(it => {
-      s.items++;
-      if (it.status === "defect") { s.defects++; s.byEquipment[rec.equipmentId].defects++; }
-      if (String(it.comment||"").trim()) s.comments++;
-    });
-  });
-  (DATA.fuel||[]).filter(inScope).forEach(f => { get(f.empName||"—", f.empId).fuel++; });
+  const periodDays = Math.max(1, Math.round((to - from) / 86400000));
 
-  // Норма «регулярности» зависит от длины периода: за неделю максимум 7 дней,
-  // за месяц — больше, иначе месячный рейтинг упрётся в тот же потолок
-  const periodDays = Math.round((to - from) / 86400000);
-
-  return Object.values(stats)
-    .map(s => ({
-      ...s, daysCount: s.days.size,
-      equipmentLabel: (() => {
-        const en = Object.entries(s.byEquipment||{}).sort((a,b)=>b[1].osmotrs-a[1].osmotrs);
-        const lab = id => {
-          const e = (DATA.equipment||[]).find(x => String(x.equipmentId)===String(id));
-          return e ? `${e.equipmentId} ${e.model||""}`.trim() : String(id);
-        };
-        if (!en.length) return "—";
-        return en.length === 1 ? lab(en[0][0]) : `${lab(en[0][0])} и ещё ${en.length-1}`;
-      })(),
-      score: Math.round(
-        Math.min(s.defects,40)*2.5 + Math.min(s.comments,40)*1.5 +
-        Math.min(s.days.size, periodDays)*3 + Math.min(s.fuel,25)*1.2 + Math.min(s.osmotrs,30)*0.5
-      ),
-    }))
-    // В победители — только те, кто реально что-то находил: формальный
-    // осмотр награждать нельзя, иначе смысл награды теряется
-    .filter(s => s.defects > 0 || s.comments > 0)
+  return (st.byOperator||[])
+    .filter(o => o.defects > 0 || o.comments > 0)
+    .map(o => {
+      const daysCount = Math.min(o.osmotrs, periodDays);
+      return {
+        name: o.empName, empId: o.empId, osmotrs: o.osmotrs,
+        defects: o.defects, comments: o.comments, fuel: 0,
+        daysCount, equipmentCount: o.equipmentCount,
+        equipmentLabel: o.equipmentCount === 1 ? "1 ед. техники" : `${o.equipmentCount} ед. техники`,
+        score: Math.round(
+          Math.min(o.defects,40)*2.5 + Math.min(o.comments,40)*1.5 +
+          Math.min(daysCount, periodDays)*3 + Math.min(o.osmotrs,30)*0.5),
+      };
+    })
     .sort((a,b) => b.score - a.score)
     .slice(0, limit || 3);
 }
 
-function renderWeeklyAward() {
+async function renderWeeklyAward() {
   const el = document.getElementById("weeklyAward");
   if (!el) return;
+  // Догружаем агрегат за выбранный период
+  const [pFrom] = awardPeriodRange(AWARD_PERIOD, AWARD_OFFSET);
+  await statsForDays(Math.max(1, Math.ceil((new Date() - pFrom) / 86400000)));
 
   const sw = document.getElementById("awardPeriodSwitch");
   if (sw) {
@@ -5213,7 +5103,10 @@ async function printAwardCertificate(empId, empName, place, defects, comments, o
   window.print();
 }
 
-function renderOperatorRating() {
+async function renderOperatorRating() {
+  // Догружаем агрегат за выбранный период, если его ещё нет
+  const pv = document.getElementById("ratingPeriod")?.value || "30";
+  await statsForDays(pv === "all" ? 0 : Number(pv));
   renderWeeklyAward();
   const rows = computeOperatorRating();
   const sum = document.getElementById("ratingSummary");
@@ -5962,7 +5855,19 @@ function shiftDefects(recCur) {
   return out;
 }
 
-function generateReport(site) {
+async function generateReport(site) {
+  // Отчёту нужны детальные записи осмотров. При входе они не грузятся
+  // (тяжёлые), поэтому подтягиваем их здесь — один раз за сессию.
+  if (!(DATA.checklistRecords||[]).length) {
+    const btn = event && event.target;
+    if (btn) { btn.disabled = true; btn.textContent = "⏳ Загружаю данные осмотров..."; }
+    await loadFullHistory(null);
+    if (btn) { btn.disabled = false; btn.textContent = "📄 Сформировать отчёт"; }
+    if (!(DATA.checklistRecords||[]).length) {
+      alert("Не удалось загрузить данные осмотров. Попробуйте ещё раз.");
+      return;
+    }
+  }
   const suffix = site === "Ашыктас" ? "Ashyktas" : "Almaty";
   const period = REPORT_PERIOD[site];
   const periodLabel = period === "day" ? "сутки" : "неделю";
@@ -6135,7 +6040,17 @@ function copyReportText(site) {
 // Считает по DATA, которая уже загружена в loadAll() — без
 // дополнительных запросов к серверу.
 // ══════════════════════════════════════════════════════
-function generateFullSystemReport(site) {
+async function generateFullSystemReport(site) {
+  if (!(DATA.checklistRecords||[]).length) {
+    const btn = event && event.target;
+    if (btn) { btn.disabled = true; btn.textContent = "⏳ Загружаю данные осмотров..."; }
+    await loadFullHistory(null);
+    if (btn) { btn.disabled = false; btn.textContent = "📊 Сформировать сводный отчёт"; }
+    if (!(DATA.checklistRecords||[]).length) {
+      alert("Не удалось загрузить данные осмотров. Попробуйте ещё раз.");
+      return;
+    }
+  }
   const suffix = site === "Ашыктас" ? "Ashyktas" : "Almaty";
 
   const emp   = (DATA.employees||[]).filter(e => (e.site||"").trim() === site);
