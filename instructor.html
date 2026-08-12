@@ -3283,16 +3283,101 @@ function selectPersonnelEmployee(id) {
 
       <div>
         <div style="font-size:12px;font-weight:700;color:var(--navy);margin-bottom:8px">Все тесты (${tests.length})</div>
-        ${tests.length ? tests.map(t=>`
-          <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px">
-            <span>${t.testTitle||t.testId}</span>
-            <span>${resultBadge(t.passed || t["Результат"])} <span style="color:var(--gray)">${fmtDate(t.date)}</span></span>
-          </div>
-        `).join("") : `<div style="font-size:12px;color:var(--gray)">Тестов пока нет.</div>`}
+        ${tests.length ? tests.map(t=>{
+          const hasAnswers = !!String(t.answers||"").trim();
+          return `
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px;gap:8px">
+            <span${hasAnswers?` style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted"
+              onclick="showTestReview('${String(t.id||"").replace(/'/g,"\\'")}')" title="Посмотреть ошибки"`:""}>
+              ${t.testTitle||t.testId}${hasAnswers?' 🔍':''}
+            </span>
+            <span style="white-space:nowrap">
+              <b style="color:${Number(t.score)>=Number(t.passingScore||80)?'var(--green,#2E7D32)':'var(--red)'}">${t.score||"—"}%</b>
+              ${resultBadge(t.passed || t["Результат"])}
+              <span style="color:var(--gray)">${fmtDate(t.date)}</span>
+            </span>
+          </div>`;
+        }).join("") : `<div style="font-size:12px;color:var(--gray)">Тестов пока нет.</div>`}
       </div>
 
     </div>
   `;
+}
+
+
+// ══════════════════════════════════════════════════════
+// РАЗБОР ОШИБОК ПО ТЕСТУ
+// Сопоставляем сохранённые ответы работника с правильными из теста.
+// Видно, на каких именно вопросах человек ошибся.
+// ══════════════════════════════════════════════════════
+function showTestReview(resultId) {
+  const r = (DATA.results||[]).find(x => String(x.id) === String(resultId));
+  if (!r) { alert("Результат не найден"); return; }
+
+  let answers = {};
+  try { answers = JSON.parse(r.answers || "{}"); } catch(e) { answers = {}; }
+
+  // Тест ищем по названию — id теста в результате не сохраняется
+  const test = (DATA.tests||[]).find(t => t.title === r.testTitle);
+  if (!test) {
+    openModal(`
+      <div style="font-size:16px;font-weight:800;color:var(--navy);margin-bottom:8px">${r.testTitle||"Тест"}</div>
+      <div style="font-size:13px;color:var(--gray);margin-bottom:14px">
+        Тест «${r.testTitle}» больше не найден в системе — возможно, был удалён или переименован.
+        Разбор ошибок недоступен.
+      </div>
+      <button class="btn btn-ghost" onclick="closeModal()">Закрыть</button>`);
+    return;
+  }
+
+  const rows = (test.questions||[]).map((q, i) => {
+    const given = answers[q.id] || answers["q"+(i+1)] || [];
+    const correct = q.correct || [];
+    const ok = given.length === correct.length && given.every(x => correct.includes(x));
+    return { i, q, given, correct, ok, answered: given.length > 0 };
+  });
+  const wrong = rows.filter(x => !x.ok);
+
+  openModal(`
+    <div style="font-size:16px;font-weight:800;color:var(--navy);margin-bottom:2px">${r.empName}</div>
+    <div style="font-size:13px;color:var(--gray);margin-bottom:4px">${r.testTitle}</div>
+    <div style="font-size:12px;color:var(--gray);margin-bottom:14px">
+      ${fmtDate(r.date)} ${r.time||""} · результат
+      <b style="color:${Number(r.score)>=Number(r.passingScore||80)?'var(--green,#2E7D32)':'var(--red)'}">${r.score}%</b>
+      (${r.correctQ} из ${r.totalQ})
+    </div>
+
+    ${wrong.length ? `
+      <div style="font-size:13px;font-weight:700;color:var(--red);margin-bottom:8px">
+        Ошибки — ${wrong.length} вопрос(ов)
+      </div>
+      <div style="max-height:50vh;overflow:auto">
+      ${wrong.map(x => `
+        <div style="padding:10px;border:1px solid var(--red);background:var(--redbg);
+          border-radius:8px;margin-bottom:8px">
+          <div style="font-size:13px;font-weight:700;color:var(--navy);margin-bottom:6px">
+            ${x.i+1}. ${x.q.text}
+          </div>
+          ${(x.q.options||[]).map((o,j) => {
+            const isCorrect = (x.correct||[]).includes(j);
+            const isGiven = (x.given||[]).includes(j);
+            const color = isCorrect ? "var(--green,#2E7D32)" : isGiven ? "var(--red)" : "var(--gray)";
+            const mark = isCorrect ? "✓" : isGiven ? "✗" : "&nbsp;&nbsp;";
+            const weight = (isCorrect||isGiven) ? "700" : "400";
+            return `<div style="font-size:12px;color:${color};font-weight:${weight};padding:2px 0">
+              ${mark} ${o}${isGiven && !isCorrect ? ' <span style="font-size:11px">— ответ работника</span>' : ""}
+              ${isCorrect ? ' <span style="font-size:11px">— правильный</span>' : ""}
+            </div>`;
+          }).join("")}
+          ${!x.answered ? `<div style="font-size:11px;color:var(--gray);margin-top:4px">Вопрос остался без ответа</div>` : ""}
+        </div>`).join("")}
+      </div>`
+    : `<div style="padding:12px;background:var(--greenbg,#EAF7ED);border-radius:8px;
+         font-size:13px;color:var(--green,#2E7D32);font-weight:700">
+        ✓ Все вопросы отвечены верно</div>`}
+
+    <button class="btn btn-ghost" style="margin-top:14px" onclick="closeModal()">Закрыть</button>
+  `);
 }
 
 // ── Модалки ──────────────────────────────────────────
