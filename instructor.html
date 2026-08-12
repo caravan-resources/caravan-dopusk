@@ -1175,13 +1175,19 @@ function today() { return new Date().toISOString().split("T")[0]; }
 function fmtDate(d) {
   if (!d || d === "—") return "—";
   try {
+    // Сначала проверяем формат dd.mm.yyyy — его нельзя отдавать в new Date():
+    // "11.08.2026" будет разобрано как 11 ноября (американский порядок),
+    // и дата в интерфейсе окажется другой.
+    const dmy = String(d).match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
+    if (dmy) return `${dmy[1]}.${dmy[2]}.${dmy[3]}`;
     // Если это объект Date или строка типа "Sun Jun 28 2026..."
+    // Форматируем строго по времени Казахстана: иначе дата, записанная как
+    // 11.08 00:00 +05:00, в браузере с другим поясом покажется как 10.08.
     const date = new Date(d);
     if (!isNaN(date.getTime())) {
-      const dd = String(date.getDate()).padStart(2,"0");
-      const mm = String(date.getMonth()+1).padStart(2,"0");
-      const yy = date.getFullYear();
-      return `${dd}.${mm}.${yy}`;
+      return date.toLocaleDateString("ru-RU", {
+        timeZone: "Asia/Almaty", day: "2-digit", month: "2-digit", year: "numeric",
+      });
     }
     // Уже dd.mm.yyyy
     if (String(d).includes(".")) return d;
@@ -1716,7 +1722,7 @@ function renderDashboard() {
   const warning = [...emps, ...instr].filter(e=>statusOf(e)==="warning");
   const ok      = emps.filter(e=>statusOf(e)==="ok");
   const passed  = results.filter(r=>isPassed(r));
-  const failed  = results.filter(r=>r.passed==="Не сдал ✗"||r.passed===false||r.passed==="FALSE");
+  const failed  = results.filter(r => !isPassed(r));
 
   // Статистика — кадры и допуск
   document.getElementById("statsGridPersonnel").innerHTML = [
@@ -2024,7 +2030,7 @@ function exportTestsCSV() {
     r["Время"]||r.time||"",
     r["Сотрудник"]||r.empName||"",
     r["Тест"]||r.testTitle||"",
-    r["Результат"]||"",
+    r["Результат"]||r.result||"",
     r["Балл (%)"]||r.score||"",
     r["Правильных"]||r.correctQ||"",
     r["Всего вопросов"]||r.totalQ||"",
@@ -3349,7 +3355,7 @@ function selectPersonnelEmployee(id) {
             </span>
             <span style="white-space:nowrap">
               <b style="color:${Number(t.score)>=Number(t.passingScore||80)?'var(--green,#2E7D32)':'var(--red)'}">${t.score||"—"}%</b>
-              ${resultBadge(t.passed || t["Результат"])}
+              ${resultBadge(isPassed(t))}
               <span style="color:var(--gray)">${fmtDate(t.date)}</span>
             </span>
           </div>`;
