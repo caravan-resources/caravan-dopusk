@@ -168,7 +168,7 @@ const CFG = {
   SHEET_URL: "https://script.google.com/macros/s/AKfycbwhdMV20k8US2BXUz1Xk2XCXE9MEwpHpQaadTF9xEfzbU1--dHL-Zuj06K2qXW-rFtKGw/exec",
 };
 
-let DATA = { equipment: [], checklistRecords: [] };
+let DATA = { equipment: [], checklistStats: null, checklistRecords: [] };
 
 function checkPin() {
   const val = document.getElementById("pinInput").value;
@@ -217,21 +217,22 @@ async function loadAll() {
   if (banner) banner.style.display = "none";
   // Топливо здесь не грузим: механику по выпуску нужны только осмотры
   // Последовательно, а не параллельно: на слабой связи одновременные запросы
-  // рвут друг друга. Здесь их всего два, так что потеря скорости небольшая.
+  // рвут друг друга.
   const eq = await Promise.allSettled(
     [fetchWithRetry(`${CFG.SHEET_URL}?action=getEquipment`, 40000, 3)]
   ).then(a => a[0]);
+  // Готовая аналитика с сервера вместо всех записей: объём почти не растёт
+  // вместе с числом осмотров (~150 КБ против мегабайтов).
   const records = await Promise.allSettled(
-    // 30 дней вместо всей истории: полная выгрузка ~7 МБ не доходит на слабой связи
-    [fetchWithRetry(`${CFG.SHEET_URL}?action=getChecklistRecords&days=30`, 90000, 3)]
+    [fetchWithRetry(`${CFG.SHEET_URL}?action=getChecklistStats&days=30`, 90000, 3)]
   ).then(a => a[0]);
   let failed = false;
 
   if (eq.status === "fulfilled" && Array.isArray(eq.value)) DATA.equipment = eq.value;
   else { DATA.equipment = []; failed = true; console.error("Техника:", eq.reason); }
 
-  if (records.status === "fulfilled" && Array.isArray(records.value)) DATA.checklistRecords = records.value;
-  else { DATA.checklistRecords = []; failed = true; console.error("Осмотры:", records.reason); }
+  if (records.status === "fulfilled" && records.value && records.value.ok) DATA.checklistStats = records.value;
+  else { DATA.checklistStats = null; failed = true; console.error("Осмотры:", records.reason); }
 
   // Честно показываем сбой, а не делаем вид, что данных просто нет
   if (banner) banner.style.display = failed ? "block" : "none";
@@ -247,6 +248,15 @@ function setSite(site) {
 }
 
 // Техника выбранного участка и её id — на них фильтруется всё остальное
+
+// Агрегат осмотров по выбранному участку. Считает сервер — страница получает
+// готовые цифры, поэтому объём не растёт вместе с числом осмотров.
+function chkStats() {
+  const s = DATA.checklistStats;
+  if (!s || !s.ok) return null;
+  return (s.sites && s.sites[CURRENT_SITE]) || null;
+}
+
 function siteEquipment() {
   return (DATA.equipment || []).filter(e => (e.site || "").trim() === CURRENT_SITE);
 }
@@ -287,47 +297,31 @@ function renderSiteSwitch() {
 
 // Неисправности по разделам чек-листа: где именно чаще всего проблемы —
 // тормоза, электрика, ходовая и т.д. Помогает понять узкое место в парке.
+// ПОДРОБНАЯ АНАЛИТИКА ПО ЧЕК-ЛИСТАМ (для механика по выпуску)
+// ══════════════════════════════════════════════════════
+
+// Неисправности по разделам чек-листа: где именно чаще всего проблемы —
+// тормоза, электрика, ходовая и т.д. Помогает понять узкое место в парке.
 function renderBySection() {
   const el = document.getElementById("analyticsBySection");
   if (!el) return;
-  const recs = siteRecords();
-  if (!recs.length) {
-    el.innerHTML = `<div class="empty" style="padding:16px"><div class="empty-icon">📊</div>Осмотров пока нет</div>`;
+  const st = chkStats();
+  const rows = st ? st.bySection.filter(s=>s.defects>0) : [];
+  if (!rows.length) {
+    el.innerHTML = `<div class="empty" style="padding:16px"><div class="empty-icon">✓</div>Замечаний нет</div>`;
     return;
   }
-  const sec = {};
-  recs.forEach(r => (r.items||[]).forEach(it => {
-    const s = it.section || "Без раздела";
-    if (!sec[s]) sec[s] = { total:0, defects:0, items:{} };
-    sec[s].total++;
-    if (it.status === "defect") {
-      sec[s].defects++;
-      sec[s].items[it.itemText] = (sec[s].items[it.itemText]||0)+1;
-    }
-  }));
-  const rows = Object.entries(sec).sort((a,b) => b[1].defects - a[1].defects);
-  const maxDef = Math.max(...rows.map(r => r[1].defects), 1);
-
-  el.innerHTML = rows.map(([name, s]) => {
-    // Исправные пункты приходят общим счётчиком (без разбивки по разделам),
-    // поэтому долю по разделу не считаем — показываем абсолютное число.
-    const top = Object.entries(s.items).sort((a,b)=>b[1]-a[1]).slice(0,3);
-    return `
-      <div style="padding:10px 0;border-bottom:1px solid var(--border)">
-        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px">
-          <span style="font-size:13px;font-weight:700;color:var(--navy)">${name}</span>
-          <span style="font-size:12px;color:${s.defects?'var(--red)':'var(--green)'}">
-            ${s.defects} неисправност${s.defects===1?'ь':s.defects<5?'и':'ей'}
-          </span>
-        </div>
-        <div style="background:var(--light);border-radius:6px;height:7px;overflow:hidden;margin-bottom:6px">
-          <div style="background:${s.defects?'var(--red)':'var(--green)'};height:100%;width:${Math.round(s.defects/maxDef*100)}%"></div>
-        </div>
-        ${top.length ? `<div style="font-size:11px;color:var(--gray);line-height:1.6">
-          ${top.map(([t,c])=>`• ${t} — <b style="color:var(--red)">${c}×</b>`).join("<br>")}
-        </div>` : `<div style="font-size:11px;color:var(--green)">✓ замечаний нет</div>`}
-      </div>`;
-  }).join("");
+  const maxDef = Math.max(...rows.map(r=>r.defects),1);
+  el.innerHTML = rows.map(s => `
+    <div style="padding:10px 0;border-bottom:1px solid var(--border)">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px">
+        <span style="font-size:13px;font-weight:700;color:var(--navy)">${s.section}</span>
+        <span style="font-size:12px;color:var(--red)">${s.defects} неисправност${s.defects===1?'ь':s.defects<5?'и':'ей'}</span>
+      </div>
+      <div style="background:var(--light);border-radius:6px;height:7px;overflow:hidden">
+        <div style="background:var(--red);height:100%;width:${Math.round(s.defects/maxDef*100)}%"></div>
+      </div>
+    </div>`).join("");
 }
 
 // Техника, у которой в ПОСЛЕДНЕМ осмотре были неисправности — то есть
@@ -336,77 +330,48 @@ function renderBySection() {
 function renderOpenDefects() {
   const el = document.getElementById("analyticsOpenDefects");
   if (!el) return;
-  const recs = siteRecords();
-  const byEq = {};
-  recs.forEach(r => {
-    const id = String(r.equipmentId);
-    const d = parseRecordDate(r.date);
-    if (!byEq[id] || (d && parseRecordDate(byEq[id].date) < d)) byEq[id] = r;
-  });
-
-  const open = Object.values(byEq)
-    .map(r => ({ rec:r, defects:(r.items||[]).filter(i=>i.status==="defect") }))
-    .filter(x => x.defects.length)
-    .sort((a,b) => b.defects.length - a.defects.length);
-
+  const st = chkStats();
+  const open = st ? st.openDefects : [];
   if (!open.length) {
     el.innerHTML = `<div style="padding:12px;background:var(--greenbg);border-radius:8px;font-size:13px;color:var(--green);font-weight:700">
-      ✓ Вся осмотренная техника без открытых замечаний
-    </div>`;
+      ✓ Вся осмотренная техника без открытых замечаний</div>`;
     return;
   }
-
-  el.innerHTML = open.map(({rec, defects}) => {
-    const eq = (DATA.equipment||[]).find(e => String(e.equipmentId)===String(rec.equipmentId));
-    return `
-      <div style="padding:12px;border:1.5px solid var(--red);background:var(--redbg);
-        border-radius:10px;margin-bottom:8px">
-        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">
-          <span style="font-size:14px;font-weight:800;color:var(--navy)">
-            ${rec.equipmentId}${eq?` — ${eq.model}`:""}
-          </span>
-          <span style="font-size:11px;color:var(--gray)">
-            ${rec.empName||"—"} · ${fmtRecordDateTime(rec.date)}
-          </span>
-        </div>
-        ${defects.map(d => `
-          <div style="font-size:12px;color:var(--red);padding:3px 0">
-            ✗ ${d.itemText}${d.comment?` <span style="color:var(--gray)">— ${d.comment}</span>`:""}
-          </div>`).join("")}
-      </div>`;
-  }).join("");
+  el.innerHTML = open.map(o => `
+    <div style="padding:12px;border:1.5px solid var(--red);background:var(--redbg);
+      border-radius:10px;margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">
+        <span style="font-size:14px;font-weight:800;color:var(--navy)">
+          ${o.equipmentId}${o.model?` — ${o.model}`:""}
+        </span>
+        <span style="font-size:11px;color:var(--gray)">${o.empName||"—"} · ${fmtRecordDateTime(o.date)}</span>
+      </div>
+      ${(o.items||[]).map(d => `
+        <div style="font-size:12px;color:var(--red);padding:3px 0">
+          ✗ ${d.itemText}${d.comment?` <span style="color:var(--gray)">— ${d.comment}</span>`:""}
+        </div>`).join("")}
+    </div>`).join("");
 }
 
 // Динамика по дням: сколько осмотров и сколько замечаний
 function renderByDay() {
   const el = document.getElementById("analyticsByDay");
   if (!el) return;
-  const recs = siteRecords();
-  if (!recs.length) {
+  const st = chkStats();
+  const rows = st ? st.byDay.slice(0,21) : [];
+  if (!rows.length) {
     el.innerHTML = `<div class="empty" style="padding:16px"><div class="empty-icon">📅</div>Осмотров пока нет</div>`;
     return;
   }
-  const days = {};
-  recs.forEach(r => {
-    const d = parseRecordDate(r.date);
-    if (!d) return;
-    const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
-    if (!days[key]) days[key] = { osmotrs:0, defects:0, eq:new Set() };
-    days[key].osmotrs++;
-    days[key].eq.add(r.equipmentId);
-    (r.items||[]).forEach(i => { if (i.status==="defect") days[key].defects++; });
-  });
-  const rows = Object.entries(days).sort((a,b) => b[0].localeCompare(a[0])).slice(0, 21);
-  const maxO = Math.max(...rows.map(r => r[1].osmotrs), 1);
-
-  el.innerHTML = rows.map(([key, v]) => {
-    const [y,m,d] = key.split("-");
+  const maxO = Math.max(...rows.map(r=>r.osmotrs),1);
+  el.innerHTML = rows.map(v => {
+    const [y,m,d] = v.date.split("-");
     return `
       <div style="padding:6px 0;border-bottom:1px solid var(--border)">
         <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
           <span style="color:var(--navy);font-weight:600">${d}.${m}.${y}</span>
           <span style="color:var(--gray)">
-            ${v.osmotrs} осм. · ${v.eq.size} ед. ·
+            ${v.osmotrs} осм. · ${v.equipmentCount} ед. ·
             <b style="color:${v.defects?'var(--red)':'var(--green)'}">${v.defects} неиспр.</b>
           </span>
         </div>
@@ -421,62 +386,25 @@ function renderByDay() {
 function renderByOperator() {
   const el = document.getElementById("analyticsByOperator");
   if (!el) return;
-  const recs = siteRecords();
-  if (!recs.length) {
+  const st = chkStats();
+  const rows = st ? st.byOperator : [];
+  if (!rows.length) {
     el.innerHTML = `<div class="empty" style="padding:16px"><div class="empty-icon">👷</div>Осмотров пока нет</div>`;
     return;
   }
-  const ops = {};
-  recs.forEach(r => {
-    const n = r.empName || "—";
-    if (!ops[n]) ops[n] = { osmotrs:0, defects:0, comments:0, eq:new Set() };
-    ops[n].osmotrs++;
-    ops[n].eq.add(r.equipmentId);
-    (r.items||[]).forEach(i => {
-      if (i.status === "defect") ops[n].defects++;
-      if (String(i.comment||"").trim()) ops[n].comments++;
-    });
-  });
-  const rows = Object.entries(ops).sort((a,b) => b[1].defects - a[1].defects || b[1].osmotrs - a[1].osmotrs);
-
   el.innerHTML = `<div class="tbl-wrap"><table style="font-size:13px">
     <thead><tr><th>Оператор</th><th>Техника</th><th>Осмотров</th><th>Неисправ.</th><th>Коммент.</th></tr></thead>
-    <tbody>${rows.map(([n,v]) => {
+    <tbody>${rows.map(v => {
       const formal = v.osmotrs >= 5 && v.defects === 0 && v.comments === 0;
       return `<tr${formal?' style="background:var(--redbg)"':''}>
-        <td><b>${n}</b>${formal?' <span style="font-size:10px;color:var(--red)">формально</span>':''}</td>
-        <td style="color:var(--gray);font-size:12px">${v.eq.size} ед.</td>
+        <td><b>${v.empName}</b>${formal?' <span style="font-size:10px;color:var(--red)">формально</span>':''}</td>
+        <td style="color:var(--gray);font-size:12px">${v.equipmentCount} ед.</td>
         <td>${v.osmotrs}</td>
         <td${v.defects?' style="color:var(--red);font-weight:700"':''}>${v.defects}</td>
         <td${v.comments?' style="color:var(--navy2);font-weight:700"':''}>${v.comments}</td>
       </tr>`;
     }).join("")}</tbody>
   </table></div>`;
-}
-
-
-// Полная история осмотров — по требованию, чтобы не тащить мегабайты при
-// каждом входе
-let FULL_HISTORY_LOADED = false;
-async function loadFullHistory(btn) {
-  if (FULL_HISTORY_LOADED) return;
-  const old = btn ? btn.textContent : "";
-  if (btn) { btn.disabled = true; btn.textContent = "⏳ Загружаю..."; }
-  try {
-    const d = await fetchWithRetry(`${CFG.SHEET_URL}?action=getChecklistRecords`, 90000, 2);
-    if (Array.isArray(d) && d.length) {
-      DATA.checklistRecords = d;
-      FULL_HISTORY_LOADED = true;
-      renderAll();
-      if (btn) btn.textContent = `✓ Загружено ${d.length} осмотров`;
-    } else {
-      if (btn) { btn.disabled=false; btn.textContent=old; }
-      alert("Не удалось загрузить историю.");
-    }
-  } catch(e) {
-    if (btn) { btn.disabled=false; btn.textContent=old; }
-    alert("Не удалось загрузить историю: " + e.message);
-  }
 }
 
 function renderAll() {
@@ -511,32 +439,15 @@ function fmtRecordDateTime(s) {
 
 function renderStats() {
   const equipment = siteEquipment();
-  const records = siteRecords();
   const noTemplate = equipment.filter(e => !e.templateId);
-  const weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate()-7);
-  const recordsWithDefects = records.filter(r => r.items.some(it => it.status==="defect"));
-  const recentDefects = recordsWithDefects.filter(r => {
-    const d = parseRecordDate(r.date);
-    return d && d >= weekAgo;
-  });
-
-  // Техника с открытыми замечаниями — то есть в последнем осмотре были
-  // неисправности. Для механика по выпуску это главная цифра.
-  const byEq = {};
-  records.forEach(r => {
-    const id = String(r.equipmentId), d = parseRecordDate(r.date);
-    if (!byEq[id] || (d && parseRecordDate(byEq[id].date) < d)) byEq[id] = r;
-  });
-  const openDefectEq = Object.values(byEq).filter(r => (r.items||[]).some(i=>i.status==="defect")).length;
-  const defects7 = recentDefects.reduce((n,r)=>n+(r.items||[]).filter(i=>i.status==="defect").length,0);
-  const inspected = new Set(records.map(r=>String(r.equipmentId))).size;
+  const st = chkStats();
 
   document.getElementById("statsGrid").innerHTML = [
     {lbl:"Единиц техники", val:equipment.length, acc:"var(--navy2)"},
-    {lbl:"Осмотрено хотя бы раз", val:`${inspected} из ${equipment.length}`, acc:"var(--navy2)"},
-    {lbl:"С открытыми замечаниями", val:openDefectEq, acc:openDefectEq?"var(--red)":"var(--green)"},
-    {lbl:"Осмотров всего", val:records.length, acc:"var(--gold)"},
-    {lbl:"Неисправностей за 7 дней", val:defects7, acc:defects7?"var(--red)":"var(--green)"},
+    {lbl:"Осмотрено хотя бы раз", val:`${st?st.inspectedCount:0} из ${equipment.length}`, acc:"var(--navy2)"},
+    {lbl:"С открытыми замечаниями", val:st?st.openDefects.length:0, acc:(st&&st.openDefects.length)?"var(--red)":"var(--green)"},
+    {lbl:"Осмотров всего", val:st?st.records:0, acc:"var(--gold)"},
+    {lbl:"Неисправностей за 7 дней", val:st?st.defects7:0, acc:(st&&st.defects7)?"var(--red)":"var(--green)"},
     {lbl:"Без шаблона чек-листа", val:noTemplate.length, acc:noTemplate.length?"var(--yellow)":"var(--gray)"},
   ].map(s=>`
     <div class="stat-card" style="border-left-color:${s.acc}">
@@ -547,39 +458,27 @@ function renderStats() {
 }
 
 function renderAnalytics() {
-  const records = siteRecords();
-  const equipment = siteEquipment();
+  const st = chkStats();
   const byEqEl = document.getElementById("analyticsByEquipment");
   const byItemEl = document.getElementById("analyticsByItem");
+  const cEl = document.getElementById("analyticsComments");
+  if (!byEqEl || !byItemEl) return;
 
-  if (!records.length) {
-    byEqEl.innerHTML = `<div class="empty" style="padding:16px"><div class="empty-icon">📊</div>Пока нет данных</div>`;
-    byItemEl.innerHTML = `<div class="empty" style="padding:16px"><div class="empty-icon">📊</div>Пока нет данных</div>`;
-    // Комментарии тоже нужно очистить: иначе при переключении участка здесь
-    // остаётся список от предыдущего — с чужой техникой
-    const cEl = document.getElementById("analyticsComments");
+  if (!st || !st.records) {
+    const empty = `<div class="empty" style="padding:16px"><div class="empty-icon">📊</div>Пока нет данных</div>`;
+    byEqEl.innerHTML = empty;
+    byItemEl.innerHTML = empty;
     if (cEl) cEl.innerHTML = `<div class="empty" style="padding:16px"><div class="empty-icon">💬</div>Комментариев нет</div>`;
     return;
   }
 
-  const eqStats = {};
-  records.forEach(r => {
-    const id = r.equipmentId;
-    if (!eqStats[id]) eqStats[id] = { inspections: 0, defects: 0 };
-    eqStats[id].inspections += 1;
-    eqStats[id].defects += r.items.filter(it => it.status === "defect").length;
-  });
-  const eqRows = Object.keys(eqStats).map(id => ({ id, ...eqStats[id] }))
-    .sort((a,b) => b.defects - a.defects || b.inspections - a.inspections);
-
-  byEqEl.innerHTML = eqRows.map(row => {
-    const eq = equipment.find(e => String(e.equipmentId)===String(row.id));
-    const label = eq ? `${eq.equipmentId} — ${eq.model}` : row.id;
+  byEqEl.innerHTML = st.byEquipment.map(row => {
+    const label = row.model ? `${row.equipmentId} — ${row.model}` : row.equipmentId;
     return `
       <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border);font-size:13px">
         <div>
           <div style="font-weight:700;color:var(--navy)">${label}</div>
-          <div style="font-size:11px;color:var(--gray)">${row.inspections} осмотр(ов)</div>
+          <div style="font-size:11px;color:var(--gray)">${row.osmotrs} осмотр(ов)</div>
         </div>
         ${row.defects > 0
           ? `<span style="background:var(--redbg);color:var(--red);font-size:12px;font-weight:700;padding:3px 10px;border-radius:99px">${row.defects}</span>`
@@ -587,48 +486,28 @@ function renderAnalytics() {
       </div>`;
   }).join("");
 
-  const itemStats = {};
-  records.forEach(r => r.items.forEach(it => {
-    if (it.status !== "defect") return;
-    itemStats[it.itemText] = (itemStats[it.itemText]||0) + 1;
-  }));
-  const itemRows = Object.keys(itemStats).map(text => ({ text, count: itemStats[text] }))
-    .sort((a,b) => b.count - a.count).slice(0, 10);
-
-  byItemEl.innerHTML = itemRows.length ? itemRows.map(row => `
+  const items = st.topDefects.slice(0,10);
+  byItemEl.innerHTML = items.length ? items.map(row => `
     <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border);font-size:13px">
-      <span style="color:var(--navy)">${row.text}</span>
+      <span style="color:var(--navy)">${row.itemText}</span>
       <span style="background:var(--redbg);color:var(--red);font-size:12px;font-weight:700;padding:3px 10px;border-radius:99px;flex-shrink:0;margin-left:10px">${row.count}</span>
-    </div>
-  `).join("") : `<div class="empty" style="padding:16px"><div class="empty-icon">✓</div>Неисправностей не найдено</div>`;
+    </div>`).join("")
+    : `<div class="empty" style="padding:16px"><div class="empty-icon">✓</div>Неисправностей не найдено</div>`;
 
-  const commentsEl = document.getElementById("analyticsComments");
-  if (commentsEl) {
-    const allComments = [];
-    records.forEach(r => {
-      r.items.forEach(it => {
-        if (!it.comment) return;
-        allComments.push({
-          equipmentId: r.equipmentId, empName: r.empName, date: r.date,
-          itemText: it.itemText, status: it.status, comment: it.comment,
-        });
-      });
-    });
-    allComments.sort((a,b) => (parseRecordDate(b.date)||0) - (parseRecordDate(a.date)||0));
-
-    commentsEl.innerHTML = allComments.length ? allComments.slice(0,15).map(c => {
-      const eq = equipment.find(e => String(e.equipmentId)===String(c.equipmentId));
-      const eqLabel = eq ? `${eq.equipmentId} — ${eq.model}` : c.equipmentId;
+  if (cEl) {
+    const cm = st.comments || [];
+    cEl.innerHTML = cm.length ? cm.slice(0,15).map(c2 => {
+      const eq = (DATA.equipment||[]).find(e => String(e.equipmentId)===String(c2.equipmentId));
+      const eqLabel = eq ? `${eq.equipmentId} — ${eq.model}` : c2.equipmentId;
       return `
         <div style="padding:8px 0;border-bottom:1px solid var(--border);font-size:13px">
           <div style="display:flex;justify-content:space-between;align-items:baseline">
             <span style="font-weight:700;color:var(--navy)">${eqLabel}</span>
-            <span style="font-size:11px;color:var(--gray)">${c.empName} · ${fmtRecordDateTime(c.date)}</span>
+            <span style="font-size:11px;color:var(--gray)">${c2.empName} · ${fmtRecordDateTime(c2.date)}</span>
           </div>
-          <div style="font-size:11px;color:var(--gray);margin-top:2px">${c.itemText}${c.status==='defect'?' (неисправно)':''}</div>
-          <div style="margin-top:2px">${c.comment}</div>
-        </div>
-      `;
+          <div style="font-size:11px;color:var(--gray);margin-top:2px">${c2.itemText}${c2.status==='defect'?' (неисправно)':''}</div>
+          <div style="margin-top:2px">${c2.comment}</div>
+        </div>`;
     }).join("") : `<div class="empty" style="padding:16px"><div class="empty-icon">💬</div>Комментариев нет</div>`;
   }
 }
@@ -650,15 +529,38 @@ function renderEquipmentList() {
 
 function renderRecordsList() {
   const el = document.getElementById("recordsList");
-  const list = siteRecords();
+  if (!el) return;
+  // Журнал осмотров не грузится автоматически — он тяжёлый и растёт каждый день.
+  // Показываем сводку, полный список — по кнопке.
+  const loaded = (DATA.checklistRecords||[]).length > 0;
+  if (!loaded) {
+    const st = chkStats();
+    el.innerHTML = st && st.records
+      ? `<div style="padding:14px;background:var(--light);border-radius:10px;text-align:center">
+           <div style="font-size:13px;color:var(--navy);margin-bottom:4px">
+             <b>${st.records}</b> осмотр(ов) · <b style="color:var(--red)">${st.defects}</b> неисправност(ей)
+           </div>
+           <div style="font-size:11px;color:var(--gray);margin-bottom:10px">
+             Полный журнал не загружается автоматически — он тяжёлый
+           </div>
+           <button class="btn-ghost" style="padding:8px 16px;font-size:12px"
+             onclick="loadFullHistory(this)">📜 Показать журнал осмотров</button>
+         </div>`
+      : `<div class="empty"><div class="empty-icon">📋</div>Осмотров пока нет</div>`;
+    return;
+  }
+
+  const ids = siteEquipmentIds();
+  const list = (DATA.checklistRecords||[]).filter(r => ids.has(String(r.equipmentId)));
   if (!list.length) {
     el.innerHTML = `<div class="empty"><div class="empty-icon">📋</div>Осмотров пока нет</div>`;
     return;
   }
   el.innerHTML = list.map((r, idx) => {
-    const defects = r.items.filter(it => it.status === "defect");
+    const defects = (r.items||[]).filter(it => it.status === "defect");
     const eq = (DATA.equipment||[]).find(e => String(e.equipmentId)===String(r.equipmentId));
     const eqLabel = eq ? `${eq.equipmentId} — ${eq.model}` : r.equipmentId;
+    const okCount = r.okCount ?? 0;
     return `
       <div style="padding:12px;border:1px solid var(--border);border-radius:10px;margin-bottom:8px;background:#fff">
         <div style="display:flex;justify-content:space-between;align-items:center;cursor:pointer" onclick="toggleRecord(${idx})">
@@ -671,13 +573,14 @@ function renderRecordsList() {
             : `<span style="background:var(--greenbg);color:var(--green);font-size:12px;font-weight:700;padding:3px 10px;border-radius:99px">✓ Без замечаний</span>`}
         </div>
         <div id="recordDetail${idx}" style="display:none;margin-top:12px;border-top:1px solid var(--border);padding-top:10px">
-          ${r.items.map(it => `
+          ${(r.items||[]).map(it => `
             <div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px;gap:10px">
               <span style="color:${it.status==='defect'?'var(--red)':'var(--navy)'}">${it.itemText}</span>
-              <span style="color:var(--gray);white-space:nowrap">${it.status==='defect'?'✗ неисправно':it.status==='ok'?'✓ исправно':it.status}</span>
+              <span style="color:var(--gray);white-space:nowrap">${it.status==='defect'?'✗ неисправно':'✓ исправно'}</span>
             </div>
             ${it.comment ? `<div style="font-size:11px;color:var(--gray);margin-bottom:4px">${it.comment}</div>` : ""}
           `).join("")}
+          ${okCount ? `<div style="font-size:11px;color:var(--green);padding-top:4px">✓ Ещё ${okCount} пункт(ов) исправны</div>` : ""}
         </div>
       </div>`;
   }).join("");
