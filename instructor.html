@@ -216,6 +216,7 @@ tr:hover td { background:#FAFBFD; }
     <button id="navReportsAlmaty"   onclick="showTab('reportsAlmaty')">📄 Отчёты (Алмалы)</button>
     <button id="navReportsAshyktas" onclick="showTab('reportsAshyktas')">📄 Отчёты (Ашыктас)</button>
     <button id="navOperatorRating" onclick="showTab('operatorRating')">🏅 Рейтинг операторов</button>
+    <button id="navTrainingPlan" onclick="showTab('trainingPlan')">📚 График обучения</button>
     <button id="navShift1"   onclick="showTab('shift1')">👷 Вахта 1 (Алмалы)</button>
     <button id="navShift2"   onclick="showTab('shift2')">👷 Вахта 2 (Алмалы)</button>
     <button id="navShift1a"  onclick="showTab('shift1a')">👷 Вахта 1 (Ашыктас)</button>
@@ -804,6 +805,63 @@ tr:hover td { background:#FAFBFD; }
       </div>
     </div>
 
+    <!-- ══ ГРАФИК ОБУЧЕНИЯ ══ -->
+    <div id="tabTrainingPlan" class="screen">
+      <div class="panel">
+        <div class="panel-title">
+          📚 График обучения на год
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <select id="planSite" onchange="renderTrainingPlan()" style="max-width:150px">
+              <option value="all">Оба участка</option>
+              <option value="Алмалы">Алмалы</option>
+              <option value="Ашыктас">Ашыктас</option>
+            </select>
+            <select id="planShift" onchange="renderTrainingPlan()" style="max-width:150px">
+              <option value="all">Обе смены</option>
+              <option value="1">Смена 1 (день)</option>
+              <option value="2">Смена 2 (ночь)</option>
+            </select>
+            <select id="planVahta" onchange="renderTrainingPlan()" style="max-width:150px">
+              <option value="all">Обе вахты</option>
+              <option value="Вахта-1">Вахта-1</option>
+              <option value="Вахта-2">Вахта-2</option>
+            </select>
+            <button class="btn btn-ghost" onclick="exportTrainingPlanCSV()">⬇️ CSV</button>
+          </div>
+        </div>
+        <div class="hint">
+          Показано, кто на какой технике работает и обучен ли на неё. Одновременно со смены
+          можно снимать не более 8 человек — план распределён по месяцам с учётом этого ограничения,
+          чтобы техника не встала.
+        </div>
+      </div>
+
+      <div id="planSummary"></div>
+
+      <div class="panel">
+        <div class="panel-title">🔴 Работают без обучения на свою технику</div>
+        <div class="hint" style="margin-bottom:10px">Первоочередные кандидаты на учёбу</div>
+        <div id="planNoTraining"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">📅 Предлагаемый план по месяцам</div>
+        <div class="hint" style="margin-bottom:10px">
+          Распределено так, чтобы из одной смены одновременно училось не более 8 человек.
+          План — предложение, а не жёсткое расписание: правьте под реальные заезды вахт.
+        </div>
+        <div id="planByMonth"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">📋 Полная картина: кто чем обучен</div>
+        <div class="filters">
+          <input type="text" id="planSearch" placeholder="🔍 Поиск по имени или технике..." oninput="renderTrainingPlan()">
+        </div>
+        <div id="planTable"></div>
+      </div>
+    </div>
+
     <!-- ══ СМЕНА 1 / СМЕНА 2 — формация техники с закреплёнными операторами ══ -->
     <div id="tabShift1" class="screen">
       <div class="panel">
@@ -1330,6 +1388,7 @@ function renderAll() {
   renderReportPeriodButtons("Алмалы");
   renderReportPeriodButtons("Ашыктас");
   renderOperatorRating();
+  renderTrainingPlan();
   renderShiftFormation(1, "shift1Formation", "Алмалы");
   renderShiftFormation(2, "shift2Formation", "Алмалы");
   renderShiftFormation(1, "shift1FormationAshyktas", "Ашыктас");
@@ -1340,7 +1399,7 @@ function renderAll() {
 // НАВИГАЦИЯ
 // ══════════════════════════════════════════════════════
 function showTab(name) {
-  ["dash","tests","access","print","certPrintProfession","training","personnel","surveys","equipmentAlmaty","equipmentAshyktas","checklistTemplates","fuelAlmaty","fuelAshyktas","reportsAlmaty","reportsAshyktas","operatorRating","shift1","shift2","shift1a","shift2a","import"].forEach(t => {
+  ["dash","tests","access","print","certPrintProfession","training","personnel","surveys","equipmentAlmaty","equipmentAshyktas","checklistTemplates","fuelAlmaty","fuelAshyktas","reportsAlmaty","reportsAshyktas","operatorRating","trainingPlan","shift1","shift2","shift1a","shift2a","import"].forEach(t => {
     document.getElementById("tab"+cap(t)).classList.remove("active");
     document.getElementById("nav"+cap(t)).classList.remove("active");
   });
@@ -5100,6 +5159,231 @@ function exportRatingCSV() {
     r.formal ? "да" : "",
   ]);
   downloadCSV([headers, ...data], `Рейтинг_операторов_${today()}.csv`);
+}
+
+
+// ══════════════════════════════════════════════════════
+// ГРАФИК ОБУЧЕНИЯ
+// Сопоставляем: на какой технике человек закреплён по сменам и обучен ли
+// он на этот тип. Всё считается на лету, ничего не хранится отдельно.
+// ══════════════════════════════════════════════════════
+
+// Какое обучение считается профильным для типа техники.
+// Сопоставление по ключевым словам — названия курсов и типов заведены
+// людьми и не совпадают дословно.
+const TRAINING_MATCH = {
+  "Самосвал":          [/самосвал/i],
+  "Экскаватор":        [/экскаватор/i],
+  "Бульдозер":         [/бульдозер/i],
+  "Грейдер":           [/грейдер/i],
+  "Каток":             [/каток|виброкат/i],
+  "Буровой станок":    [/буров/i],
+  "Погрузчик":         [/погрузчик/i],
+  "Водовоз":           [/водовоз|полив/i],
+  "Легковой транспорт":[/вождени/i],
+};
+
+function normEqType(t) {
+  const s = String(t||"").trim();
+  return s.toLowerCase() === "каток" ? "Каток" : s;
+}
+
+// Обучение каждого сотрудника: empId -> Set(курсов)
+function trainingByEmployee() {
+  const map = {};
+  (DATA.training||[]).forEach(r => {
+    const id = String(r.empId||"");
+    const nm = String(r.empName||"").trim().toLowerCase();
+    const course = String(r.course||"").split(":")[0].trim();
+    if (id) (map["id:"+id] = map["id:"+id] || new Set()).add(course);
+    if (nm) (map["nm:"+nm] = map["nm:"+nm] || new Set()).add(course);
+  });
+  return map;
+}
+
+function coursesOf(map, empId, empName) {
+  const a = map["id:"+String(empId||"")] || new Set();
+  const b = map["nm:"+String(empName||"").trim().toLowerCase()] || new Set();
+  return new Set([...a, ...b]);
+}
+
+function isTrainedFor(courses, eqType) {
+  const pats = TRAINING_MATCH[normEqType(eqType)];
+  if (!pats) return null;               // для типа профильного обучения не задано
+  for (const c of courses) if (pats.some(p => p.test(c))) return true;
+  return false;
+}
+
+// Собираем строки графика: один человек + одна единица техники
+function buildTrainingPlan() {
+  const site  = document.getElementById("planSite")?.value  || "all";
+  const shift = document.getElementById("planShift")?.value || "all";
+  const vahta = document.getElementById("planVahta")?.value || "all";
+  const q     = (document.getElementById("planSearch")?.value||"").toLowerCase();
+
+  const tmap = trainingByEmployee();
+  const rows = [];
+
+  (DATA.shiftAssignments||[]).forEach(a => {
+    if (a.status !== "активен") return;
+    if (!a.empName || String(a.empName).toLowerCase() === "вакансия") return;
+    if (site  !== "all" && String(a.site||"").trim() !== site) return;
+    if (shift !== "all" && String(a.smena) !== shift) return;
+    if (vahta !== "all" && a.vahta !== vahta) return;
+
+    const eq = (DATA.equipment||[]).find(e => String(e.equipmentId)===String(a.equipmentId));
+    const eqType = eq ? normEqType(eq.type) : null;
+    const courses = coursesOf(tmap, a.empId, a.empName);
+    const trained = eqType ? isTrainedFor(courses, eqType) : null;
+
+    if (q) {
+      const hay = `${a.empName} ${a.equipmentId||""} ${eq?eq.model:""} ${eqType||""}`.toLowerCase();
+      if (!hay.includes(q)) return;
+    }
+
+    rows.push({
+      empId: a.empId || "", empName: a.empName,
+      site: (a.site||"").trim(), vahta: a.vahta, smena: String(a.smena),
+      equipmentId: a.equipmentId || "", model: eq ? eq.model : "", eqType,
+      courses: [...courses], trained,
+      linked: !!a.empId,
+    });
+  });
+
+  rows.sort((a,b) => a.empName.localeCompare(b.empName));
+  return rows;
+}
+
+function renderTrainingPlan() {
+  const rows = buildTrainingPlan();
+  const sum  = document.getElementById("planSummary");
+  const noTr = document.getElementById("planNoTraining");
+  const byM  = document.getElementById("planByMonth");
+  const tbl  = document.getElementById("planTable");
+  if (!tbl) return;
+
+  const need    = rows.filter(r => r.trained === false);
+  const ok      = rows.filter(r => r.trained === true);
+  const unknown = rows.filter(r => r.trained === null);
+
+  if (sum) sum.innerHTML = `<div class="stats-grid" style="margin-bottom:16px">
+    ${[
+      {lbl:"Всего в графике", val:rows.length, acc:"var(--navy2)"},
+      {lbl:"Обучены на свою технику", val:ok.length, acc:"var(--green,#2E7D32)"},
+      {lbl:"Требуют обучения", val:need.length, acc:need.length?"var(--red)":"var(--green,#2E7D32)"},
+      {lbl:"Нет данных об обучении", val:unknown.length, acc:"var(--gray)"},
+    ].map(s=>`<div class="stat-card" style="border-left-color:${s.acc}">
+      <div class="stat-val" style="color:${s.acc}">${s.val}</div>
+      <div class="stat-lbl">${s.lbl}</div></div>`).join("")}
+  </div>`;
+
+  const link = (r, txt) => r.empId
+    ? `<span style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted"
+         onclick="goToEmployeeProfile('${String(r.empId).replace(/'/g,"\\'")}')">${txt}</span>` : txt;
+
+  // 🔴 Без обучения на свою технику
+  if (noTr) {
+    noTr.innerHTML = need.length ? `<div class="tbl-wrap"><table style="font-size:13px">
+      <thead><tr><th>Сотрудник</th><th>Техника</th><th>Тип</th><th>Участок</th><th>Вахта / смена</th></tr></thead>
+      <tbody>${need.map(r=>`<tr>
+        <td><b>${link(r, r.empName)}</b></td>
+        <td>${r.equipmentId} <span style="color:var(--gray);font-size:11px">${r.model||""}</span></td>
+        <td style="color:var(--red);font-weight:700">${r.eqType||"—"}</td>
+        <td>${r.site}</td>
+        <td style="font-size:12px;color:var(--gray)">${r.vahta} · ${r.smena==="1"?"день":"ночь"}</td>
+      </tr>`).join("")}</tbody></table></div>`
+      : `<div style="padding:10px 12px;background:var(--greenbg,#EAF7ED);border-radius:8px;font-size:13px;color:var(--green,#2E7D32);font-weight:700">
+          ✓ Все работают на технике, на которую обучены</div>`;
+  }
+
+  // 📅 План по месяцам: раскидываем нуждающихся так, чтобы из одной
+  // смены (участок+вахта+смена) одновременно училось не более 8 человек
+  if (byM) {
+    const LIMIT = 8;
+    const months = ["Январь","Февраль","Март","Апрель","Май","Июнь",
+                    "Июль","Август","Сентябрь","Октябрь","Ноябрь","Декабрь"];
+    const now = new Date();
+    const plan = Array.from({length:12}, () => []);
+    const perGroupMonth = {};   // группа+месяц -> сколько уже стоит
+
+    need.forEach(r => {
+      const g = `${r.site}|${r.vahta}|${r.smena}`;
+      for (let i=0;i<12;i++) {
+        const k = g+"|"+i;
+        if ((perGroupMonth[k]||0) < LIMIT) {
+          perGroupMonth[k] = (perGroupMonth[k]||0)+1;
+          plan[i].push(r);
+          return;
+        }
+      }
+      plan[11].push(r);   // если совсем не влезло — в последний месяц
+    });
+
+    const filled = plan.map((list,i)=>({ i, list })).filter(x=>x.list.length);
+    byM.innerHTML = filled.length ? filled.map(({i,list}) => {
+      const mDate = new Date(now.getFullYear(), now.getMonth()+i, 1);
+      const label = `${months[mDate.getMonth()]} ${mDate.getFullYear()}`;
+      const byGroup = {};
+      list.forEach(r => {
+        const g = `${r.site} · ${r.vahta} · ${r.smena==="1"?"день":"ночь"}`;
+        (byGroup[g] = byGroup[g]||[]).push(r);
+      });
+      return `<div style="margin-bottom:14px;padding:12px;border:1px solid var(--border);border-radius:10px">
+        <div style="font-size:14px;font-weight:800;color:var(--navy);margin-bottom:8px">
+          ${label} <span style="font-weight:400;color:var(--gray);font-size:12px">— ${list.length} чел.</span>
+        </div>
+        ${Object.entries(byGroup).map(([g,arr])=>`
+          <div style="margin-bottom:8px">
+            <div style="font-size:11px;font-weight:700;color:var(--gray);text-transform:uppercase;margin-bottom:3px">
+              ${g} <span style="color:${arr.length>=LIMIT?'var(--red)':'var(--gray)'}">(${arr.length} из ${LIMIT})</span>
+            </div>
+            ${arr.map(r=>`<div style="font-size:12px;padding:2px 0;color:var(--navy)">
+              • ${link(r, r.empName)} — <span style="color:var(--gray)">${r.eqType} (${r.equipmentId})</span>
+            </div>`).join("")}
+          </div>`).join("")}
+      </div>`;
+    }).join("")
+      : `<div style="padding:10px 12px;background:var(--greenbg,#EAF7ED);border-radius:8px;font-size:13px;color:var(--green,#2E7D32)">
+          ✓ Планировать нечего — все обучены</div>`;
+  }
+
+  // 📋 Полная картина
+  tbl.innerHTML = rows.length ? `<div class="tbl-wrap"><table style="font-size:13px">
+    <thead><tr><th>Сотрудник</th><th>Техника</th><th>Тип</th><th>Участок</th>
+    <th>Вахта / смена</th><th>Обучение</th><th>Смежные</th></tr></thead>
+    <tbody>${rows.map(r=>{
+      const mark = r.trained === true
+        ? `<span style="color:var(--green,#2E7D32);font-weight:700">✓ обучен</span>`
+        : r.trained === false
+          ? `<span style="color:var(--red);font-weight:700">✗ не обучен</span>`
+          : `<span style="color:var(--gray)">— нет данных</span>`;
+      const other = r.courses.filter(cc => {
+        const pats = TRAINING_MATCH[r.eqType];
+        return !pats || !pats.some(p => p.test(cc));
+      });
+      return `<tr${r.trained===false?' style="background:var(--redbg)"':''}>
+        <td><b>${link(r, r.empName)}</b>${!r.linked?' <span style="font-size:10px;color:var(--gray)">нет карточки</span>':''}</td>
+        <td>${r.equipmentId} <span style="color:var(--gray);font-size:11px">${r.model||""}</span></td>
+        <td>${r.eqType||"—"}</td>
+        <td>${r.site}</td>
+        <td style="font-size:12px;color:var(--gray)">${r.vahta} · ${r.smena==="1"?"день":"ночь"}</td>
+        <td>${mark}</td>
+        <td style="font-size:11px;color:var(--gray)">${other.length?other.join(", "):"—"}</td>
+      </tr>`;
+    }).join("")}</tbody></table></div>`
+    : `<div class="empty"><div class="empty-icon">📚</div>Нет данных по выбранным фильтрам</div>`;
+}
+
+function exportTrainingPlanCSV() {
+  const rows = buildTrainingPlan();
+  const headers = ["Сотрудник","Техника","Модель","Тип техники","Участок","Вахта","Смена","Обучен на свою технику","Смежное обучение"];
+  const data = rows.map(r => [
+    r.empName, r.equipmentId, r.model, r.eqType||"", r.site, r.vahta,
+    r.smena === "1" ? "день" : "ночь",
+    r.trained === true ? "да" : r.trained === false ? "НЕТ" : "нет данных",
+    r.courses.join("; "),
+  ]);
+  downloadCSV([headers, ...data], `График_обучения_${today()}.csv`);
 }
 
 function renderShiftFormation(vahtaNum, containerId, site) {
