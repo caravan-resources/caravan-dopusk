@@ -3372,7 +3372,8 @@ function selectPersonnelEmployee(id) {
 // Сопоставляем сохранённые ответы работника с правильными из теста.
 // Видно, на каких именно вопросах человек ошибся.
 // ══════════════════════════════════════════════════════
-function showTestReview(resultId) {
+function showTestReview(resultId, filter) {
+  filter = filter || "all";
   const r = (DATA.results||[]).find(x => String(x.id) === String(resultId));
   if (!r) { alert("Результат не найден"); return; }
 
@@ -3386,7 +3387,7 @@ function showTestReview(resultId) {
       <div style="font-size:16px;font-weight:800;color:var(--navy);margin-bottom:8px">${r.testTitle||"Тест"}</div>
       <div style="font-size:13px;color:var(--gray);margin-bottom:14px">
         Тест «${r.testTitle}» больше не найден в системе — возможно, был удалён или переименован.
-        Разбор ошибок недоступен.
+        Разбор ответов недоступен.
       </div>
       <button class="btn btn-ghost" onclick="closeModal()">Закрыть</button>`);
     return;
@@ -3398,45 +3399,55 @@ function showTestReview(resultId) {
     const ok = given.length === correct.length && given.every(x => correct.includes(x));
     return { i, q, given, correct, ok, answered: given.length > 0 };
   });
-  const wrong = rows.filter(x => !x.ok);
+  const wrongCount = rows.filter(x => !x.ok).length;
+  const shown = filter === "wrong" ? rows.filter(x => !x.ok) : rows;
+
+  const questionCard = x => {
+    const border = x.ok ? "var(--green,#2E7D32)" : "var(--red)";
+    const bg = x.ok ? "var(--greenbg,#EAF7ED)" : "var(--redbg)";
+    return `
+      <div style="padding:10px;border:1px solid ${border};background:${bg};
+        border-radius:8px;margin-bottom:8px">
+        <div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:6px">
+          <div style="font-size:13px;font-weight:700;color:var(--navy)">${x.i+1}. ${x.q.text}</div>
+          <span style="flex-shrink:0;font-size:11px;font-weight:700;color:${border}">${x.ok ? "✓ верно" : "✗ неверно"}</span>
+        </div>
+        ${(x.q.options||[]).map((o,j) => {
+          const isCorrect = (x.correct||[]).includes(j);
+          const isGiven = (x.given||[]).includes(j);
+          const color = isCorrect ? "var(--green,#2E7D32)" : isGiven ? "var(--red)" : "var(--gray)";
+          const mark = isCorrect ? "✓" : isGiven ? "✗" : "&nbsp;&nbsp;";
+          const weight = (isCorrect||isGiven) ? "700" : "400";
+          return `<div style="font-size:12px;color:${color};font-weight:${weight};padding:2px 0">
+            ${mark} ${o}${isGiven && !isCorrect ? ' <span style="font-size:11px">— ответ работника</span>' : ""}
+            ${isCorrect ? ' <span style="font-size:11px">— правильный</span>' : ""}
+          </div>`;
+        }).join("")}
+        ${!x.answered ? `<div style="font-size:11px;color:var(--gray);margin-top:4px">Вопрос остался без ответа</div>` : ""}
+      </div>`;
+  };
 
   openModal(`
     <div style="font-size:16px;font-weight:800;color:var(--navy);margin-bottom:2px">${r.empName}</div>
     <div style="font-size:13px;color:var(--gray);margin-bottom:4px">${r.testTitle}</div>
-    <div style="font-size:12px;color:var(--gray);margin-bottom:14px">
+    <div style="font-size:12px;color:var(--gray);margin-bottom:10px">
       ${fmtDate(r.date)} ${r.time||""} · результат
       <b style="color:${Number(r.score)>=Number(r.passingScore||80)?'var(--green,#2E7D32)':'var(--red)'}">${r.score}%</b>
       (${r.correctQ} из ${r.totalQ})
     </div>
 
-    ${wrong.length ? `
-      <div style="font-size:13px;font-weight:700;color:var(--red);margin-bottom:8px">
-        Ошибки — ${wrong.length} вопрос(ов)
-      </div>
-      <div style="max-height:50vh;overflow:auto">
-      ${wrong.map(x => `
-        <div style="padding:10px;border:1px solid var(--red);background:var(--redbg);
-          border-radius:8px;margin-bottom:8px">
-          <div style="font-size:13px;font-weight:700;color:var(--navy);margin-bottom:6px">
-            ${x.i+1}. ${x.q.text}
-          </div>
-          ${(x.q.options||[]).map((o,j) => {
-            const isCorrect = (x.correct||[]).includes(j);
-            const isGiven = (x.given||[]).includes(j);
-            const color = isCorrect ? "var(--green,#2E7D32)" : isGiven ? "var(--red)" : "var(--gray)";
-            const mark = isCorrect ? "✓" : isGiven ? "✗" : "&nbsp;&nbsp;";
-            const weight = (isCorrect||isGiven) ? "700" : "400";
-            return `<div style="font-size:12px;color:${color};font-weight:${weight};padding:2px 0">
-              ${mark} ${o}${isGiven && !isCorrect ? ' <span style="font-size:11px">— ответ работника</span>' : ""}
-              ${isCorrect ? ' <span style="font-size:11px">— правильный</span>' : ""}
-            </div>`;
-          }).join("")}
-          ${!x.answered ? `<div style="font-size:11px;color:var(--gray);margin-top:4px">Вопрос остался без ответа</div>` : ""}
-        </div>`).join("")}
-      </div>`
-    : `<div style="padding:12px;background:var(--greenbg,#EAF7ED);border-radius:8px;
+    <div style="display:flex;gap:6px;margin-bottom:12px">
+      <button class="btn ${filter==='all'?'btn-gold':'btn-ghost'}" style="width:auto;padding:7px 14px;font-size:12px"
+        onclick="showTestReview('${String(resultId).replace(/'/g,"\\'")}','all')">Все (${rows.length})</button>
+      <button class="btn ${filter==='wrong'?'btn-gold':'btn-ghost'}" style="width:auto;padding:7px 14px;font-size:12px"
+        onclick="showTestReview('${String(resultId).replace(/'/g,"\\'")}','wrong')">Только ошибки (${wrongCount})</button>
+    </div>
+
+    ${shown.length ? `<div style="max-height:50vh;overflow:auto">
+      ${shown.map(questionCard).join("")}
+    </div>` : `<div style="padding:12px;background:var(--greenbg,#EAF7ED);border-radius:8px;
          font-size:13px;color:var(--green,#2E7D32);font-weight:700">
-        ✓ Все вопросы отвечены верно</div>`}
+        ✓ Ошибок нет — все вопросы отвечены верно</div>`}
 
     <button class="btn btn-ghost" style="margin-top:14px" onclick="closeModal()">Закрыть</button>
   `);
