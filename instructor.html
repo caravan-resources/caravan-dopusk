@@ -1538,6 +1538,21 @@ async function statsForDays(days) {
   return null;
 }
 
+// Точное окно [from, to) — для наград за конкретную неделю/месяц/квартал.
+// statsForDays берёт "последние N дней от сегодня": для текущей недели это
+// совпадает с нужным окном, но для ЛЮБОЙ прошлой недели — нет, там нужен
+// именно тот отрезок, а не всё от него до сегодняшнего дня.
+async function statsForRange(from, to) {
+  const key = "r:" + from.toISOString().slice(0,10) + ":" + to.toISOString().slice(0,10);
+  if (STATS_CACHE[key]) return STATS_CACHE[key];
+  try {
+    const url = `${CFG.SHEET_URL}?action=getChecklistStats&from=${encodeURIComponent(from.toISOString())}&to=${encodeURIComponent(to.toISOString())}`;
+    const d = await jsonpFetchRetry(url, "cb_stats_range", 90000, 3);
+    if (d && d.ok) { STATS_CACHE[key] = d; return d; }
+  } catch(e) { console.error("Агрегат за период:", e); }
+  return null;
+}
+
 
 // Подгрузка журнала осмотров по требованию — при входе не грузится, чтобы
 // не тащить мегабайты. Нужен для отчётов и просмотра конкретных осмотров.
@@ -4824,13 +4839,15 @@ function shiftAwardPeriod(delta) {
 }
 
 function computeWeeklyWinners(limit) {
-  // Победители за календарный период — из серверного агрегата.
-  // Агрегат считает за N последних дней, поэтому берём срок от начала периода.
+  // Победители за календарный период — из серверного агрегата за ТОЧНОЕ
+  // окно [from, to). Раньше запрашивалось "последние N дней от сегодня",
+  // и для любой прошлой недели это накопленный итог до сегодня, а не
+  // данные именно за ту неделю — цифры были завышены, иногда сильно.
   const [from, to] = awardPeriodRange(AWARD_PERIOD, AWARD_OFFSET);
-  const days = Math.max(1, Math.ceil((new Date() - from) / 86400000));
   const site = document.getElementById("ratingSite")?.value || "all";
 
-  const pack = STATS_CACHE[String(days)] || DATA.checklistStats;
+  const rangeKey = "r:" + from.toISOString().slice(0,10) + ":" + to.toISOString().slice(0,10);
+  const pack = STATS_CACHE[rangeKey];
   if (!pack || !pack.ok) return [];
   const st = site === "all" ? pack.all : (pack.sites && pack.sites[site]);
   if (!st) return [];
@@ -4858,9 +4875,9 @@ function computeWeeklyWinners(limit) {
 async function renderWeeklyAward() {
   const el = document.getElementById("weeklyAward");
   if (!el) return;
-  // Догружаем агрегат за выбранный период
-  const [pFrom] = awardPeriodRange(AWARD_PERIOD, AWARD_OFFSET);
-  await statsForDays(Math.max(1, Math.ceil((new Date() - pFrom) / 86400000)));
+  // Догружаем агрегат за точное окно выбранного периода
+  const [pFrom, pTo] = awardPeriodRange(AWARD_PERIOD, AWARD_OFFSET);
+  await statsForRange(pFrom, pTo);
 
   const sw = document.getElementById("awardPeriodSwitch");
   if (sw) {
