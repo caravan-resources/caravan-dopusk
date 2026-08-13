@@ -4738,9 +4738,8 @@ function computeOperatorRating() {
   const periodDays = days || 365;
 
   return (st.byOperator||[]).map(o => {
-    // Дней работы агрегат по операторам не отдаёт — оцениваем по числу
-    // осмотров, но не выше длины периода
-    const daysCount = Math.min(o.osmotrs, periodDays);
+    // Реальные уникальные дни работы — приходят из агрегата
+    const daysCount = o.daysCount ?? Math.min(o.osmotrs, periodDays);
     const score =
         Math.min(o.defects, 40) * 2.5
       + Math.min(o.comments, 40) * 1.5
@@ -4841,7 +4840,7 @@ function computeWeeklyWinners(limit) {
   return (st.byOperator||[])
     .filter(o => o.defects > 0 || o.comments > 0)
     .map(o => {
-      const daysCount = Math.min(o.osmotrs, periodDays);
+      const daysCount = o.daysCount ?? Math.min(o.osmotrs, periodDays);
       return {
         name: o.empName, empId: o.empId, osmotrs: o.osmotrs,
         defects: o.defects, comments: o.comments, fuel: 0,
@@ -4977,13 +4976,23 @@ async function awardExcellent(empId, empName, place, defects, comments, osmotrs,
     })});
     const data = await res.json();
     if (data.ok) {
-      await loadAll();
+      // Не перезагружаем всю базу (12 источников, 15-20с) ради одной записи —
+      // добавляем её в память локально, этого достаточно, чтобы кнопка сразу
+      // стала «✓ уже в личном деле». Полная перезагрузка иногда падала на
+      // одном из тяжёлых источников, и ошибка попадала сюда в catch —
+      // выглядело так, будто не сохранилось, хотя запись уже была в базе.
+      if (!DATA.personnelEvents) DATA.personnelEvents = [];
+      DATA.personnelEvents.push({
+        empId: empId || "", empName, date: new Date().toISOString(),
+        type: "награда", description, issuedBy: "Отдел обучения и развития ДГР",
+      });
+      renderWeeklyAward();
       alert("Награда внесена в личное дело.");
     } else {
       alert("Ошибка: " + (data.error || "неизвестная"));
     }
   } catch(e) {
-    alert("Ошибка сети: " + e.message);
+    alert("Не удалось подтвердить сохранение (" + e.message + "). Проверьте личное дело сотрудника — возможно, запись всё же прошла.");
   }
 }
 
