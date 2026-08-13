@@ -4739,6 +4739,25 @@ function equipmentFuelChecklistLines(equipmentId) {
 // Поэтому смотрим на внимательность: находит ли неисправности, пишет ли
 // комментарии, работает ли регулярно, отмечает ли заправки.
 // ══════════════════════════════════════════════════════
+
+// Заправки: живут отдельно от тяжёлого агрегата осмотров (их немного,
+// грузятся как обычно при входе). Считаем по оператору за нужное окно.
+function fuelCountsByOperator(site, since, until) {
+  const eqIds = site && site !== "all"
+    ? new Set((DATA.equipment||[]).filter(e => (e.site||"").trim() === site).map(e => String(e.equipmentId)))
+    : null;
+  const counts = {};
+  (DATA.fuel||[]).forEach(f => {
+    if (eqIds && !eqIds.has(String(f.equipmentId))) return;
+    const d = parseRecordDate(f.date);
+    if (since && (!d || d < since)) return;
+    if (until && d && d >= until) return;
+    const n = f.empName || "—";
+    counts[n] = (counts[n]||0) + 1;
+  });
+  return counts;
+}
+
 function computeOperatorRating() {
   // Считаем из серверного агрегата за выбранный период
   const site = document.getElementById("ratingSite")?.value || "all";
@@ -4751,19 +4770,24 @@ function computeOperatorRating() {
   if (!st) return [];
 
   const periodDays = days || 365;
+  let fuelSince = null;
+  if (days > 0) { fuelSince = new Date(); fuelSince.setDate(fuelSince.getDate() - days); fuelSince.setHours(0,0,0,0); }
+  const fuelCounts = fuelCountsByOperator(site, fuelSince, null);
 
   return (st.byOperator||[]).map(o => {
     // Реальные уникальные дни работы — приходят из агрегата
     const daysCount = o.daysCount ?? Math.min(o.osmotrs, periodDays);
+    const fuel = fuelCounts[o.empName] || 0;
     const score =
         Math.min(o.defects, 40) * 2.5
       + Math.min(o.comments, 40) * 1.5
       + Math.min(daysCount, 25) * 2
+      + Math.min(fuel, 25) * 1.2
       + Math.min(o.osmotrs, 30) * 0.5;
 
     return {
       name: o.empName, empId: o.empId, osmotrs: o.osmotrs, items: 0,
-      defects: o.defects, comments: o.comments, fuel: 0,
+      defects: o.defects, comments: o.comments, fuel,
       daysCount, equipmentCount: o.equipmentCount,
       equipmentLabel: o.equipmentCount === 1 ? "1 ед. техники" : `${o.equipmentCount} ед. техники`,
       score: Math.round(score),
@@ -4854,18 +4878,21 @@ function computeWeeklyWinners(limit) {
 
   const periodDays = Math.max(1, Math.round((to - from) / 86400000));
 
+  const fuelCounts = fuelCountsByOperator(site, from, to);
+
   return (st.byOperator||[])
     .filter(o => o.defects > 0 || o.comments > 0)
     .map(o => {
       const daysCount = o.daysCount ?? Math.min(o.osmotrs, periodDays);
+      const fuel = fuelCounts[o.empName] || 0;
       return {
         name: o.empName, empId: o.empId, osmotrs: o.osmotrs,
-        defects: o.defects, comments: o.comments, fuel: 0,
+        defects: o.defects, comments: o.comments, fuel,
         daysCount, equipmentCount: o.equipmentCount,
         equipmentLabel: o.equipmentCount === 1 ? "1 ед. техники" : `${o.equipmentCount} ед. техники`,
         score: Math.round(
           Math.min(o.defects,40)*2.5 + Math.min(o.comments,40)*1.5 +
-          Math.min(daysCount, periodDays)*3 + Math.min(o.osmotrs,30)*0.5),
+          Math.min(daysCount, periodDays)*3 + Math.min(fuel,25)*1.2 + Math.min(o.osmotrs,30)*0.5),
       };
     })
     .sort((a,b) => b.score - a.score)
