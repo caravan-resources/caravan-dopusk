@@ -306,7 +306,7 @@ document.addEventListener("DOMContentLoaded", () => {
     <div class="logo-bar"></div>
     <span>CARAVAN RESOURCES</span>
   </div>
-  <div id="headerStatus" style="font-size:11px;color:rgba(255,255,255,.5)">Допуск в карьер</div>
+  <div id="headerStatus" style="font-size:11px;color:rgba(255,255,255,.5)"></div>
 </div>
 
 <!-- ════════════════════════════════════════ -->
@@ -333,7 +333,7 @@ document.addEventListener("DOMContentLoaded", () => {
     <div class="card-title">👷 Шаг 1. Выберите себя</div>
 
     <div class="field">
-      <input type="text" id="empSearch" placeholder="🔍 Начните вводить ФИО..."
+      <input type="text" id="empSearch" placeholder="⏳ Загрузка списка сотрудников..." disabled
         oninput="filterEmployees(this.value)">
     </div>
 
@@ -567,16 +567,13 @@ const CFG = {
 // ══════════════════════════════════════════════════════
 // БАЗА СОТРУДНИКОВ (загружается из Sheets или демо)
 // ══════════════════════════════════════════════════════
-let EMPLOYEES = [
-  {id:"1", name:"Ахметов Серик Болатович",    pos:"Машинист экскаватора", site:"Алмалы"},
-  {id:"2", name:"Байжанов Руслан Темирович",   pos:"Водитель БелАЗ",       site:"Ашыктас"},
-  {id:"3", name:"Сейткали Айбек Маратович",   pos:"Машинист бульдозера",  site:"Алмалы"},
-  {id:"4", name:"Дюсенов Нурлан Асылович",    pos:"Оператор буровой",     site:"Ашыктас"},
-  {id:"5", name:"Касымов Бауыржан Ерланович", pos:"Машинист экскаватора", site:"Алмалы"},
-  {id:"6", name:"Нурмаганбетов Дамир Б.",     pos:"Водитель БелАЗ",       site:"Алмалы"},
-  {id:"7", name:"Жумабаев Серік Қайратович",  pos:"Машинист грейдера",    site:"Ашыктас"},
-  {id:"8", name:"Тулеев Арман Маратович",     pos:"Водитель погрузчика",  site:"Алмалы"},
-];
+// Раньше здесь были 8 вымышленных демо-сотрудников, и поле поиска работало
+// сразу при открытии страницы — до того, как настоящий список успевал прийти
+// с сервера (это занимает несколько секунд). Человек, начавший печатать своё
+// имя в первые секунды, искал по вымышленным людям и не находил себя.
+// Теперь список пуст, а поле заблокировано до реальной загрузки (см. ниже).
+let EMPLOYEES = [];
+let EMPLOYEES_LOADED = false;
 
 // ══════════════════════════════════════════════════════
 // БАНК ТЕСТОВ
@@ -680,12 +677,15 @@ let state = {
 window.addEventListener("DOMContentLoaded", ()=>{
   // Подпись под заголовком — по какому QR пришёл человек
   const sub = document.getElementById("screenSubtitle");
-  if (sub) {
-    const k = currentTestKind();
-    sub.textContent = k === "profession" ? "Тест по профессии"
-                    : k === "instruktazh" ? "Инструктаж"
-                    : "Сдача теста";
-  }
+  const k = currentTestKind();
+  const kindLabel = k === "profession" ? "Тест по профессии"
+                   : k === "instruktazh" ? "Инструктаж"
+                   : "Сдача теста";
+  if (sub) sub.textContent = kindLabel;
+  // Верхняя строка тоже держала жёстко «Допуск в карьер» независимо от того,
+  // по какой ссылке пришёл человек — не совпадало с подписью ниже
+  const hdr = document.getElementById("headerStatus");
+  if (hdr) hdr.textContent = kindLabel;
   renderEmployees("");
   renderTests();
   renderHistory();
@@ -708,16 +708,32 @@ window.addEventListener("DOMContentLoaded", ()=>{
 });
 
 async function loadEmployeesFromSheets() {
-  try {
-    const r = await fetch(`${CFG.SHEET_URL}?action=list`);
-    const data = await r.json();
-    if (Array.isArray(data) && data.length > 0) {
-      EMPLOYEES = data.map(e=>({
-        id:e.id, name:e.name, pos:e.position, site:e.site
-      }));
-      renderEmployees("");
-    }
-  } catch(e) { console.log("Sheets недоступен, используем демо-данные"); }
+  const input = document.getElementById("empSearch");
+  // Реальный список часто занимает несколько секунд — пробуем несколько раз,
+  // прежде чем сдаться, а не оставлять поле заблокированным навсегда из-за
+  // одного неудачного запроса.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const r = await fetch(`${CFG.SHEET_URL}?action=list`);
+      const data = await r.json();
+      if (Array.isArray(data) && data.length > 0) {
+        EMPLOYEES = data.map(e=>({
+          id:e.id, name:e.name, pos:e.position, site:e.site
+        }));
+        EMPLOYEES_LOADED = true;
+        if (input) { input.disabled = false; input.placeholder = "🔍 Начните вводить ФИО..."; }
+        renderEmployees("");
+        return;
+      }
+    } catch(e) { /* повторим */ }
+    if (attempt < 2) await new Promise(res => setTimeout(res, 1500));
+  }
+  // Все попытки не удались — говорим об этом честно, а не подсовываем
+  // вымышленных людей вместо реального списка
+  if (input) {
+    input.placeholder = "⚠ Не удалось загрузить список — обновите страницу";
+  }
+  console.log("Не удалось загрузить сотрудников с сервера после 3 попыток");
 }
 
 // ══════════════════════════════════════════════════════
@@ -740,10 +756,23 @@ function showScreen(name) {
 // ══════════════════════════════════════════════════════
 function renderEmployees(query) {
   const list = document.getElementById("empList");
-  const q = query.toLowerCase();
-  const filtered = EMPLOYEES.filter(e=>e.name.toLowerCase().includes(q));
+  const q = query.toLowerCase().trim();
 
   if (!query) { list.innerHTML=""; return; }
+
+  // Совпадение в начале имени или фамилии — выше по списку, чем совпадение
+  // где-то в середине. Раньше сортировки не было вообще (порядок как в базе),
+  // и при коротком запросе на 400+ человек нужный мог не попасть в первые 6
+  // показанных карточек — технически найден, но не виден.
+  const filtered = EMPLOYEES
+    .filter(e => e.name.toLowerCase().includes(q))
+    .map(e => {
+      const parts = e.name.toLowerCase().split(/\s+/);
+      const prefixMatch = parts.some(p => p.startsWith(q));
+      return { e, rank: prefixMatch ? 0 : 1 };
+    })
+    .sort((a,b) => a.rank - b.rank)
+    .map(x => x.e);
 
   if (filtered.length===0) {
     list.innerHTML = `<div style="padding:14px;color:var(--gray);font-size:13px;text-align:center">
@@ -751,7 +780,14 @@ function renderEmployees(query) {
     return;
   }
 
-  list.innerHTML = filtered.slice(0,6).map(e=>`
+  // Было 6 — при частом запросе (одна буква, распространённое имя) искомый
+  // человек мог не попасть в срез и выглядеть как «не найден». Теперь 20,
+  // плюс подсказка, если совпадений ещё больше — уточнить запрос.
+  const SHOW_LIMIT = 20;
+  const shown = filtered.slice(0, SHOW_LIMIT);
+  const moreCount = filtered.length - shown.length;
+
+  list.innerHTML = shown.map(e=>`
     <button class="emp-item ${state.selectedEmp?.id===e.id?"selected":""}"
       onclick="selectEmployee(${JSON.stringify(e).replace(/"/g,'&quot;')})">
       <div class="emp-avatar">${initials(e.name)}</div>
@@ -761,7 +797,11 @@ function renderEmployees(query) {
       </div>
       ${state.selectedEmp?.id===e.id?'<span style="margin-left:auto;color:var(--gold)">✓</span>':""}
     </button>
-  `).join("");
+  `).join("") + (moreCount > 0
+    ? `<div style="padding:10px;color:var(--gray);font-size:12px;text-align:center">
+         Показаны первые ${SHOW_LIMIT} из ${filtered.length} — уточните запрос (например, добавьте фамилию)
+       </div>`
+    : "");
 }
 
 function filterEmployees(val) { renderEmployees(val); }
