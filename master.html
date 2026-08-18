@@ -298,7 +298,7 @@ function renderVahtaSwitch() {
     <button class="${CURRENT_VAHTA===v?'btn-gold':'btn-ghost'}" onclick="setVahta('${v}')">${v.replace('Вахта-','Вахта ')}</button>
   `).join("");
 }
-function setVahta(v) { CURRENT_VAHTA = v; renderShift(); }
+function setVahta(v) { CURRENT_VAHTA = v; renderVahtaSwitch(); renderShift(); }
 
 
 const SHIFT_TYPE_ORDER = ["Буровой станок","Экскаватор","Погрузчик","Самосвал","Бульдозер","Грейдер","Каток"];
