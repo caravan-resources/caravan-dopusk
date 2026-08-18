@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Горный мастер — Caravan Resources</title>
+<style>
+:root {
+  --navy:#0B1A35; --navy2:#1B3B6F; --gold:#F4A52A;
+  --red:#DC2626; --redbg:#FEF2F2;
+  --green:#16A34A; --greenbg:#F0FDF4;
+  --yellow:#B45309; --yellowbg:#FFFBEB;
+  --gray:#64748B; --light:#F1F5F9; --border:#E2E8F0;
+}
+* { box-sizing:border-box; }
+body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+  background:var(--light); color:var(--navy); margin:0; min-height:100vh; }
+
+#loginScreen { display:flex; align-items:center; justify-content:center; min-height:100vh; }
+.login-box { background:#fff; border-radius:16px; padding:36px; width:320px; text-align:center;
+  box-shadow:0 10px 40px rgba(0,0,0,.1); }
+.login-logo { font-size:36px; margin-bottom:10px; }
+.login-title { font-size:17px; font-weight:800; color:var(--navy); }
+.login-sub { font-size:12px; color:var(--gray); margin:4px 0 20px; }
+.login-box input { width:100%; padding:12px; border:1.5px solid var(--border); border-radius:10px;
+  font-size:15px; margin-bottom:12px; text-align:center; }
+.login-box button { width:100%; padding:12px; border:none; border-radius:10px; background:var(--gold);
+  color:var(--navy); font-weight:800; font-size:15px; cursor:pointer; }
+.login-err { display:none; color:var(--red); font-size:12px; margin-top:10px; }
+
+#app { display:none; }
+.header { background:var(--navy); color:#fff; padding:16px 24px; display:flex; justify-content:space-between; align-items:center; }
+.header h1 { font-size:16px; font-weight:800; margin:0; }
+.header p { font-size:11px; color:rgba(255,255,255,.6); margin:2px 0 0; }
+.header button { background:rgba(255,255,255,.1); color:#fff; border:none; padding:8px 14px;
+  border-radius:8px; cursor:pointer; font-size:13px; }
+
+.navbar { background:#fff; border-bottom:1px solid var(--border); padding:0 16px; display:flex;
+  gap:4px; overflow-x:auto; }
+.navbar button { background:none; border:none; padding:12px 14px; font-size:13px; font-weight:700;
+  color:var(--gray); cursor:pointer; white-space:nowrap; border-bottom:3px solid transparent; }
+.navbar button.active { color:var(--navy); border-bottom-color:var(--gold); }
+
+.wrap { max-width:1100px; margin:0 auto; padding:20px; }
+.screen { display:none; }
+.screen.active { display:block; }
+.stats-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin-bottom:20px; }
+.stat-card { background:#fff; border-radius:12px; padding:16px; border-left:4px solid var(--gold); }
+.stat-val { font-size:24px; font-weight:800; }
+.stat-lbl { font-size:12px; color:var(--gray); margin-top:2px; }
+
+.panel { background:#fff; border-radius:14px; padding:18px; margin-bottom:16px; }
+.panel-title { font-size:14px; font-weight:800; color:var(--navy); margin-bottom:12px;
+  display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; }
+.empty { text-align:center; padding:24px; color:var(--gray); font-size:13px; }
+.empty-icon { font-size:28px; margin-bottom:8px; }
+.btn-ghost { background:var(--light); color:var(--navy); border:none; padding:8px 12px;
+  border-radius:8px; cursor:pointer; font-size:13px; }
+.btn-gold { background:var(--gold); color:var(--navy); border:none; padding:8px 12px;
+  border-radius:8px; cursor:pointer; font-size:13px; font-weight:700; }
+input[type=text] { width:100%; padding:10px 12px; border:1.5px solid var(--border); border-radius:10px;
+  font-size:14px; }
+table { width:100%; border-collapse:collapse; font-size:13px; }
+th { text-align:left; padding:8px; color:var(--gray); font-size:11px; text-transform:uppercase;
+  border-bottom:2px solid var(--border); }
+td { padding:8px; border-bottom:1px solid var(--border); }
+</style>
+</head>
+<body>
+
+<div id="loginScreen">
+  <div class="login-box">
+    <div class="login-logo">⛏️</div>
+    <div class="login-title">Горный мастер</div>
+    <div class="login-sub">Caravan Resources · вахта, топливо, персонал</div>
+    <input type="password" id="pinInput" placeholder="Введите PIN-код"
+      onkeydown="if(event.key==='Enter')checkPin()">
+    <button onclick="checkPin()">Войти</button>
+    <div class="login-err" id="loginErr">Неверный PIN-код</div>
+  </div>
+</div>
+
+<div id="app">
+  <div class="header">
+    <div>
+      <h1>Горный мастер</h1>
+      <p>Caravan Resources · <span id="loadStatus">загрузка...</span></p>
+    </div>
+    <button onclick="logout()">Выйти</button>
+  </div>
+
+  <div class="navbar">
+    <button id="navShift" class="active" onclick="showScreen('shift')">👷 Вахта</button>
+    <button id="navFuel" onclick="showScreen('fuel')">⛽ Топливо</button>
+    <button id="navPersonnel" onclick="showScreen('personnel')">👥 Работники</button>
+    <button id="navAnalytics" onclick="showScreen('analytics')">📊 Аналитика</button>
+  </div>
+
+  <div class="wrap">
+    <div id="loadErrorBanner" style="display:none;background:var(--red);color:#fff;
+      padding:12px 16px;border-radius:8px;font-size:13px;font-weight:700;margin-bottom:14px">
+      ⚠ Часть данных не загрузилась. То, что показано — может быть неполным.
+      <button onclick="loadAll()" style="margin-left:10px;background:#fff;color:var(--red);
+        border:none;padding:4px 12px;border-radius:6px;font-weight:800;cursor:pointer">Повторить</button>
+    </div>
+
+    <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center;flex-wrap:wrap">
+      <span style="font-size:13px;color:var(--gray);font-weight:600">Участок:</span>
+      <div id="siteSwitch" style="display:flex;gap:8px"></div>
+      <span style="font-size:13px;color:var(--gray);font-weight:600;margin-left:16px">Вахта:</span>
+      <div id="vahtaSwitch" style="display:flex;gap:8px"></div>
+    </div>
+
+    <!-- ══ ВАХТА ══ -->
+    <div id="screenShift" class="screen active">
+      <div id="shiftFormation"></div>
+    </div>
+
+    <!-- ══ ТОПЛИВО ══ -->
+    <div id="screenFuel" class="screen">
+      <div class="stats-grid" id="fuelStats"></div>
+      <div class="panel">
+        <div class="panel-title">⛽ Заправки — <span id="fuelSiteLabel"></span></div>
+        <div id="fuelList"></div>
+      </div>
+    </div>
+
+    <!-- ══ РАБОТНИКИ ══ -->
+    <div id="screenPersonnel" class="screen">
+      <div class="panel">
+        <input type="text" id="personnelSearch" placeholder="🔍 Поиск по имени..." oninput="renderPersonnelList()">
+      </div>
+      <div class="panel">
+        <div id="personnelList"></div>
+      </div>
+    </div>
+
+    <!-- ══ АНАЛИТИКА ══ -->
+    <div id="screenAnalytics" class="screen">
+      <div class="stats-grid" id="analyticsStats"></div>
+      <div class="panel">
+        <div class="panel-title">⚠️ Техника с открытыми неисправностями</div>
+        <div id="analyticsOpenDefects"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">🏅 Рейтинг операторов — <span id="ratingSiteLabel"></span></div>
+        <div id="analyticsRating"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">🔩 Слабые места — по узлам</div>
+        <div id="analyticsBySection"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="modalOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);
+  align-items:center;justify-content:center;z-index:1000;padding:16px">
+  <div id="modalBox" style="background:#fff;border-radius:14px;padding:22px;max-width:480px;width:100%;
+    max-height:85vh;overflow-y:auto"></div>
+</div>
+
+<script>
+const CFG = {
+  PIN: "1234",
+  SHEET_URL: "https://script.google.com/macros/s/AKfycbwhdMV20k8US2BXUz1Xk2XCXE9MEwpHpQaadTF9xEfzbU1--dHL-Zuj06K2qXW-rFtKGw/exec",
+};
+
+let DATA = { equipment: [], employees: [], shiftAssignments: [], fuel: [], checklistStats: null, personnelEvents: [] };
+let CURRENT_SITE = "Алмалы";
+let CURRENT_VAHTA = "Вахта-1";
+
+function checkPin() {
+  const val = document.getElementById("pinInput").value;
+  if (val === CFG.PIN) {
+    document.getElementById("loginScreen").style.display = "none";
+    document.getElementById("app").style.display = "block";
+    loadAll();
+  } else {
+    document.getElementById("loginErr").style.display = "block";
+    document.getElementById("pinInput").value = "";
+    document.getElementById("pinInput").focus();
+  }
+}
+function logout() {
+  document.getElementById("loginScreen").style.display = "flex";
+  document.getElementById("app").style.display = "none";
+  document.getElementById("pinInput").value = "";
+}
+
+function showScreen(name) {
+  ["shift","fuel","personnel","analytics"].forEach(s => {
+    document.getElementById("screen"+s.charAt(0).toUpperCase()+s.slice(1)).classList.remove("active");
+    document.getElementById("nav"+s.charAt(0).toUpperCase()+s.slice(1)).classList.remove("active");
+  });
+  document.getElementById("screen"+name.charAt(0).toUpperCase()+name.slice(1)).classList.add("active");
+  document.getElementById("nav"+name.charAt(0).toUpperCase()+name.slice(1)).classList.add("active");
+}
+
+// Запрос с таймаутом и повтором — тот же проверенный способ, что и в
+// приложении механика: пауза растёт с каждой попыткой, чтобы не душить
+// и без того слабый канал повторными запросами подряд.
+async function fetchWithRetry(url, timeoutMs, attempts) {
+  const tries = attempts || 3;
+  let lastErr;
+  for (let i = 0; i < tries; i++) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs || 40000);
+    try {
+      const r = await fetch(url, { cache: "no-store", signal: ctrl.signal });
+      clearTimeout(timer);
+      return await r.json();
+    } catch (e) {
+      clearTimeout(timer);
+      lastErr = e;
+      if (i < tries - 1) await new Promise(res => setTimeout(res, 1500 * (i + 1)));
+    }
+  }
+  throw lastErr;
+}
+
+async function loadAll() {
+  const banner = document.getElementById("loadErrorBanner");
+  if (banner) banner.style.display = "none";
+  const statusEl = document.getElementById("loadStatus");
+
+  // Пачками по 2-3, последовательно, а не всё разом — тот же урок с
+  // Ашыктаса: параллельные запросы душат друг друга на слабой связи.
+  // siteScoped: сервер теперь фильтрует по участку сам (&site=...), поэтому
+  // качаем только данные текущего участка, а не всю базу разом — это и есть
+  // деление базы по участкам вместо старой клиентской фильтрации.
+  const fetches = [
+    { key: "equipment",        action: "getEquipment",      siteScoped: true },
+    { key: "checklistStats",   action: "getChecklistStats&days=30" },
+    { key: "employees",        action: "list",              siteScoped: true },
+    { key: "shiftAssignments", action: "getShiftAssignments", siteScoped: true },
+    { key: "fuel",             action: "getFuelRecords",    siteScoped: true },
+    { key: "personnelEvents",  action: "getPersonnelEvents" },
+  ];
+
+  let failed = false;
+  for (let i = 0; i < fetches.length; i++) {
+    const f = fetches[i];
+    if (statusEl) statusEl.textContent = `загрузка... ${i+1} из ${fetches.length}`;
+    try {
+      const heavy = f.key === "employees" || f.key === "checklistStats" || f.key === "shiftAssignments" || f.key === "fuel";
+      const url = f.siteScoped
+        ? `${CFG.SHEET_URL}?action=${f.action}&site=${encodeURIComponent(CURRENT_SITE)}`
+        : `${CFG.SHEET_URL}?action=${f.action}`;
+      const val = await fetchWithRetry(url, heavy ? 90000 : 40000, 3);
+      if (f.key === "checklistStats") {
+        if (val && val.ok) DATA[f.key] = val; else { failed = true; }
+      } else if (Array.isArray(val)) {
+        DATA[f.key] = val;
+      } else {
+        failed = true;
+      }
+    } catch (e) {
+      failed = true;
+      console.error(f.key + ":", e);
+    }
+    // Наполняем экран по мере поступления, не дожидаясь самого медленного запроса
+    try { renderAll(); } catch(e) { console.error("Отрисовка:", e); }
+  }
+
+  if (statusEl) statusEl.textContent = failed ? "часть данных не загрузилась" : "данные загружены";
+  if (banner) banner.style.display = failed ? "block" : "none";
+  renderAll();
+}
+
+function renderAll() {
+  renderSiteSwitch();
+  renderVahtaSwitch();
+  renderShift();
+  renderFuel();
+  renderPersonnelList();
+  renderAnalytics();
+}
+
+function renderSiteSwitch() {
+  const el = document.getElementById("siteSwitch");
+  if (!el) return;
+  el.innerHTML = ["Алмалы","Ашыктас"].map(s => `
+    <button class="${CURRENT_SITE===s?'btn-gold':'btn-ghost'}" onclick="setSite('${s}')">${s}</button>
+  `).join("");
+}
+function setSite(site) {
+  if (site === CURRENT_SITE) return;
+  CURRENT_SITE = site;
+  renderSiteSwitch(); // подсветить активную кнопку сразу, не дожидаясь сети
+  loadAll(); // данные теперь серверно отфильтрованы по участку — грузим заново
+}
+
+function renderVahtaSwitch() {
+  const el = document.getElementById("vahtaSwitch");
+  if (!el) return;
+  el.innerHTML = ["Вахта-1","Вахта-2"].map(v => `
+    <button class="${CURRENT_VAHTA===v?'btn-gold':'btn-ghost'}" onclick="setVahta('${v}')">${v.replace('Вахта-','Вахта ')}</button>
+  `).join("");
+}
+function setVahta(v) { CURRENT_VAHTA = v; renderShift(); }
+
+
+const SHIFT_TYPE_ORDER = ["Буровой станок","Экскаватор","Погрузчик","Самосвал","Бульдозер","Грейдер","Каток"];
+const SHIFT_TYPE_ICONS = {
+  "Буровой станок": "⛏️", "Экскаватор": "🏗️", "Погрузчик": "🚜",
+  "Самосвал": "🚛", "Бульдозер": "🚧", "Грейдер": "🛣️", "Каток": "🛞",
+};
+const SMENA_LABEL = { 1: "День", 2: "Ночь" };
+
+function shiftStatusColor(status) {
+  if (status === "вакансия") return "var(--gold)";
+  if (status === "увольняется") return "var(--red)";
+  if (status === "оптимизация") return "var(--gray)";
+  if (status === "не_заехал") return "var(--navy2)";
+  return "var(--green)";
+}
+
+// ══ ВАХТА — только просмотр: кто на чём работает, без редактирования
+// (изменение состава смен остаётся в полной панели, чтобы два приложения
+// не правили одни и те же записи одновременно) ══
+function renderShift() {
+  const container = document.getElementById("shiftFormation");
+  if (!container) return;
+
+  const assignments = (DATA.shiftAssignments||[]).filter(a =>
+    String(a.vahta) === CURRENT_VAHTA && String(a.site||"").trim() === CURRENT_SITE
+  );
+
+  const byKey = {};
+  assignments.forEach(a => {
+    const key = a.equipmentId || ("pos:" + a.position);
+    if (!byKey[key]) byKey[key] = { equipmentId: a.equipmentId, position: a.position, items: [] };
+    byKey[key].items.push(a);
+  });
+  (DATA.equipment||[]).forEach(eq => {
+    if ((eq.site||"").trim() === CURRENT_SITE && !byKey[eq.equipmentId]) {
+      byKey[eq.equipmentId] = { equipmentId: eq.equipmentId, position: "", items: [] };
+    }
+  });
+
+  function typeOf(group) {
+    if (group.equipmentId) {
+      const eq = (DATA.equipment||[]).find(e => String(e.equipmentId) === String(group.equipmentId));
+      return eq ? (eq.type||"Прочее").trim().replace(/^каток$/i, "Каток") : "Прочее";
+    }
+    return "Управление участком";
+  }
+
+  const rows = {};
+  Object.entries(byKey).forEach(([key, group]) => {
+    const t = typeOf(group);
+    if (!rows[t]) rows[t] = [];
+    rows[t].push(group);
+  });
+
+  const order = [...SHIFT_TYPE_ORDER, "Управление участком", "Прочее"];
+  const usedTypes = Object.keys(rows).sort((a,b) => {
+    const ia = order.indexOf(a), ib = order.indexOf(b);
+    return (ia<0?999:ia) - (ib<0?999:ib);
+  });
+
+  if (!usedTypes.length) {
+    if (!DATA.equipment.length) {
+      container.innerHTML = `<div class="panel"><div class="empty"><div class="empty-icon">⏳</div>Загружаю данные...</div></div>`;
+    } else {
+      container.innerHTML = `<div class="panel"><div class="empty"><div class="empty-icon">👷</div>Данных по этой вахте пока нет.</div></div>`;
+    }
+    return;
+  }
+
+  container.innerHTML = usedTypes.map(type => {
+    const groups = rows[type].sort((a,b) => String(a.equipmentId||a.position).localeCompare(String(b.equipmentId||b.position)));
+    const icon = SHIFT_TYPE_ICONS[type] || "📋";
+    const cards = groups.map(g => {
+      const eq = g.equipmentId ? (DATA.equipment||[]).find(e => String(e.equipmentId)===String(g.equipmentId)) : null;
+      const title = g.equipmentId
+        ? `${g.equipmentId} <span style="font-weight:500;color:var(--gray);font-size:10px">${eq ? eq.model : ""}</span>`
+        : `<span style="font-size:12px">${g.position}</span>`;
+      const bySmena = {};
+      g.items.forEach(a => { bySmena[Number(a.smena)] = a; });
+      const slots = [1,2].map(sm => {
+        const a = bySmena[sm];
+        const label = SMENA_LABEL[sm];
+        if (!a) return `<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0;color:var(--gray)">
+          <span>${label}</span><span>—</span></div>`;
+        const color = shiftStatusColor(a.status);
+        let text = a.empName || (a.status === "вакансия" ? "вакансия" : a.status === "оптимизация" ? "не требуется" : "—");
+        if (a.status === "увольняется" && a.dismissDate) text += ` (до ${a.dismissDate})`;
+        const clickable = a.empId && a.status !== "вакансия" && a.status !== "оптимизация";
+        const nameHtml = clickable
+          ? `<span style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted" onclick="openEmployeeCard('${String(a.empId).replace(/'/g,"\\'")}')">${text}</span>`
+          : text;
+        return `<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0">
+          <span style="color:var(--gray)">${label}</span><span style="color:${color};font-weight:600">${nameHtml}</span></div>`;
+      }).join("");
+      return `<div style="background:#fff;border:1px solid var(--border);border-radius:10px;padding:10px 12px;min-width:200px;flex:1 1 200px;max-width:250px">
+        <div style="font-size:13px;font-weight:800;color:var(--navy);margin-bottom:6px">${title}</div>
+        ${slots}
+      </div>`;
+    }).join("");
+    return `<div class="panel">
+      <div class="panel-title" style="font-size:13px">${icon} ${type} <span style="font-weight:400;color:var(--gray);font-size:11px">(${groups.length})</span></div>
+      <div style="display:flex;flex-wrap:wrap;gap:10px">${cards}</div>
+    </div>`;
+  }).join("");
+}
+
+
+// ══ ТОПЛИВО — заправки выбранного участка за последние 30 дней ══
+function renderFuel() {
+  const statsEl = document.getElementById("fuelStats");
+  const listEl = document.getElementById("fuelList");
+  const lbl = document.getElementById("fuelSiteLabel");
+  if (!statsEl || !listEl) return;
+  if (lbl) lbl.textContent = CURRENT_SITE;
+
+  const eqIds = new Set((DATA.equipment||[]).filter(e => (e.site||"").trim()===CURRENT_SITE).map(e=>String(e.equipmentId)));
+  const eqById = {};
+  (DATA.equipment||[]).forEach(e => eqById[String(e.equipmentId)] = e);
+
+  const since = new Date(); since.setDate(since.getDate()-30);
+  const records = (DATA.fuel||[]).filter(f => eqIds.has(String(f.equipmentId)))
+    .filter(f => { const d = new Date(f.date); return !isNaN(d) && d >= since; })
+    .sort((a,b) => new Date(b.date) - new Date(a.date));
+
+  const totalLiters = records.reduce((s,f)=>s+(Number(f.amountLiters)||0),0);
+  const byEq = {};
+  records.forEach(f => { byEq[f.equipmentId] = (byEq[f.equipmentId]||0)+(Number(f.amountLiters)||0); });
+
+  statsEl.innerHTML = [
+    {lbl:"Заправок за 30 дней", val:records.length, acc:"var(--gold)"},
+    {lbl:"Литров всего", val:Math.round(totalLiters).toLocaleString("ru-RU"), acc:"var(--navy2)"},
+    {lbl:"Техники заправлялось", val:Object.keys(byEq).length, acc:"var(--navy)"},
+  ].map(s=>`<div class="stat-card" style="border-left-color:${s.acc}">
+    <div class="stat-val" style="color:${s.acc}">${s.val}</div>
+    <div class="stat-lbl">${s.lbl}</div></div>`).join("");
+
+  if (!records.length) {
+    listEl.innerHTML = DATA.equipment.length
+      ? `<div class="empty"><div class="empty-icon">⛽</div>Заправок за 30 дней нет</div>`
+      : `<div class="empty"><div class="empty-icon">⏳</div>Загружаю данные...</div>`;
+    return;
+  }
+
+  listEl.innerHTML = `<div style="overflow-x:auto"><table>
+    <thead><tr><th>Техника</th><th>Дата</th><th>Оператор</th><th style="text-align:right">Литров</th></tr></thead>
+    <tbody>${records.slice(0,80).map(f => {
+      const eq = eqById[String(f.equipmentId)];
+      const label = eq ? `${f.equipmentId} — ${eq.model}` : f.equipmentId;
+      const d = new Date(f.date);
+      const dateStr = isNaN(d) ? f.date : d.toLocaleString("ru-RU",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
+      return `<tr><td>${label}</td><td>${dateStr}</td><td>${f.empName||"—"}</td>
+        <td style="text-align:right;font-weight:700">${f.amountLiters}</td></tr>`;
+    }).join("")}</tbody>
+  </table></div>` + (records.length>80 ? `<div style="text-align:center;color:var(--gray);font-size:12px;padding-top:10px">Показаны последние 80 из ${records.length}</div>` : "");
+}
+
+
+function daysLeft(v) {
+  if (!v) return null;
+  const d = new Date(v);
+  if (isNaN(d)) return null;
+  const now = new Date(); now.setHours(0,0,0,0); d.setHours(0,0,0,0);
+  return Math.round((d - now) / 86400000);
+}
+function statusOf(emp) {
+  const d = daysLeft(emp.validUntil);
+  if (d === null) return "nodate";
+  if (d < 0) return "expired";
+  if (d <= 30) return "warning";
+  return "ok";
+}
+function statusBadge(st) {
+  const map = {
+    expired: ["#DC2626","🔴 Просрочен"], warning: ["#B45309","🟡 Истекает"],
+    ok: ["#16A34A","✓ Действителен"], nodate: ["#64748B","— Нет данных"],
+  };
+  const [color,text] = map[st] || map.nodate;
+  return `<span style="color:${color};font-weight:700;font-size:12px">${text}</span>`;
+}
+
+// ══ РАБОТНИКИ — поиск + личное дело по клику ══
+function renderPersonnelList() {
+  const el = document.getElementById("personnelList");
+  if (!el) return;
+  const q = (document.getElementById("personnelSearch")?.value||"").toLowerCase().trim();
+
+  let list = (DATA.employees||[]).filter(e => (e.site||"").trim() === CURRENT_SITE);
+  if (q) list = list.filter(e => e.name.toLowerCase().includes(q));
+  list.sort((a,b) => a.name.localeCompare(b.name));
+
+  if (!DATA.employees.length) {
+    el.innerHTML = `<div class="empty"><div class="empty-icon">⏳</div>Загружаю список сотрудников...</div>`;
+    return;
+  }
+  if (!list.length) {
+    el.innerHTML = `<div class="empty"><div class="empty-icon">🔍</div>Никого не найдено</div>`;
+    return;
+  }
+
+  const shown = list.slice(0, 40);
+  el.innerHTML = `<div style="overflow-x:auto"><table>
+    <thead><tr><th>Сотрудник</th><th>Должность</th><th>Допуск</th></tr></thead>
+    <tbody>${shown.map(e => `
+      <tr style="cursor:pointer" onclick="openEmployeeCard('${String(e.id).replace(/'/g,"\\'")}')">
+        <td><b>${e.name}</b></td>
+        <td style="color:var(--gray)">${e.position||"—"}</td>
+        <td>${statusBadge(statusOf(e))}</td>
+      </tr>`).join("")}</tbody>
+  </table></div>` + (list.length>40 ? `<div style="text-align:center;color:var(--gray);font-size:12px;padding-top:10px">Показаны первые 40 из ${list.length} — уточните поиск</div>` : "");
+}
+
+// Личное дело — карточка сотрудника + история наград/взысканий
+function openEmployeeCard(empId) {
+  const e = empById(empId);
+  if (!e) { alert("Карточка не найдена — возможно, список ещё не полностью загрузился"); return; }
+
+  const events = (DATA.personnelEvents||[]).filter(p => String(p.empId)===String(empId))
+    .sort((a,b) => new Date(b.date) - new Date(a.date));
+
+  const photo = e.photoUrl
+    ? `<img src="${e.photoUrl}" referrerpolicy="no-referrer" loading="lazy"
+         style="width:64px;height:64px;border-radius:50%;object-fit:cover;border:2px solid var(--gold)">`
+    : `<div style="width:64px;height:64px;border-radius:50%;background:var(--light);display:flex;
+         align-items:center;justify-content:center;font-size:24px">👤</div>`;
+
+  document.getElementById("modalBox").innerHTML = `
+    <div style="display:flex;gap:14px;align-items:center;margin-bottom:16px">
+      ${photo}
+      <div>
+        <div style="font-size:17px;font-weight:800;color:var(--navy)">${e.name}</div>
+        <div style="font-size:13px;color:var(--gray)">${e.position||""} · ${e.site||""}</div>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:13px;margin-bottom:16px">
+      <div><span style="color:var(--gray)">Допуск:</span> ${statusBadge(statusOf(e))}</div>
+      <div><span style="color:var(--gray)">До:</span> ${e.validUntil||"—"}</div>
+      <div><span style="color:var(--gray)">Телефон:</span> ${e.phone||"—"}</div>
+      <div><span style="color:var(--gray)">ТОО:</span> ${e.tooPrimary||"—"}</div>
+    </div>
+    <div style="font-size:13px;font-weight:700;color:var(--navy);margin-bottom:8px">Личное дело (${events.length})</div>
+    <div style="max-height:240px;overflow-y:auto">
+      ${events.length ? events.map(ev => `
+        <div style="padding:8px 0;border-bottom:1px solid var(--border)">
+          <div style="font-size:12px;color:var(--gray)">${(ev.date||"").slice(0,10)} · ${ev.type||""}</div>
+          <div style="font-size:13px;color:var(--navy);margin-top:2px">${ev.description||""}</div>
+        </div>`).join("") : `<div style="color:var(--gray);font-size:13px">Записей нет</div>`}
+    </div>
+    <button class="btn-ghost" style="width:100%;margin-top:16px;padding:10px" onclick="closeModal()">Закрыть</button>
+  `;
+  document.getElementById("modalOverlay").style.display = "flex";
+}
+function closeModal() { document.getElementById("modalOverlay").style.display = "none"; }
+
+
+function chkStats() {
+  const s = DATA.checklistStats;
+  if (!s || !s.ok) return null;
+  return (s.sites && s.sites[CURRENT_SITE]) || null;
+}
+
+function fuelCountsByOperator() {
+  const eqIds = new Set((DATA.equipment||[]).filter(e => (e.site||"").trim()===CURRENT_SITE).map(e=>String(e.equipmentId)));
+  const since = new Date(); since.setDate(since.getDate()-30);
+  const counts = {};
+  (DATA.fuel||[]).forEach(f => {
+    if (!eqIds.has(String(f.equipmentId))) return;
+    const d = new Date(f.date);
+    if (isNaN(d) || d < since) return;
+    counts[f.empName] = (counts[f.empName]||0)+1;
+  });
+  return counts;
+}
+
+function renderAnalytics() {
+  const st = chkStats();
+  const statsEl = document.getElementById("analyticsStats");
+  const openEl = document.getElementById("analyticsOpenDefects");
+  const ratingEl = document.getElementById("analyticsRating");
+  const sectionEl = document.getElementById("analyticsBySection");
+  const lbl = document.getElementById("ratingSiteLabel");
+  if (!statsEl) return;
+  if (lbl) lbl.textContent = CURRENT_SITE;
+
+  if (!st) {
+    statsEl.innerHTML = "";
+    [openEl, ratingEl, sectionEl].forEach(el => {
+      if (el) el.innerHTML = `<div class="empty"><div class="empty-icon">⏳</div>Загружаю данные...</div>`;
+    });
+    return;
+  }
+
+  statsEl.innerHTML = [
+    {lbl:"Осмотров за 30 дней", val:st.records, acc:"var(--gold)"},
+    {lbl:"Неисправностей", val:st.defects, acc:st.defects?"var(--red)":"var(--green)"},
+    {lbl:"С открытыми замечаниями", val:st.openDefects.length, acc:st.openDefects.length?"var(--red)":"var(--green)"},
+  ].map(s=>`<div class="stat-card" style="border-left-color:${s.acc}">
+    <div class="stat-val" style="color:${s.acc}">${s.val}</div>
+    <div class="stat-lbl">${s.lbl}</div></div>`).join("");
+
+  // Открытые неисправности
+  openEl.innerHTML = st.openDefects.length ? st.openDefects.map(o => `
+    <div style="padding:11px 12px;border:1.5px solid var(--red);background:var(--redbg);
+      border-radius:10px;margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px">
+        <span style="font-size:14px;font-weight:800;color:var(--navy)">${o.equipmentId}${o.model?` — ${o.model}`:""}</span>
+        <span style="font-size:11px;color:var(--gray)">${o.empName||"—"}</span>
+      </div>
+      ${(o.items||[]).map(d => `<div style="font-size:12px;color:var(--red);padding:2px 0">✗ ${d.itemText}</div>`).join("")}
+    </div>`).join("")
+    : `<div style="padding:10px 12px;background:var(--greenbg);border-radius:8px;font-size:13px;color:var(--green);font-weight:700">
+        ✓ Вся осмотренная техника без открытых замечаний</div>`;
+
+  // Слабые места по узлам
+  const secRows = (st.bySection||[]).filter(s=>s.defects>0).slice(0,8);
+  sectionEl.innerHTML = secRows.length ? secRows.map(s => `
+    <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px">
+      <span>${s.section}</span><span style="color:var(--red);font-weight:700">${s.defects}</span>
+    </div>`).join("") : `<div class="empty"><div class="empty-icon">✓</div>Замечаний нет</div>`;
+
+  // Рейтинг операторов — с учётом заправок (тот же принцип, что и в полной панели)
+  const fuelCounts = fuelCountsByOperator();
+  const rows = (st.byOperator||[]).map(o => {
+    const fuel = fuelCounts[o.empName] || 0;
+    const days = o.daysCount ?? o.osmotrs;
+    const score = Math.round(
+      Math.min(o.defects,40)*2.5 + Math.min(o.comments,40)*1.5 +
+      Math.min(days,25)*2 + Math.min(fuel,25)*1.2 + Math.min(o.osmotrs,30)*0.5);
+    return { ...o, fuel, score };
+  }).sort((a,b) => b.score - a.score).slice(0,10);
+
+  ratingEl.innerHTML = rows.length ? `<div style="overflow-x:auto"><table>
+    <thead><tr><th>#</th><th>Оператор</th><th>Осмотров</th><th>Неиспр.</th><th>Заправок</th><th>Балл</th></tr></thead>
+    <tbody>${rows.map((r,i) => `<tr>
+      <td>${i+1}</td><td><b>${r.empName}</b></td><td>${r.osmotrs}</td>
+      <td style="color:${r.defects?'var(--red)':'inherit'}">${r.defects}</td>
+      <td>${r.fuel}</td><td style="font-weight:800">${r.score}</td>
+    </tr>`).join("")}</tbody>
+  </table></div>` : `<div class="empty"><div class="empty-icon">📊</div>Данных пока нет</div>`;
+}
+
+function empById(id) { return (DATA.employees||[]).find(e => String(e.id)===String(id)); }
+function empByName(name) { return (DATA.employees||[]).find(e => e.name===name); }
+</script>
+</body>
+</html>
