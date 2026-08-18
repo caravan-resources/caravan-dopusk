@@ -291,14 +291,32 @@ function setSite(site) {
   loadAll(); // данные теперь серверно отфильтрованы по участку — грузим заново
 }
 
+const VAHTA_OPTIONS = [
+  { key: "Вахта-1",    label: "Вахта 1" },
+  { key: "Вахта-2",    label: "Вахта 2" },
+  { key: "unassigned", label: "Неназначенные" },
+];
 function renderVahtaSwitch() {
   const el = document.getElementById("vahtaSwitch");
   if (!el) return;
-  el.innerHTML = ["Вахта-1","Вахта-2"].map(v => `
-    <button class="${CURRENT_VAHTA===v?'btn-gold':'btn-ghost'}" onclick="setVahta('${v}')">${v.replace('Вахта-','Вахта ')}</button>
+  el.innerHTML = VAHTA_OPTIONS.map(o => `
+    <button class="${CURRENT_VAHTA===o.key?'btn-gold':'btn-ghost'}" onclick="setVahta('${o.key}')">${o.label}</button>
   `).join("");
 }
-function setVahta(v) { CURRENT_VAHTA = v; renderVahtaSwitch(); renderShift(); }
+function setVahta(v) { CURRENT_VAHTA = v; renderVahtaSwitch(); renderShift(); renderPersonnelList(); }
+
+// empId -> vahta по текущим назначениям («Смены», уже отфильтрованы сервером по участку).
+// Один человек может встречаться в нескольких строках (день/ночь на разной технике) —
+// берём последнее встреченное значение, конфликтов на практике не бывает (вахта не
+// меняется чаще, чем формируется состав смен).
+function empVahtaMap() {
+  const map = {};
+  (DATA.shiftAssignments||[]).forEach(a => {
+    const id = String(a.empId||"").trim();
+    if (id) map[id] = String(a.vahta||"").trim();
+  });
+  return map;
+}
 
 
 const SHIFT_TYPE_ORDER = ["Буровой станок","Экскаватор","Погрузчик","Самосвал","Бульдозер","Грейдер","Каток"];
@@ -486,7 +504,12 @@ function renderPersonnelList() {
   if (!el) return;
   const q = (document.getElementById("personnelSearch")?.value||"").toLowerCase().trim();
 
+  const vMap = empVahtaMap();
   let list = (DATA.employees||[]).filter(e => (e.site||"").trim() === CURRENT_SITE);
+  list = list.filter(e => {
+    const v = vMap[String(e.id).trim()];
+    return CURRENT_VAHTA === "unassigned" ? !v : v === CURRENT_VAHTA;
+  });
   if (q) list = list.filter(e => e.name.toLowerCase().includes(q));
   list.sort((a,b) => a.name.localeCompare(b.name));
 
@@ -495,7 +518,8 @@ function renderPersonnelList() {
     return;
   }
   if (!list.length) {
-    el.innerHTML = `<div class="empty"><div class="empty-icon">🔍</div>Никого не найдено</div>`;
+    const label = VAHTA_OPTIONS.find(o=>o.key===CURRENT_VAHTA)?.label || CURRENT_VAHTA;
+    el.innerHTML = `<div class="empty"><div class="empty-icon">🔍</div>Никого не найдено (${label}${q?", поиск: «"+q+"»":""})</div>`;
     return;
   }
 
