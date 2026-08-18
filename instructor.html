@@ -226,7 +226,7 @@ tr:hover td { background:#FAFBFD; }
 
   <div id="criticalErrorBanner" style="display:none;background:var(--red);color:#fff;
     padding:12px 20px;font-size:13px;font-weight:700;text-align:center">
-    ⚠ Не удалось загрузить часть данных с сервера (сотрудники или результаты тестов). То, что вы видите — может быть неполным или пустым, а не реальным состоянием базы.
+    ⚠ Не удалось загрузить технику или осмотры — самое важное на дашборде может быть неполным. Остальные разделы (сотрудники, отчёты) догрузятся отдельно, даже если этот баннер не исчезнет.
     <button onclick="loadAll()" style="margin-left:10px;background:#fff;color:var(--red);border:none;
       padding:4px 12px;border-radius:6px;font-weight:800;cursor:pointer">Повторить загрузку</button>
   </div>
@@ -1341,27 +1341,34 @@ async function loadAll() {
   // Порядок важен: грузим пачками по 3, и первыми — то, без чего вкладки
   // выглядят пустыми (сотрудники, техника, смены). Иначе, открыв «График
   // обучения» или «Вахту» до конца загрузки, человек видит нули.
+  // Порядок и «критичность» пересмотрены ради слабой связи (Ашыктас):
+  // сотрудники (300 КБ, самый тяжёлый запрос) и результаты тестов раньше были
+  // «критичными» — если не грузились даже за 3 попытки, весь дашборд
+  // подписывался тревожным баннером, хотя техника и осмотры (то, ради чего
+  // дашборд вообще существует) были в порядке. Теперь критичны только они —
+  // без техники и осмотров дашборд действительно бессмысленен, а без
+  // сотрудников/результатов он просто неполный, и это нестрашно.
+  // personnelStats — лёгкая сводка вместо полного списка (просрочки/истекающие
+  // обычно единицы, а не все 446 карточек) — кадровая часть дашборда работает
+  // от неё, пока полный список ещё грузится или не дошёл вовсе.
   const fetches = [
-    { key: "employees",         action: "list",                    cb: "cb_employees",           critical: true, heavy: true },
-    { key: "equipment",         action: "getEquipment",            cb: "cb_equipment"                             },
+    { key: "equipment",         action: "getEquipment",            cb: "cb_equipment",            critical: true },
+    { key: "checklistStats",    action: "getChecklistStats&days=30",   cb: "cb_checklist_stats",   critical: true, heavy: true },
+    { key: "personnelStats",    action: "getPersonnelStats",       cb: "cb_personnel_stats"                       },
+
+    { key: "surveys",           action: "getSurveys",              cb: "cb_surveys"                               },
+    { key: "checklistTemplates",action: "getChecklistTemplates",   cb: "cb_checklist_templates"                   },
+    { key: "requirements",      action: "getRequirements",         cb: "cb_requirements"                          },
+
+    { key: "employees",         action: "list",                    cb: "cb_employees",           heavy: true },
     { key: "shiftAssignments",  action: "getShiftAssignments",     cb: "cb_shift_assignments",    heavy: true     },
+    { key: "results",           action: "getResults",              cb: "cb_results"  },
 
     { key: "training",          action: "getTraining",             cb: "cb_training"                              },
-    { key: "results",           action: "getResults",              cb: "cb_results",              critical: true  },
     { key: "tests",             action: "getTests",                cb: "cb_tests"                                 },
-
-    // Осмотры грузим за 30 дней: полная история выросла до ~7 МБ и переставала
-    // доходить на слабой связи. Всю историю можно поднять кнопкой (loadFullHistory).
-    // Готовая аналитика с сервера вместо всех записей: размер почти не зависит
-    // от числа осмотров (137 КБ против 800 КБ и растущих). Сами записи грузим
-    // только по требованию — для конкретной машины или полной истории.
-    { key: "checklistStats",    action: "getChecklistStats&days=30",   cb: "cb_checklist_stats",   heavy: true },
-    { key: "checklistTemplates",action: "getChecklistTemplates",   cb: "cb_checklist_templates"                   },
     { key: "fuel",              action: "getFuelRecords",          cb: "cb_fuel_records"                          },
 
-    { key: "requirements",      action: "getRequirements",         cb: "cb_requirements"                          },
     { key: "personnelEvents",   action: "getPersonnelEvents",      cb: "cb_personnel_events"                      },
-    { key: "surveys",           action: "getSurveys",              cb: "cb_surveys"                               },
   ];
 
   // Грузим пачками по 3, а не все 12 разом. Браузер держит к одному домену
@@ -1394,7 +1401,9 @@ async function loadAll() {
     res.forEach((r, j) => {
       const f = part[j];
       if (r.status !== "fulfilled") return;
-      if (f.key === "checklistStats") { if (r.value && r.value.ok) DATA[f.key] = r.value; }
+      if (f.key === "checklistStats" || f.key === "personnelStats") {
+        if (r.value && r.value.ok) DATA[f.key] = r.value;
+      }
       else if (Array.isArray(r.value)) DATA[f.key] = r.value;
     });
     try { renderAll(); } catch(e) { console.error("Отрисовка:", e); }
@@ -1403,8 +1412,8 @@ async function loadAll() {
 
   settled.forEach((res, i) => {
     const f = fetches[i];
-    // Агрегат приходит объектом, остальное — массивами
-    const isObj = f.key === "checklistStats";
+    // Агрегаты (checklistStats, personnelStats) приходят объектом, остальное — массивами
+    const isObj = f.key === "checklistStats" || f.key === "personnelStats";
     const val = res.status === "fulfilled" ? res.value : null;
     const ok = res.status === "fulfilled" &&
       (isObj ? (val && val.ok) : Array.isArray(val) && (f.critical ? val.length > 0 : true));
@@ -1729,19 +1738,48 @@ function renderDashByDay() {
 }
 
 function renderDashboard() {
-  const emps = DATA.employees;
+  // Полный список сотрудников (300 КБ) грузится отдельно и может ещё не
+  // прийти — особенно на слабой связи. Пока его нет, кадровая часть
+  // дашборда работает от лёгкой серверной сводки (personnelStats):
+  // просрочки/истекающие — обычно единицы человек, а не все 446 карточек.
+  // Как только полный список догрузится, здесь же подставится подробная
+  // версия — ничего вручную обновлять не нужно, renderAll() вызывается
+  // заново после каждой пачки загрузки.
+  const emps = DATA.employees || [];
+  const employeesLoaded = emps.length > 0;
+  const ps = DATA.personnelStats;
   const instr = instruktazhAsAccessLike();
-  const results = DATA.results;
+  const results = DATA.results || [];
 
-  const expired = [...emps, ...instr].filter(e=>statusOf(e)==="expired");
-  const warning = [...emps, ...instr].filter(e=>statusOf(e)==="warning");
-  const ok      = emps.filter(e=>statusOf(e)==="ok");
+  let expired, warning, totalEmpCount, attentionRows;
+
+  if (employeesLoaded) {
+    // Полные данные на месте — считаем как раньше, включая периодические
+    // инструктажи (instr), которых в лёгкой сводке нет.
+    expired = [...emps, ...instr].filter(e=>statusOf(e)==="expired");
+    warning = [...emps, ...instr].filter(e=>statusOf(e)==="warning");
+    totalEmpCount = emps.length;
+    attentionRows = null; // построим ниже по старой логике
+  } else if (ps && ps.ok) {
+    // Данные ещё не пришли — берём то, что есть с сервера: просрочки и
+    // истекающие уже готовым списком (без периодических инструктажей —
+    // они посчитаются отдельно, когда придёт DATA.training).
+    expired = ps.attention.filter(a => a.status === "expired");
+    warning = ps.attention.filter(a => a.status === "warning");
+    totalEmpCount = ps.total;
+    attentionRows = ps.attention; // уже в нужной форме {name,position,site,validUntil,daysLeft,status}
+  } else {
+    // Ни то ни другое ещё не пришло — честно показываем "—", а не 0,
+    // чтобы не выглядело так, будто в базе никого нет.
+    expired = []; warning = []; totalEmpCount = null; attentionRows = null;
+  }
+
   const passed  = results.filter(r=>isPassed(r));
   const failed  = results.filter(r => !isPassed(r));
 
   // Статистика — кадры и допуск
   document.getElementById("statsGridPersonnel").innerHTML = [
-    {lbl:"Сотрудников в базе", val:emps.length,    acc:"var(--gold)"},
+    {lbl:"Сотрудников в базе", val: totalEmpCount===null?"—":totalEmpCount, acc:"var(--gold)"},
     {lbl:"Просроченных допусков", val:expired.length, acc:"var(--red)"},
     {lbl:"Истекает в 30 дней",  val:warning.length, acc:"var(--yellow)"},
     {lbl:"Анкет в очереди",     val:(DATA.surveys||[]).length, acc:"var(--navy2)"},
@@ -1755,18 +1793,32 @@ function renderDashboard() {
   // Требует внимания — допуски (просроченные+истекающие), несданные тесты,
   // вакансии по вахтам — всё в одном месте вместо отдельной вкладки.
   // Компактный баннер, если совсем чисто, иначе — секции по каждой категории.
-  const failedTests = (DATA.results||[]).filter(r => !isPassed(r))
-    .sort((a,b) => new Date(getField(b,"date","Дата")||0) - new Date(getField(a,"date","Дата")||0));
-  const shiftVacanciesList = (DATA.shiftAssignments||[]).filter(a => a.status === "вакансия");
+  // Тесты и вакансии показываем, только если их данные уже пришли — до этого
+  // просто не участвуют в счётчике, а не показываются как "их нет".
+  const resultsLoaded = (DATA.results||[]).length > 0;
+  const shiftsLoaded = (DATA.shiftAssignments||[]).length > 0;
+  const failedTests = resultsLoaded ? (DATA.results||[]).filter(r => !isPassed(r))
+    .sort((a,b) => new Date(getField(b,"date","Дата")||0) - new Date(getField(a,"date","Дата")||0)) : [];
+  const shiftVacanciesList = shiftsLoaded ? (DATA.shiftAssignments||[]).filter(a => a.status === "вакансия") : [];
 
   const attentionTotal = expired.length + warning.length + failedTests.length + shiftVacanciesList.length;
+  const stillLoading = !employeesLoaded && !ps;
 
-  if (attentionTotal === 0) {
+  if (stillLoading) {
+    document.getElementById("attentionList").innerHTML =
+      `<div style="display:flex;align-items:center;gap:8px;padding:10px 12px;background:var(--light);border-radius:8px;font-size:13px;color:var(--gray)">
+        ⏳ Загружаю данные о допусках...
+      </div>`;
+  } else if (attentionTotal === 0) {
     document.getElementById("attentionList").innerHTML =
       `<div style="display:flex;align-items:center;gap:8px;padding:10px 12px;background:var(--greenbg,#EAF7ED);border-radius:8px;font-size:13px;color:var(--green,#2E7D32);font-weight:700">
         ✓ Всё чисто — ни просроченных допусков, ни несданных тестов, ни вакансий на линии
       </div>`;
   } else {
+    // Единая строка и для полных объектов сотрудников (employeesLoaded),
+    // и для лёгкой сводки personnelStats — daysLeft берём готовым полем,
+    // если оно уже посчитано сервером, иначе считаем на месте.
+    const dl = e => e.daysLeft !== undefined && e.daysLeft !== null ? e.daysLeft : daysLeft(e.validUntil);
     const rowHtml = (e, color, dateLabel, dayLabel) => `
       <div style="display:flex;justify-content:space-between;align-items:center;
         padding:9px 0;border-bottom:1px solid var(--border)">
@@ -1780,10 +1832,10 @@ function renderDashboard() {
         </div>
       </div>`;
 
-    const expiredHtml = expired.sort((a,b)=>(daysLeft(a.validUntil)||0)-(daysLeft(b.validUntil)||0)).slice(0,6)
-      .map(e => rowHtml(e, "var(--red)", fmtDate(e.validUntil), `${Math.abs(daysLeft(e.validUntil)||0)} дн. назад`)).join("");
-    const warningHtml = warning.sort((a,b)=>(daysLeft(a.validUntil)||0)-(daysLeft(b.validUntil)||0)).slice(0,6)
-      .map(e => rowHtml(e, "var(--yellow)", fmtDate(e.validUntil), `${daysLeft(e.validUntil)} дн.`)).join("");
+    const expiredHtml = expired.sort((a,b)=>(dl(a)||0)-(dl(b)||0)).slice(0,6)
+      .map(e => rowHtml(e, "var(--red)", fmtDate(e.validUntil), `${Math.abs(dl(e)||0)} дн. назад`)).join("");
+    const warningHtml = warning.sort((a,b)=>(dl(a)||0)-(dl(b)||0)).slice(0,6)
+      .map(e => rowHtml(e, "var(--yellow)", fmtDate(e.validUntil), `${dl(e)} дн.`)).join("");
     const failedHtml = failedTests.slice(0,6).map(r => `
       <div style="display:flex;justify-content:space-between;align-items:center;
         padding:9px 0;border-bottom:1px solid var(--border)">
@@ -1831,7 +1883,9 @@ function renderDashboard() {
           </div>
         </div>`;
       }).join("")
-    : `<div class="empty"><div class="empty-icon">📋</div>Нет данных</div>`;
+    : (resultsLoaded
+        ? `<div class="empty"><div class="empty-icon">📋</div>Нет данных</div>`
+        : `<div style="padding:16px;text-align:center;color:var(--gray);font-size:13px">⏳ Загружаю результаты тестов...</div>`);
 
   // ══ Зона техники и осмотров ══
   // Все цифры берём из серверного агрегата: он считает по всей базе,
