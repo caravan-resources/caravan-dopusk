@@ -62,8 +62,9 @@ body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans
   border-radius:8px; cursor:pointer; font-size:13px; font-weight:700; }
 .btn-green { background:var(--greenbg); color:var(--green); border:none; padding:8px 12px;
   border-radius:8px; cursor:pointer; font-size:13px; font-weight:700; }
-input[type=text], input[type=date], select { width:100%; padding:10px 12px; border:1.5px solid var(--border);
-  border-radius:10px; font-size:14px; }
+input[type=text], input[type=date], select, textarea { width:100%; padding:10px 12px; border:1.5px solid var(--border);
+  border-radius:10px; font-size:14px; font-family:inherit; }
+textarea { resize:vertical; min-height:120px; }
 label { font-size:12px; color:var(--gray); font-weight:600; display:block; margin-bottom:4px; }
 .field { margin-bottom:12px; }
 table { width:100%; border-collapse:collapse; font-size:13px; }
@@ -98,6 +99,7 @@ td { padding:8px; border-bottom:1px solid var(--border); }
 
   <div class="navbar">
     <button id="navPlan" class="active" onclick="showScreen('plan')">📋 План</button>
+    <button id="navGroup" onclick="showScreen('group')">👥 Группа</button>
     <button id="navHistory" onclick="showScreen('history')">✅ История</button>
     <button id="navCatalog" onclick="showScreen('catalog')">📚 Каталог курсов</button>
   </div>
@@ -139,6 +141,51 @@ td { padding:8px; border-bottom:1px solid var(--border); }
       <div class="panel">
         <div class="panel-title">Запланировано — <span id="planSiteLabel"></span> (<span id="planCount">0</span>)</div>
         <div id="planList"></div>
+      </div>
+    </div>
+
+    <!-- ══ ГРУППА (зачисление по ростеру после очного обучения) ══ -->
+    <div id="screenGroup" class="screen">
+      <div class="panel">
+        <div class="panel-title">👥 Зачислить группу после очного обучения</div>
+        <div style="font-size:12px;color:var(--gray);margin-bottom:14px">
+          Для случая «прошло обучение, есть готовый список — кого записать». Не требует
+          предварительного плана. Одна дата и один курс на всю группу.
+        </div>
+        <div class="field">
+          <label>Курс</label>
+          <select id="groupCourseSelect"><option value="">— выберите курс —</option></select>
+        </div>
+        <div class="field">
+          <label>Дата прохождения (одна на всю группу)</label>
+          <input type="date" id="groupDate">
+        </div>
+        <div class="field">
+          <label>Действует до (необязательно — для периодических инструктажей)</label>
+          <input type="date" id="groupValidUntil">
+        </div>
+        <div class="field">
+          <label>Список сотрудников — по одному ФИО на строку (можно вставить из Excel/списка)</label>
+          <textarea id="groupRoster" rows="8" placeholder="Иванов Иван Иванович
+Петров Пётр Петрович
+..."></textarea>
+          <div style="margin-top:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <label class="btn-ghost" style="cursor:pointer;display:inline-block" for="groupRosterPhoto">📷 Загрузить фото ростера</label>
+            <input type="file" id="groupRosterPhoto" accept="image/*" capture="environment" style="display:none" onchange="uploadRosterPhoto(this)">
+            <span id="rosterUploadStatus" style="font-size:12px;color:var(--gray)"></span>
+          </div>
+        </div>
+        <button class="btn-gold" onclick="matchGroupRoster()">Сопоставить со списком сотрудников</button>
+      </div>
+      <div class="panel" id="groupMatchPanel" style="display:none">
+        <div class="panel-title">Проверьте сопоставление перед зачислением</div>
+        <div style="font-size:12px;color:var(--gray);margin-bottom:10px">
+          Зелёное — нашли точно. Жёлтое — нашли похоже, проверьте, что это тот человек.
+          Красное — не нашли, впишите вручную или оставьте пустым, если этого человека не нужно зачислять.
+        </div>
+        <div id="groupMatchList"></div>
+        <datalist id="groupEmpList"></datalist>
+        <button class="btn-gold" style="margin-top:14px" onclick="submitGroupEnroll()">Зачислить всех</button>
       </div>
     </div>
 
@@ -204,7 +251,7 @@ function logout() {
 }
 
 function showScreen(name) {
-  ["plan","history","catalog"].forEach(s => {
+  ["plan","history","catalog","group"].forEach(s => {
     document.getElementById("screen"+s.charAt(0).toUpperCase()+s.slice(1)).classList.remove("active");
     document.getElementById("nav"+s.charAt(0).toUpperCase()+s.slice(1)).classList.remove("active");
   });
@@ -349,12 +396,209 @@ function empIdFromInput(text) {
 }
 
 function renderCourseSelect() {
-  const el = document.getElementById("planCourseSelect");
+  ["planCourseSelect", "groupCourseSelect"].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const cur = el.value;
+    el.innerHTML = `<option value="">— выберите курс —</option>` +
+      (DATA.courseCatalog||[]).map(c => `<option value="${c.replace(/"/g,'&quot;')}">${c}</option>`).join("");
+    if ((DATA.courseCatalog||[]).includes(cur)) el.value = cur;
+  });
+}
+
+// ══════════════════════════════════════════════════════════
+// ГРУППА — зачисление по вставленному списку ФИО, без плана.
+// Сопоставление нестрогое (опечатки, разный порядок слов, лишние пробелы),
+// поэтому каждую строку человек проверяет и правит перед отправкой —
+// не пишем в базу того, в ком не уверены молча.
+// ══════════════════════════════════════════════════════════
+let GROUP_MATCH_ROWS = [];
+
+function normalizeName(s) {
+  return String(s||"").trim().toLowerCase().replace(/\s+/g," ").replace(/[.,]/g,"");
+}
+function levenshtein(a, b) {
+  const m = a.length, n = b.length;
+  if (m === 0) return n;
+  if (n === 0) return m;
+  let prev = Array(n+1).fill(0).map((_,i)=>i);
+  for (let i = 1; i <= m; i++) {
+    const cur = [i];
+    for (let j = 1; j <= n; j++) {
+      cur[j] = a[i-1] === b[j-1] ? prev[j-1] : 1 + Math.min(prev[j-1], prev[j], cur[j-1]);
+    }
+    prev = cur;
+  }
+  return prev[n];
+}
+function findBestMatch(rawLine) {
+  const norm = normalizeName(rawLine);
+  if (!norm) return { quality: "none" };
+  const emps = DATA.employees||[];
+  const exact = emps.find(e => normalizeName(e.name) === norm);
+  if (exact) return { emp: exact, quality: "exact" };
+  const words = norm.split(" ").filter(Boolean);
+  const partial = emps.filter(e => {
+    const empNorm = normalizeName(e.name);
+    return words.every(w => empNorm.includes(w));
+  });
+  if (partial.length === 1) return { emp: partial[0], quality: "partial" };
+  if (partial.length > 1) return { quality: "ambiguous" };
+
+  // Ни точного, ни "все слова содержатся" — пробуем опечатку ВНУТРИ слова
+  // (частый случай в рукописных ростерах: "Айтбасв" вместо "Айтбаев").
+  // Порог — не больше 20% длины строки и не больше 3 символов абсолютно,
+  // и обязательно единственный явный лидер (иначе рискуем перепутать людей).
+  const maxDist = Math.min(3, Math.ceil(norm.length * 0.2));
+  let best = null, bestDist = Infinity, secondBestDist = Infinity;
+  emps.forEach(e => {
+    const d = levenshtein(norm, normalizeName(e.name));
+    if (d < bestDist) { secondBestDist = bestDist; bestDist = d; best = e; }
+    else if (d < secondBestDist) { secondBestDist = d; }
+  });
+  if (best && bestDist <= maxDist && bestDist < secondBestDist) {
+    return { emp: best, quality: "fuzzy" };
+  }
+  return { quality: "none" };
+}
+
+// Сжимаем на клиенте ДО отправки — важно на слабой связи: фото с телефона
+// может быть 5-10 МБ, а модель всё равно даунскейлит длинную сторону до
+// ~1568px, так что смысла гнать оригинал нет. JPEG 85% держит текст читаемым.
+function resizeImageForUpload(file, maxDim) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        let w = img.width, h = img.height;
+        if (w > maxDim || h > maxDim) {
+          if (w > h) { h = Math.round(h * maxDim / w); w = maxDim; }
+          else { w = Math.round(w * maxDim / h); h = maxDim; }
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = w; canvas.height = h;
+        canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL("image/jpeg", 0.85).split(",")[1]);
+      };
+      img.onerror = () => reject(new Error("Не удалось прочитать изображение"));
+      img.src = e.target.result;
+    };
+    reader.onerror = () => reject(new Error("Не удалось прочитать файл"));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function uploadRosterPhoto(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const statusEl = document.getElementById("rosterUploadStatus");
+  if (statusEl) statusEl.textContent = "⏳ Распознаю фото...";
+  try {
+    const base64 = await resizeImageForUpload(file, 1400);
+    const res = await fetch(CFG.SHEET_URL, {
+      method: "POST",
+      body: JSON.stringify({ action: "recognizeRoster", image: base64, mimeType: "image/jpeg" }),
+    });
+    const val = await res.json();
+    if (!val.ok) {
+      if (statusEl) statusEl.textContent = "";
+      alert("Не удалось распознать: " + (val.error||""));
+      return;
+    }
+    const textarea = document.getElementById("groupRoster");
+    const existing = textarea.value.trim();
+    textarea.value = existing ? existing + "\n" + val.text : val.text;
+    if (statusEl) statusEl.textContent = "✓ Распознано — проверьте список выше перед сопоставлением";
+  } catch (e) {
+    if (statusEl) statusEl.textContent = "";
+    alert("Ошибка: " + e.message);
+  } finally {
+    input.value = ""; // сброс, чтобы можно было выбрать тот же файл повторно
+  }
+}
+
+function matchGroupRoster() {
+  const course = document.getElementById("groupCourseSelect").value;
+  if (!course) { alert("Выберите курс"); return; }
+  const raw = document.getElementById("groupRoster").value;
+  const lines = raw.split("\n").map(l=>l.trim()).filter(Boolean);
+  if (!lines.length) { alert("Вставьте список сотрудников"); return; }
+
+  GROUP_MATCH_ROWS = lines.map(line => ({ original: line, match: findBestMatch(line) }));
+  renderGroupMatchList();
+  document.getElementById("groupMatchPanel").style.display = "block";
+}
+
+function renderGroupMatchList() {
+  const el = document.getElementById("groupMatchList");
   if (!el) return;
-  const cur = el.value;
-  el.innerHTML = `<option value="">— выберите курс —</option>` +
-    (DATA.courseCatalog||[]).map(c => `<option value="${c.replace(/"/g,'&quot;')}">${c}</option>`).join("");
-  if ((DATA.courseCatalog||[]).includes(cur)) el.value = cur;
+  el.innerHTML = GROUP_MATCH_ROWS.map((row, i) => {
+    const m = row.match;
+    let badge, prefill = "";
+    if (m.quality === "exact") {
+      badge = `<span class="badge" style="background:var(--greenbg);color:var(--green)">✓ найден</span>`;
+      prefill = `${m.emp.name} [${m.emp.id}]`;
+    } else if (m.quality === "partial") {
+      badge = `<span class="badge" style="background:var(--yellowbg);color:var(--yellow)">⚠ похоже, проверьте</span>`;
+      prefill = `${m.emp.name} [${m.emp.id}]`;
+    } else if (m.quality === "fuzzy") {
+      badge = `<span class="badge" style="background:var(--yellowbg);color:var(--yellow)">⚠ похоже на опечатку — проверьте</span>`;
+      prefill = `${m.emp.name} [${m.emp.id}]`;
+    } else if (m.quality === "ambiguous") {
+      badge = `<span class="badge" style="background:var(--yellowbg);color:var(--yellow)">⚠ несколько тёзок</span>`;
+    } else {
+      badge = `<span class="badge" style="background:var(--redbg);color:var(--red)">✗ не найден</span>`;
+    }
+    return `<div style="display:flex;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);flex-wrap:wrap">
+      <div style="flex:0 0 200px;font-size:13px;color:var(--gray)">${row.original}</div>
+      <input type="text" class="group-match-input" list="groupEmpList" value="${prefill.replace(/"/g,'&quot;')}" placeholder="Впишите вручную..." style="flex:1;min-width:200px">
+      ${badge}
+    </div>`;
+  }).join("");
+  const dl = document.getElementById("groupEmpList");
+  dl.innerHTML = (DATA.employees||[]).slice().sort((a,b)=>a.name.localeCompare(b.name))
+    .map(e => `<option value="${e.name.replace(/"/g,'&quot;')} [${e.id}]">`).join("");
+}
+
+async function submitGroupEnroll() {
+  const course = document.getElementById("groupCourseSelect").value;
+  const dateIso = document.getElementById("groupDate").value;
+  const validIso = document.getElementById("groupValidUntil").value;
+  const dateRu = dateIso ? isoToRu(dateIso) : "";
+  const validRu = validIso ? isoToRu(validIso) : "";
+
+  const inputs = document.querySelectorAll(".group-match-input");
+  const records = [];
+  const unmatchedNames = [];
+  inputs.forEach((inp, i) => {
+    const empId = empIdFromInput(inp.value);
+    const emp = empById(empId);
+    if (emp) records.push({ empId: emp.id, empName: emp.name, course, date: dateRu, validUntil: validRu });
+    else unmatchedNames.push(GROUP_MATCH_ROWS[i] ? GROUP_MATCH_ROWS[i].original : "?");
+  });
+
+  if (!records.length) { alert("Нет ни одного сопоставленного сотрудника"); return; }
+  if (unmatchedNames.length) {
+    const ok = confirm(
+      `${unmatchedNames.length} человек не сопоставлены и НЕ будут зачислены:\n${unmatchedNames.join(", ")}\n\n` +
+      `Продолжить с остальными (${records.length})?`
+    );
+    if (!ok) return;
+  }
+
+  try {
+    const res = await fetch(CFG.SHEET_URL, { method:"POST", body: JSON.stringify({ action:"bulkAddTrainingFacts", records }) });
+    const val = await res.json();
+    if (!val.ok) { alert("Не удалось зачислить: " + (val.error||"")); return; }
+    alert(`Готово: зачислено ${val.added} чел. на курс «${course}».`);
+    document.getElementById("groupRoster").value = "";
+    document.getElementById("groupMatchPanel").style.display = "none";
+    GROUP_MATCH_ROWS = [];
+    await loadAll(["trainingHistory"]);
+  } catch (e) {
+    alert("Ошибка сети: " + e.message);
+  }
 }
 
 // ══════════════════════════════════════════════════════════
