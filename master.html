@@ -99,9 +99,9 @@ td { padding:8px; border-bottom:1px solid var(--border); }
   <div class="wrap">
     <div id="loadErrorBanner" style="display:none;background:var(--red);color:#fff;
       padding:12px 16px;border-radius:8px;font-size:13px;font-weight:700;margin-bottom:14px">
-      ⚠ Часть данных не загрузилась. То, что показано — может быть неполным.
-      <button onclick="loadAll()" style="margin-left:10px;background:#fff;color:var(--red);
-        border:none;padding:4px 12px;border-radius:6px;font-weight:800;cursor:pointer">Повторить</button>
+      <span id="loadErrorText">⚠ Часть данных не загрузилась. То, что показано — может быть неполным.</span>
+      <button onclick="retryFailed()" style="margin-left:10px;background:#fff;color:var(--red);
+        border:none;padding:4px 12px;border-radius:6px;font-weight:800;cursor:pointer">Повторить недогруженное</button>
     </div>
 
     <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center;flex-wrap:wrap">
@@ -219,54 +219,72 @@ async function fetchWithRetry(url, timeoutMs, attempts) {
   throw lastErr;
 }
 
-async function loadAll() {
+// Человекочитаемые названия — для баннера ошибки, чтобы было видно, что
+// именно недогрузилось на слабой связи, а не просто "часть данных".
+const FETCH_DEFS = [
+  { key: "equipment",        label: "Техника",             action: "getEquipment",        siteScoped: true,  heavy: false },
+  { key: "checklistStats",   label: "Статистика осмотров", action: "getChecklistStats&days=30", siteScoped: false, heavy: true },
+  { key: "employees",        label: "Сотрудники",          action: "list",                siteScoped: true,  heavy: true },
+  { key: "shiftAssignments", label: "Смены",                action: "getShiftAssignments", siteScoped: true,  heavy: true },
+  { key: "fuel",             label: "Заправки",             action: "getFuelRecords",      siteScoped: true,  heavy: true },
+  { key: "personnelEvents",  label: "Личные дела",          action: "getPersonnelEvents",  siteScoped: false, heavy: false },
+];
+let LAST_FAILED_KEYS = [];
+
+// onlyKeys: если указан — качаем и перезаписываем только эти ключи (для
+// кнопки "Повторить недогруженное"), а уже успешно полученные данные не
+// трогаем вовсе — на слабой связи заново тянуть то, что уже пришло,
+// означает жечь и без того скудный трафик впустую.
+async function loadAll(onlyKeys) {
   const banner = document.getElementById("loadErrorBanner");
-  if (banner) banner.style.display = "none";
   const statusEl = document.getElementById("loadStatus");
+  const fetches = onlyKeys ? FETCH_DEFS.filter(f => onlyKeys.includes(f.key)) : FETCH_DEFS;
+  if (banner) banner.style.display = "none";
 
   // Пачками по 2-3, последовательно, а не всё разом — тот же урок с
   // Ашыктаса: параллельные запросы душат друг друга на слабой связи.
   // siteScoped: сервер теперь фильтрует по участку сам (&site=...), поэтому
   // качаем только данные текущего участка, а не всю базу разом — это и есть
   // деление базы по участкам вместо старой клиентской фильтрации.
-  const fetches = [
-    { key: "equipment",        action: "getEquipment",      siteScoped: true },
-    { key: "checklistStats",   action: "getChecklistStats&days=30" },
-    { key: "employees",        action: "list",              siteScoped: true },
-    { key: "shiftAssignments", action: "getShiftAssignments", siteScoped: true },
-    { key: "fuel",             action: "getFuelRecords",    siteScoped: true },
-    { key: "personnelEvents",  action: "getPersonnelEvents" },
-  ];
-
-  let failed = false;
+  const failedKeys = [];
   for (let i = 0; i < fetches.length; i++) {
     const f = fetches[i];
-    if (statusEl) statusEl.textContent = `загрузка... ${i+1} из ${fetches.length}`;
+    if (statusEl) statusEl.textContent = `загрузка... ${i+1} из ${fetches.length}${onlyKeys ? " (повтор недогруженного)" : ""}`;
     try {
-      const heavy = f.key === "employees" || f.key === "checklistStats" || f.key === "shiftAssignments" || f.key === "fuel";
       const url = f.siteScoped
         ? `${CFG.SHEET_URL}?action=${f.action}&site=${encodeURIComponent(CURRENT_SITE)}`
         : `${CFG.SHEET_URL}?action=${f.action}`;
-      const val = await fetchWithRetry(url, heavy ? 90000 : 40000, 3);
+      const val = await fetchWithRetry(url, f.heavy ? 90000 : 40000, 3);
       if (f.key === "checklistStats") {
-        if (val && val.ok) DATA[f.key] = val; else { failed = true; }
+        if (val && val.ok) DATA[f.key] = val; else failedKeys.push(f.key);
       } else if (Array.isArray(val)) {
         DATA[f.key] = val;
       } else {
-        failed = true;
+        failedKeys.push(f.key);
       }
     } catch (e) {
-      failed = true;
+      failedKeys.push(f.key);
       console.error(f.key + ":", e);
     }
     // Наполняем экран по мере поступления, не дожидаясь самого медленного запроса
     try { renderAll(); } catch(e) { console.error("Отрисовка:", e); }
   }
 
-  if (statusEl) statusEl.textContent = failed ? "часть данных не загрузилась" : "данные загружены";
-  if (banner) banner.style.display = failed ? "block" : "none";
+  LAST_FAILED_KEYS = failedKeys;
+  if (statusEl) statusEl.textContent = failedKeys.length ? "часть данных не загрузилась" : "данные загружены";
+  if (banner) {
+    if (failedKeys.length) {
+      const labels = FETCH_DEFS.filter(f => failedKeys.includes(f.key)).map(f => f.label).join(", ");
+      const textEl = document.getElementById("loadErrorText");
+      if (textEl) textEl.textContent = `⚠ Не загрузилось: ${labels}. То, что показано — может быть неполным.`;
+      banner.style.display = "block";
+    } else {
+      banner.style.display = "none";
+    }
+  }
   renderAll();
 }
+function retryFailed() { loadAll(LAST_FAILED_KEYS.length ? LAST_FAILED_KEYS : undefined); }
 
 function renderAll() {
   renderSiteSwitch();
