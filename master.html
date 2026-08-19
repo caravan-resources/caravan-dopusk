@@ -118,6 +118,10 @@ td { padding:8px; border-bottom:1px solid var(--border); }
 
     <!-- ══ ТОПЛИВО ══ -->
     <div id="screenFuel" class="screen">
+      <div style="display:flex;gap:8px;margin-bottom:14px;align-items:center;flex-wrap:wrap">
+        <span style="font-size:13px;color:var(--gray);font-weight:600">Период:</span>
+        <div id="fuelPeriodSwitch" style="display:flex;gap:8px"></div>
+      </div>
       <div class="stats-grid" id="fuelStats"></div>
       <div class="panel">
         <div class="panel-title">⛽ Заправки — <span id="fuelSiteLabel"></span></div>
@@ -195,6 +199,10 @@ function showScreen(name) {
   });
   document.getElementById("screen"+name.charAt(0).toUpperCase()+name.slice(1)).classList.add("active");
   document.getElementById("nav"+name.charAt(0).toUpperCase()+name.slice(1)).classList.add("active");
+  // Рейтинг операторов на "Аналитике" считается по заправкам за 30 дней —
+  // если сейчас загружено меньше (по умолчанию только сутки), догружаем
+  // именно под это, не трогая выбор периода на экране "Топливо".
+  if (name === "analytics") ensureFuelCoverageForAnalytics();
 }
 
 // Запрос с таймаутом и повтором — тот же проверенный способ, что и в
@@ -226,10 +234,17 @@ const FETCH_DEFS = [
   { key: "checklistStats",   label: "Статистика осмотров", action: "getChecklistStats&days=30", siteScoped: false, heavy: true },
   { key: "employees",        label: "Сотрудники",          action: "list",                siteScoped: true,  heavy: true },
   { key: "shiftAssignments", label: "Смены",                action: "getShiftAssignments", siteScoped: true,  heavy: true },
-  { key: "fuel",             label: "Заправки",             action: "getFuelRecords",      siteScoped: true,  heavy: true },
+  // extraQuery: заправки при первой загрузке качаем только за сутки — это
+  // и есть "не грузить всё, догружать по требованию". Неделя/весь период
+  // подтягиваются отдельно, точечно, когда человек реально их запросит
+  // (см. setFuelPeriod) — без этого страница тянула бы все ~800 записей
+  // за весь период каждый раз, даже если нужен только последний день.
+  { key: "fuel",             label: "Заправки",             action: "getFuelRecords",      siteScoped: true,  heavy: true, extraQuery: () => `&days=${FUEL_LOADED_DAYS}` },
   { key: "personnelEvents",  label: "Личные дела",          action: "getPersonnelEvents",  siteScoped: false, heavy: false },
 ];
 let LAST_FAILED_KEYS = [];
+let FUEL_PERIOD = 1;       // что сейчас выбрано в переключателе: 1 (сутки) | 7 (неделя) | 0 (весь период)
+let FUEL_LOADED_DAYS = 1;  // сколько дней реально лежит в DATA.fuel прямо сейчас (0 = весь период загружен)
 
 // onlyKeys: если указан — качаем и перезаписываем только эти ключи (для
 // кнопки "Повторить недогруженное"), а уже успешно полученные данные не
@@ -251,14 +266,15 @@ async function loadAll(onlyKeys) {
     const f = fetches[i];
     if (statusEl) statusEl.textContent = `загрузка... ${i+1} из ${fetches.length}${onlyKeys ? " (повтор недогруженного)" : ""}`;
     try {
-      const url = f.siteScoped
+      const url = (f.siteScoped
         ? `${CFG.SHEET_URL}?action=${f.action}&site=${encodeURIComponent(CURRENT_SITE)}`
-        : `${CFG.SHEET_URL}?action=${f.action}`;
+        : `${CFG.SHEET_URL}?action=${f.action}`) + (f.extraQuery ? f.extraQuery() : "");
       const val = await fetchWithRetry(url, f.heavy ? 90000 : 40000, 3);
       if (f.key === "checklistStats") {
         if (val && val.ok) DATA[f.key] = val; else failedKeys.push(f.key);
       } else if (Array.isArray(val)) {
         DATA[f.key] = val;
+        if (f.key === "fuel") FUEL_LOADED_DAYS = FUEL_PERIOD; // зафиксировали, что реально загрузили
       } else {
         failedKeys.push(f.key);
       }
@@ -283,13 +299,44 @@ async function loadAll(onlyKeys) {
     }
   }
   renderAll();
+  // Только теперь, когда основной цикл точно завершён — иначе эта догрузка
+  // может стартовать раньше, чем loadAll дойдёт до заправок сама, и более
+  // свежий "сутки"-запрос из общего цикла затрёт уже догруженные 30 дней.
+  if (!onlyKeys || onlyKeys.includes("fuel")) ensureFuelCoverageForAnalytics();
 }
 function retryFailed() { loadAll(LAST_FAILED_KEYS.length ? LAST_FAILED_KEYS : undefined); }
+
+let FUEL_COVERAGE_LOADING = false;
+// Рейтинг операторов по заправкам (fuelCountsByOperator) исторически считался
+// за 30 дней. Экран "Топливо" теперь по умолчанию грузит только сутки —
+// значит рейтингу нужно отдельно обеспечить достаточный охват, не завязываясь
+// на то, что выбрал человек на экране "Топливо".
+async function ensureFuelCoverageForAnalytics() {
+  const needed = 30;
+  const haveEnough = FUEL_LOADED_DAYS === 0 || FUEL_LOADED_DAYS >= needed;
+  if (haveEnough || FUEL_COVERAGE_LOADING) return;
+  FUEL_COVERAGE_LOADING = true;
+  try {
+    const url = `${CFG.SHEET_URL}?action=getFuelRecords&site=${encodeURIComponent(CURRENT_SITE)}&days=${needed}`;
+    const val = await fetchWithRetry(url, 90000, 3);
+    if (Array.isArray(val)) {
+      DATA.fuel = val;
+      FUEL_LOADED_DAYS = needed;
+      renderFuel();
+      renderAnalytics();
+    }
+  } catch (e) {
+    console.error("охват заправок для аналитики:", e);
+  } finally {
+    FUEL_COVERAGE_LOADING = false;
+  }
+}
 
 function renderAll() {
   renderSiteSwitch();
   renderVahtaSwitch();
   renderShift();
+  renderFuelPeriodSwitch();
   renderFuel();
   renderPersonnelList();
   renderAnalytics();
@@ -305,6 +352,7 @@ function renderSiteSwitch() {
 function setSite(site) {
   if (site === CURRENT_SITE) return;
   CURRENT_SITE = site;
+  FUEL_PERIOD = 1; FUEL_LOADED_DAYS = 1; // новый участок — снова качаем заправки по минимуму
   renderSiteSwitch(); // подсветить активную кнопку сразу, не дожидаясь сети
   loadAll(); // данные теперь серверно отфильтрованы по участку — грузим заново
 }
@@ -443,29 +491,83 @@ function renderShift() {
 }
 
 
-// ══ ТОПЛИВО — заправки выбранного участка за последние 30 дней ══
+const FUEL_PERIOD_OPTIONS = [
+  { d: 1, label: "За день" },
+  { d: 7, label: "За неделю" },
+  { d: 0, label: "Весь период" },
+];
+function periodNoun(days) {
+  return days === 0 ? "весь период" : days === 1 ? "сутки" : "неделю";
+}
+function renderFuelPeriodSwitch() {
+  const el = document.getElementById("fuelPeriodSwitch");
+  if (!el) return;
+  el.innerHTML = FUEL_PERIOD_OPTIONS.map(o => `
+    <button class="${FUEL_PERIOD===o.d?'btn-gold':'btn-ghost'}" onclick="setFuelPeriod(${o.d})">${o.label}</button>
+  `).join("");
+}
+
+// Переключение периода. Если в DATA.fuel уже достаточно данных (например,
+// весь период уже загружен, или локально лежит неделя, а просят день) —
+// просто перерисовываем без сети. Если запрошенный период шире того, что
+// реально загружено — точечно дозапрашиваем именно заправки, не трогая
+// остальные данные (тот же принцип, что и "Повторить недогруженное").
+async function setFuelPeriod(days) {
+  if (FUEL_PERIOD === days) return;
+  FUEL_PERIOD = days;
+  renderFuelPeriodSwitch();
+
+  const haveEnough = FUEL_LOADED_DAYS === 0 || (days !== 0 && days <= FUEL_LOADED_DAYS);
+  if (!haveEnough) {
+    const listEl = document.getElementById("fuelList");
+    if (listEl) listEl.innerHTML = `<div class="empty"><div class="empty-icon">⏳</div>Загружаю за ${periodNoun(days)}...</div>`;
+    try {
+      const url = `${CFG.SHEET_URL}?action=getFuelRecords&site=${encodeURIComponent(CURRENT_SITE)}&days=${days}`;
+      const val = await fetchWithRetry(url, 90000, 3);
+      if (Array.isArray(val)) {
+        DATA.fuel = val;
+        FUEL_LOADED_DAYS = days;
+      } else {
+        if (listEl) listEl.innerHTML = `<div class="empty"><div class="empty-icon">⚠</div>Не удалось загрузить за ${periodNoun(days)} — попробуйте ещё раз</div>`;
+        return;
+      }
+    } catch (e) {
+      if (listEl) listEl.innerHTML = `<div class="empty"><div class="empty-icon">⚠</div>Ошибка сети — попробуйте ещё раз</div>`;
+      console.error("fuel period:", e);
+      return;
+    }
+  }
+  renderFuel();
+}
+
+// ══ ТОПЛИВО — заправки выбранного участка за выбранный период ══
 function renderFuel() {
   const statsEl = document.getElementById("fuelStats");
   const listEl = document.getElementById("fuelList");
   const lbl = document.getElementById("fuelSiteLabel");
   if (!statsEl || !listEl) return;
-  if (lbl) lbl.textContent = CURRENT_SITE;
+  if (lbl) lbl.textContent = `${CURRENT_SITE} · ${periodNoun(FUEL_PERIOD)}`;
 
   const eqIds = new Set((DATA.equipment||[]).filter(e => (e.site||"").trim()===CURRENT_SITE).map(e=>String(e.equipmentId)));
   const eqById = {};
   (DATA.equipment||[]).forEach(e => eqById[String(e.equipmentId)] = e);
 
-  const since = new Date(); since.setDate(since.getDate()-30);
-  const records = (DATA.fuel||[]).filter(f => eqIds.has(String(f.equipmentId)))
-    .filter(f => { const d = new Date(f.date); return !isNaN(d) && d >= since; })
-    .sort((a,b) => new Date(b.date) - new Date(a.date));
+  // DATA.fuel уже содержит минимум FUEL_LOADED_DAYS дней (сервер сам
+  // отфильтровал), но если реально загружено больше, чем сейчас выбрано
+  // для показа — обрежем на клиенте, без лишнего запроса.
+  let records = (DATA.fuel||[]).filter(f => eqIds.has(String(f.equipmentId)));
+  if (FUEL_PERIOD > 0) {
+    const since = new Date(); since.setDate(since.getDate()-FUEL_PERIOD); since.setHours(0,0,0,0);
+    records = records.filter(f => { const d = new Date(f.date); return !isNaN(d) && d >= since; });
+  }
+  records = records.sort((a,b) => new Date(b.date) - new Date(a.date));
 
   const totalLiters = records.reduce((s,f)=>s+(Number(f.amountLiters)||0),0);
   const byEq = {};
   records.forEach(f => { byEq[f.equipmentId] = (byEq[f.equipmentId]||0)+(Number(f.amountLiters)||0); });
 
   statsEl.innerHTML = [
-    {lbl:"Заправок за 30 дней", val:records.length, acc:"var(--gold)"},
+    {lbl:`Заправок за ${periodNoun(FUEL_PERIOD)}`, val:records.length, acc:"var(--gold)"},
     {lbl:"Литров всего", val:Math.round(totalLiters).toLocaleString("ru-RU"), acc:"var(--navy2)"},
     {lbl:"Техники заправлялось", val:Object.keys(byEq).length, acc:"var(--navy)"},
   ].map(s=>`<div class="stat-card" style="border-left-color:${s.acc}">
@@ -474,7 +576,7 @@ function renderFuel() {
 
   if (!records.length) {
     listEl.innerHTML = DATA.equipment.length
-      ? `<div class="empty"><div class="empty-icon">⛽</div>Заправок за 30 дней нет</div>`
+      ? `<div class="empty"><div class="empty-icon">⛽</div>Заправок за ${periodNoun(FUEL_PERIOD)} нет</div>`
       : `<div class="empty"><div class="empty-icon">⏳</div>Загружаю данные...</div>`;
     return;
   }
