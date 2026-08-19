@@ -234,27 +234,29 @@ async function fetchWithRetry(url, timeoutMs, attempts) {
   throw lastErr;
 }
 
-async function loadAll() {
+async function loadAll(onlyKeys) {
   const banner = document.getElementById("loadErrorBanner");
   if (banner) banner.style.display = "none";
   const statusEl = document.getElementById("loadStatus");
+  renderSiteSwitch(); // сразу, не дожидаясь первого сетевого ответа — иначе на слабой связи участок долго не виден
 
   // employees и trainingPlan — сервер фильтрует по участку (&site=...).
   // trainingHistory (getTraining) и courseCatalog — общие списки без
   // серверного фильтра: история фильтруется по участку на клиенте через
   // join с employees (там своего site нет, как и у заправок), а каталог
   // курсов общий для всей компании независимо от участка.
-  const fetches = [
+  const fetchDefs = [
     { key: "employees",       action: "list",             siteScoped: true },
     { key: "trainingPlan",    action: "getTrainingPlan",  siteScoped: true },
     { key: "trainingHistory", action: "getTraining" },
     { key: "courseCatalog",   action: "getCourseCatalog" },
   ];
+  const fetches = onlyKeys ? fetchDefs.filter(f => onlyKeys.includes(f.key)) : fetchDefs;
 
   let failed = false;
   for (let i = 0; i < fetches.length; i++) {
     const f = fetches[i];
-    if (statusEl) statusEl.textContent = `загрузка... ${i+1} из ${fetches.length}`;
+    if (statusEl) statusEl.textContent = `загрузка... ${i+1} из ${fetches.length}${onlyKeys ? " (обновляю)" : ""}`;
     try {
       const url = f.siteScoped
         ? `${CFG.SHEET_URL}?action=${f.action}&site=${encodeURIComponent(CURRENT_SITE)}`
@@ -383,7 +385,7 @@ async function submitPlan() {
     document.getElementById("planEmpInput").value = "";
     document.getElementById("planCourseSelect").value = "";
     document.getElementById("planDueDate").value = "";
-    await loadAll();
+    await loadAll(["trainingPlan"]);
   } catch (e) {
     alert("Ошибка сети: " + e.message);
   }
@@ -441,7 +443,7 @@ async function cancelPlan(row) {
     const res = await fetch(CFG.SHEET_URL, { method:"POST", body: JSON.stringify({ action:"deleteTrainingPlan", row }) });
     const val = await res.json();
     if (!val.ok) { alert("Не удалось отменить: " + (val.error||"")); return; }
-    await loadAll();
+    await loadAll(["trainingPlan"]);
   } catch (e) { alert("Ошибка сети: " + e.message); }
 }
 
@@ -480,7 +482,7 @@ async function submitComplete(row, empId, empName, course) {
     const val = await res.json();
     if (!val.ok) { alert("Не удалось сохранить: " + (val.error||"")); return; }
     closeModal();
-    await loadAll();
+    await loadAll(["trainingPlan", "trainingHistory"]);
   } catch (e) { alert("Ошибка сети: " + e.message); }
 }
 function closeModal() { document.getElementById("modalOverlay").style.display = "none"; }
@@ -536,7 +538,7 @@ async function submitCatalogAdd() {
     const val = await res.json();
     if (!val.ok) { alert("Не удалось добавить: " + (val.error||"")); return; }
     input.value = "";
-    await loadAll();
+    await loadAll(["courseCatalog"]);
   } catch (e) { alert("Ошибка сети: " + e.message); }
 }
 async function deleteCatalogItem(name) {
@@ -545,7 +547,7 @@ async function deleteCatalogItem(name) {
     const res = await fetch(CFG.SHEET_URL, { method:"POST", body: JSON.stringify({ action:"deleteCourseCatalog", course: name }) });
     const val = await res.json();
     if (!val.ok) { alert("Не удалось удалить: " + (val.error||"")); return; }
-    await loadAll();
+    await loadAll(["courseCatalog"]);
   } catch (e) { alert("Ошибка сети: " + e.message); }
 }
 function renderCatalogList() {
