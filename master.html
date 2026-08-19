@@ -58,8 +58,14 @@ body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans
   border-radius:8px; cursor:pointer; font-size:13px; }
 .btn-gold { background:var(--gold); color:var(--navy); border:none; padding:8px 12px;
   border-radius:8px; cursor:pointer; font-size:13px; font-weight:700; }
+.btn-red { background:var(--redbg); color:var(--red); border:none; padding:8px 12px;
+  border-radius:8px; cursor:pointer; font-size:13px; font-weight:700; }
 input[type=text] { width:100%; padding:10px 12px; border:1.5px solid var(--border); border-radius:10px;
   font-size:14px; }
+.field { margin-bottom:14px; }
+.field label { font-size:12px; color:var(--gray); font-weight:600; display:block; margin-bottom:4px; }
+.edit-slot-icon { opacity:.55; }
+.edit-slot-icon:hover { opacity:1; }
 table { width:100%; border-collapse:collapse; font-size:13px; }
 th { text-align:left; padding:8px; color:var(--gray); font-size:11px; text-transform:uppercase;
   border-bottom:2px solid var(--border); }
@@ -466,8 +472,13 @@ function renderShift() {
       const slots = [1,2].map(sm => {
         const a = bySmena[sm];
         const label = SMENA_LABEL[sm];
-        if (!a) return `<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0;color:var(--gray)">
-          <span>${label}</span><span>—</span></div>`;
+        const rowArg = a && a.__row ? a.__row : "null";
+        const curEmpId = a ? (a.empId||"") : "";
+        const curEmpName = a ? (a.empName||"") : "";
+        const editIcon = `<span class="edit-slot-icon" style="cursor:pointer;font-size:12px;margin-left:6px" title="Назначить"
+          onclick="openAssignModal('${String(g.equipmentId).replace(/'/g,"\\'")}', ${sm}, ${rowArg}, '${String(curEmpId).replace(/'/g,"\\'")}', '${String(curEmpName).replace(/'/g,"\\'")}')">✎</span>`;
+        if (!a) return `<div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;padding:3px 0;color:var(--gray)">
+          <span>${label}</span><span>—${editIcon}</span></div>`;
         const color = shiftStatusColor(a.status);
         let text = a.empName || (a.status === "вакансия" ? "вакансия" : a.status === "оптимизация" ? "не требуется" : "—");
         if (a.status === "увольняется" && a.dismissDate) text += ` (до ${a.dismissDate})`;
@@ -475,8 +486,8 @@ function renderShift() {
         const nameHtml = clickable
           ? `<span style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted" onclick="openEmployeeCard('${String(a.empId).replace(/'/g,"\\'")}')">${text}</span>`
           : text;
-        return `<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0">
-          <span style="color:var(--gray)">${label}</span><span style="color:${color};font-weight:600">${nameHtml}</span></div>`;
+        return `<div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;padding:3px 0">
+          <span style="color:var(--gray)">${label}</span><span style="color:${color};font-weight:600">${nameHtml}${editIcon}</span></div>`;
       }).join("");
       return `<div style="background:#fff;border:1px solid var(--border);border-radius:10px;padding:10px 12px;min-width:200px;flex:1 1 200px;max-width:250px">
         <div style="font-size:13px;font-weight:800;color:var(--navy);margin-bottom:6px">${title}</div>
@@ -696,6 +707,91 @@ function openEmployeeCard(empId) {
   document.getElementById("modalOverlay").style.display = "flex";
 }
 function closeModal() { document.getElementById("modalOverlay").style.display = "none"; }
+
+// Достаём empId из строки вида "Имя Фамилия [123]", которую оставляет datalist-подсказка
+function empIdFromInput(text) {
+  const m = String(text||"").match(/\[([^\]]+)\]\s*$/);
+  return m ? m[1] : "";
+}
+
+// row=null означает, что для этого слота (техника+смена+вахта+участок) в
+// базе ещё нет строки вовсе — при сохранении создадим новую (saveShiftAssignment),
+// а не будем обновлять несуществующую.
+function openAssignModal(equipmentId, smena, row, curEmpId, curEmpName) {
+  const eq = (DATA.equipment||[]).find(e => String(e.equipmentId)===String(equipmentId));
+  const smLabel = SMENA_LABEL[smena];
+  const vahtaLabel = (VAHTA_OPTIONS.find(o=>o.key===CURRENT_VAHTA)||{}).label || CURRENT_VAHTA;
+  const prefill = curEmpName ? `${curEmpName} [${curEmpId}]` : "";
+
+  document.getElementById("modalBox").innerHTML = `
+    <div style="font-size:16px;font-weight:800;margin-bottom:4px">Назначить оператора</div>
+    <div style="font-size:13px;color:var(--gray);margin-bottom:16px">
+      ${equipmentId}${eq ? " — "+eq.model : ""} · ${smLabel} · ${vahtaLabel}
+    </div>
+    <div class="field">
+      <label>Сотрудник</label>
+      <input type="text" id="assignEmpInput" list="assignEmpList" placeholder="Начните вводить имя..." value="${prefill.replace(/"/g,'&quot;')}">
+      <datalist id="assignEmpList"></datalist>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn-gold" style="flex:1" onclick="submitAssign(${row===null?"null":row}, '${String(equipmentId).replace(/'/g,"\\'")}', ${smena})">Сохранить</button>
+      ${curEmpId ? `<button class="btn-red" onclick="submitUnassign(${row})">Снять</button>` : ""}
+      <button class="btn-ghost" onclick="closeModal()">Отмена</button>
+    </div>
+  `;
+  const dl = document.getElementById("assignEmpList");
+  dl.innerHTML = (DATA.employees||[]).slice().sort((a,b)=>a.name.localeCompare(b.name))
+    .map(e => `<option value="${e.name.replace(/"/g,'&quot;')} [${e.id}]">`).join("");
+  document.getElementById("modalOverlay").style.display = "flex";
+}
+
+async function submitAssign(row, equipmentId, smena) {
+  const empText = document.getElementById("assignEmpInput").value;
+  const empId = empIdFromInput(empText);
+  const emp = empById(empId);
+  if (!emp) { alert("Выберите сотрудника из списка подсказок (начните печатать имя)"); return; }
+
+  try {
+    let res;
+    if (row) {
+      res = await fetch(CFG.SHEET_URL, { method:"POST", body: JSON.stringify({
+        action: "updateShiftAssignment", row, empId: emp.id, empName: emp.name, status: "",
+      })});
+    } else {
+      // Слота ещё нет в базе — создаём новую строку. position берём из любой
+      // существующей записи этой же техники (если есть), чтобы не терять
+      // описание должности; если техника вообще без записей — оставляем пустым.
+      const sample = (DATA.shiftAssignments||[]).find(a => String(a.equipmentId)===String(equipmentId));
+      res = await fetch(CFG.SHEET_URL, { method:"POST", body: JSON.stringify({
+        action: "saveShiftAssignment",
+        equipmentId, position: sample ? sample.position : "", smena, vahta: CURRENT_VAHTA,
+        empId: emp.id, empName: emp.name, status: "", dismissDate: "", skill: "", site: CURRENT_SITE,
+      })});
+    }
+    const val = await res.json();
+    if (!val.ok) { alert("Не удалось сохранить: " + (val.error||"")); return; }
+    closeModal();
+    await loadAll(["shiftAssignments"]); // точечно — только смены, остальное не трогаем
+  } catch (e) {
+    alert("Ошибка сети: " + e.message);
+  }
+}
+
+async function submitUnassign(row) {
+  if (!row) { closeModal(); return; }
+  if (!confirm("Снять человека с этого слота?")) return;
+  try {
+    const res = await fetch(CFG.SHEET_URL, { method:"POST", body: JSON.stringify({
+      action: "updateShiftAssignment", row, empId: "", empName: "", status: "",
+    })});
+    const val = await res.json();
+    if (!val.ok) { alert("Не удалось сохранить: " + (val.error||"")); return; }
+    closeModal();
+    await loadAll(["shiftAssignments"]);
+  } catch (e) {
+    alert("Ошибка сети: " + e.message);
+  }
+}
 
 
 function chkStats() {
