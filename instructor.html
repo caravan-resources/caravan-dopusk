@@ -614,7 +614,9 @@ tr:hover td { background:#FAFBFD; }
             <button class="btn btn-ghost" onclick="loadAll()">🔄 Обновить</button>
           </div>
         </div>
-        <div id="fuelRecordsListAlmaty"></div>
+        <div style="font-size:12px;color:var(--gray);padding:6px 0">
+          Полный список заправок с начала заполнения чек-листов — в CSV-файле.
+        </div>
       </div>
     </div>
 
@@ -656,7 +658,9 @@ tr:hover td { background:#FAFBFD; }
             <button class="btn btn-ghost" onclick="loadAll()">🔄 Обновить</button>
           </div>
         </div>
-        <div id="fuelRecordsListAshyktas"></div>
+        <div style="font-size:12px;color:var(--gray);padding:6px 0">
+          Полный список заправок с начала заполнения чек-листов — в CSV-файле.
+        </div>
       </div>
     </div>
 
@@ -1451,8 +1455,6 @@ function renderAll() {
   renderChecklistAnalytics("Ашыктас");
   renderFuelAnalytics("Алмалы");
   renderFuelAnalytics("Ашыктас");
-  renderFuelRecordsList("Алмалы");
-  renderFuelRecordsList("Ашыктас");
   renderReportPeriodButtons("Алмалы");
   renderReportPeriodButtons("Ашыктас");
   renderOperatorRating();
