@@ -115,6 +115,7 @@ td { padding:8px; border-bottom:1px solid var(--border); }
       <div id="siteSwitch" style="display:flex;gap:8px"></div>
       <span style="font-size:13px;color:var(--gray);font-weight:600;margin-left:16px">Вахта:</span>
       <div id="vahtaSwitch" style="display:flex;gap:8px"></div>
+      <div id="swapDayNightWrap"></div>
     </div>
 
     <!-- ══ ВАХТА ══ -->
@@ -341,6 +342,7 @@ async function ensureFuelCoverageForAnalytics() {
 function renderAll() {
   renderSiteSwitch();
   renderVahtaSwitch();
+  renderSwapDayNightButton();
   renderShift();
   renderFuelPeriodSwitch();
   renderFuel();
@@ -375,7 +377,41 @@ function renderVahtaSwitch() {
     <button class="${CURRENT_VAHTA===o.key?'btn-gold':'btn-ghost'}" onclick="setVahta('${o.key}')">${o.label}</button>
   `).join("");
 }
-function setVahta(v) { CURRENT_VAHTA = v; renderVahtaSwitch(); renderShift(); renderPersonnelList(); }
+function setVahta(v) { CURRENT_VAHTA = v; renderVahtaSwitch(); renderSwapDayNightButton(); renderShift(); renderPersonnelList(); }
+
+// «Неназначенные» — не настоящая вахта в базе (там просто нет таких строк),
+// для неё кнопка не имеет смысла и не показывается.
+function renderSwapDayNightButton() {
+  const el = document.getElementById("swapDayNightWrap");
+  if (!el) return;
+  if (CURRENT_VAHTA !== "Вахта-1" && CURRENT_VAHTA !== "Вахта-2") { el.innerHTML = ""; return; }
+  el.innerHTML = `<button class="btn-ghost" style="margin-left:16px;font-size:12px" onclick="confirmSwapDayNight()">🔄 Новый заезд — поменять день↔ночь</button>`;
+}
+
+async function confirmSwapDayNight() {
+  const vahtaLabel = (VAHTA_OPTIONS.find(o=>o.key===CURRENT_VAHTA)||{}).label || CURRENT_VAHTA;
+  const ok = confirm(
+    `Поменять местами день и ночь для «${vahtaLabel}» на участке ${CURRENT_SITE}?\n\n` +
+    `Затронет ВСЮ технику этой вахты — кто был на дне, встанет на ночь, и наоборот. ` +
+    `Действие одно на всех, отменить его можно только вручную по одному слоту через ✎.`
+  );
+  if (!ok) return;
+
+  const btn = document.querySelector("#swapDayNightWrap button");
+  if (btn) { btn.disabled = true; btn.textContent = "⏳ Меняю местами..."; }
+  try {
+    const res = await fetch(CFG.SHEET_URL, { method:"POST", body: JSON.stringify({
+      action: "swapDayNight", site: CURRENT_SITE, vahta: CURRENT_VAHTA,
+    })});
+    const val = await res.json();
+    if (!val.ok) { alert("Не удалось поменять: " + (val.error||"")); renderSwapDayNightButton(); return; }
+    alert(`Готово: поменялось ${val.swapped} единиц техники${val.created ? `, создано ${val.created} недостающих строк` : ""}.`);
+    await loadAll(["shiftAssignments"]);
+  } catch (e) {
+    alert("Ошибка сети: " + e.message);
+    renderSwapDayNightButton();
+  }
+}
 
 // empId -> vahta по текущим назначениям («Смены», уже отфильтрованы сервером по участку).
 // Один человек может встречаться в нескольких строках (день/ночь на разной технике) —
