@@ -81,6 +81,11 @@ td { padding:8px; border-bottom:1px solid var(--border); }
 .eval-score-box { text-align:center; min-width:100px; }
 .eval-score-val { font-size:26px; font-weight:800; }
 .eval-score-lbl { font-size:11px; color:var(--gray); margin-top:2px; }
+.crit-row { display:flex; gap:8px; align-items:flex-start; padding:8px 0; border-bottom:1px solid var(--border); }
+.crit-row-num { font-size:12px; color:var(--gray); font-weight:700; padding-top:10px; min-width:34px; }
+.crit-row input[type=text] { flex:1; }
+.crit-row select { width:160px; flex:0 0 160px; }
+.crit-row-del { background:var(--redbg); color:var(--red); border:none; border-radius:8px; padding:0 12px; cursor:pointer; font-weight:700; }
 </style>
 </head>
 <body>
@@ -228,7 +233,10 @@ td { padding:8px; border-bottom:1px solid var(--border); }
     <!-- ══ ОЦЕНКА ОПЕРАТОРА ══ -->
     <div id="screenEval" class="screen">
       <div class="panel">
-        <div class="panel-title">🎯 Новая оценка оператора</div>
+        <div class="panel-title">
+          🎯 Новая оценка оператора
+          <button class="btn-ghost" onclick="toggleCriteriaEditor()">⚙️ Критерии</button>
+        </div>
         <div class="field">
           <label>Сотрудник</label>
           <input type="text" id="evalEmpInput" list="evalEmpList" placeholder="Начните вводить имя..." oninput="onEvalEmpChange()">
@@ -262,6 +270,38 @@ td { padding:8px; border-bottom:1px solid var(--border); }
           <label>Супервайзер (необязательно)</label>
           <input type="text" id="evalSupervisor" placeholder="ФИО супервайзера">
         </div>
+      </div>
+
+      <div class="panel" id="criteriaEditorPanel" style="display:none">
+        <div class="panel-title">⚙️ Управление критериями оценки</div>
+        <div style="font-size:12px;color:var(--gray);margin-bottom:12px">
+          Изменения сохраняются сразу для всех будущих оценок этого типа техники. Уже сохранённые
+          оценки не меняются — в них текст пунктов остаётся таким, каким был на момент оценки.
+        </div>
+        <div class="field">
+          <label>Что редактируем</label>
+          <select id="critEditType" onchange="loadCriteriaForEdit()"></select>
+        </div>
+        <div class="field" id="critEditNewTypeWrap" style="display:none">
+          <label>Название нового типа техники</label>
+          <input type="text" id="critEditNewTypeName" placeholder="напр. Экскаватор ЕХ5600">
+        </div>
+
+        <div id="critEditBlock1Wrap" style="display:none">
+          <div class="panel-title" style="margin-top:6px;font-size:13px">Пункты (шкала Да/Нет)</div>
+          <div id="critEditBlock1List"></div>
+          <button class="btn-ghost" style="margin-top:8px" onclick="addCritRow('1')">+ Добавить пункт</button>
+        </div>
+        <div id="critEditBlock23Wrap" style="display:none">
+          <div class="panel-title" style="margin-top:6px;font-size:13px">Блок 2 · Состояние техники</div>
+          <div id="critEditBlock2List"></div>
+          <button class="btn-ghost" style="margin-top:8px" onclick="addCritRow('2')">+ Добавить пункт</button>
+          <div class="panel-title" style="margin-top:18px;font-size:13px">Блок 3 · Эксплуатация</div>
+          <div id="critEditBlock3List"></div>
+          <button class="btn-ghost" style="margin-top:8px" onclick="addCritRow('3')">+ Добавить пункт</button>
+        </div>
+
+        <button class="btn-gold" style="margin-top:16px" onclick="saveCriteriaEdits()">💾 Сохранить критерии</button>
       </div>
 
       <div class="panel" id="evalCriteriaPanel" style="display:none">
@@ -1161,6 +1201,158 @@ async function loadEvalHistoryFor(empId) {
     `).join("");
   } catch (err) {
     el.innerHTML = `<div class="empty">Не удалось загрузить: ${err.message}</div>`;
+  }
+}
+
+// ══════════════════════════════════════════════════════════
+// РЕДАКТОР КАТАЛОГА КРИТЕРИЕВ
+// importEvaluationCriteria на бэкенде полностью заменяет набор пунктов по
+// типу техники за один вызов — поэтому здесь редактируем весь список
+// целиком (как textarea-таблицу), а не по одному пункту через отдельные
+// запросы. Уже сохранённые оценки не затрагиваются: у них итемы уже
+// денормализованы в «ОтветыОценки» на момент сохранения.
+// ══════════════════════════════════════════════════════════
+let CRIT_EDIT_ROWS = { "1": [], "2": [], "3": [] };
+let CRIT_EDIT_PANEL_OPEN = false;
+
+function toggleCriteriaEditor() {
+  CRIT_EDIT_PANEL_OPEN = !CRIT_EDIT_PANEL_OPEN;
+  const panel = document.getElementById("criteriaEditorPanel");
+  panel.style.display = CRIT_EDIT_PANEL_OPEN ? "block" : "none";
+  if (CRIT_EDIT_PANEL_OPEN) {
+    renderCritEditTypeSelect();
+    loadCriteriaForEdit();
+  }
+}
+
+function renderCritEditTypeSelect() {
+  const el = document.getElementById("critEditType");
+  if (!el) return;
+  const cur = el.value;
+  el.innerHTML = `<option value="ВСЕ">Блок 1 (общий для всех профессий)</option>` +
+    (DATA.evaluationEquipmentTypes||[]).map(t => `<option value="${t.replace(/"/g,'&quot;')}">${t}</option>`).join("") +
+    `<option value="__new__">+ Новый тип техники...</option>`;
+  if (cur && [...el.options].some(o => o.value === cur)) el.value = cur;
+}
+
+async function loadCriteriaForEdit() {
+  const type = document.getElementById("critEditType").value;
+  const newWrap = document.getElementById("critEditNewTypeWrap");
+  const b1wrap = document.getElementById("critEditBlock1Wrap");
+  const b23wrap = document.getElementById("critEditBlock23Wrap");
+
+  if (type === "__new__") {
+    newWrap.style.display = "block";
+    document.getElementById("critEditNewTypeName").value = "";
+    b1wrap.style.display = "none";
+    b23wrap.style.display = "block";
+    CRIT_EDIT_ROWS = { "1": [], "2": [], "3": [] };
+    renderCritRows("2"); renderCritRows("3");
+    return;
+  }
+  newWrap.style.display = "none";
+
+  let data;
+  try {
+    data = await fetchWithRetry(`${CFG.SHEET_URL}?action=getEvaluationCriteria&equipmentType=${encodeURIComponent(type)}`, 30000, 3);
+  } catch (e) {
+    alert("Не удалось загрузить критерии: " + e.message);
+    return;
+  }
+  const toRows = arr => (arr||[]).map(it => ({ itemText: it.itemText, relatedCourse: it.relatedCourse||"" }));
+  CRIT_EDIT_ROWS = { "1": toRows(data.block1), "2": toRows(data.block2), "3": toRows(data.block3) };
+
+  if (type === "ВСЕ") {
+    b1wrap.style.display = "block";
+    b23wrap.style.display = "none";
+    renderCritRows("1");
+  } else {
+    b1wrap.style.display = "none";
+    b23wrap.style.display = "block";
+    renderCritRows("2"); renderCritRows("3");
+  }
+}
+
+function renderCritRows(block) {
+  const el = document.getElementById(block === "1" ? "critEditBlock1List" : `critEditBlock${block}List`);
+  if (!el) return;
+  const rows = CRIT_EDIT_ROWS[block] || [];
+  const courseOptions = `<option value="">— без привязки —</option>` +
+    (DATA.courseCatalog||[]).map(c => `<option value="${c.replace(/"/g,'&quot;')}">${c}</option>`).join("");
+  el.innerHTML = rows.map((r, i) => `
+    <div class="crit-row">
+      <div class="crit-row-num">${block}.${i+1}</div>
+      <input type="text" value="${(r.itemText||"").replace(/"/g,'&quot;')}" placeholder="Текст пункта..."
+        oninput="updateCritRowText('${block}',${i},this.value)">
+      <select onchange="updateCritRowCourse('${block}',${i},this.value)" title="Курс при низком балле">
+        ${courseOptions}
+      </select>
+      <button type="button" class="crit-row-del" onclick="deleteCritRow('${block}',${i})">✕</button>
+    </div>
+  `).join("");
+  // Восстанавливаем выбранный курс в select (innerHTML пересоздаёт элементы без value)
+  const selects = el.querySelectorAll("select");
+  selects.forEach((sel, i) => { sel.value = rows[i].relatedCourse || ""; });
+}
+
+function updateCritRowText(block, idx, value) {
+  if (CRIT_EDIT_ROWS[block][idx]) CRIT_EDIT_ROWS[block][idx].itemText = value;
+}
+function updateCritRowCourse(block, idx, value) {
+  if (CRIT_EDIT_ROWS[block][idx]) CRIT_EDIT_ROWS[block][idx].relatedCourse = value;
+}
+function deleteCritRow(block, idx) {
+  CRIT_EDIT_ROWS[block].splice(idx, 1);
+  renderCritRows(block);
+}
+function addCritRow(block) {
+  CRIT_EDIT_ROWS[block].push({ itemText: "", relatedCourse: "" });
+  renderCritRows(block);
+}
+
+async function saveCriteriaEdits() {
+  const typeSelect = document.getElementById("critEditType").value;
+  let targetType = typeSelect;
+  if (typeSelect === "__new__") {
+    targetType = document.getElementById("critEditNewTypeName").value.trim();
+    if (!targetType) { alert("Впишите название нового типа техники"); return; }
+  }
+
+  let items = [];
+  if (targetType === "ВСЕ") {
+    items = (CRIT_EDIT_ROWS["1"]||[])
+      .map(r => (r.itemText||"").trim())
+      .filter(Boolean)
+      .map((text, i) => ({ block: "1", itemNum: `1.${i+1}`, itemText: text, scale: "binary" }));
+  } else {
+    const b2 = (CRIT_EDIT_ROWS["2"]||[]).filter(r => (r.itemText||"").trim());
+    const b3 = (CRIT_EDIT_ROWS["3"]||[]).filter(r => (r.itemText||"").trim());
+    items = [
+      ...b2.map((r, i) => ({ block: "2", itemNum: `2.${i+1}`, itemText: r.itemText.trim(), scale: "scale5", relatedCourse: r.relatedCourse||"" })),
+      ...b3.map((r, i) => ({ block: "3", itemNum: `3.${i+1}`, itemText: r.itemText.trim(), scale: "scale5", relatedCourse: r.relatedCourse||"" })),
+    ];
+  }
+  if (!items.length) { alert("Нужен хотя бы один заполненный пункт"); return; }
+
+  try {
+    const res = await fetch(CFG.SHEET_URL, {
+      method: "POST",
+      body: JSON.stringify({ action: "importEvaluationCriteria", equipmentType: targetType, items }),
+    });
+    const val = await res.json();
+    if (!val.ok) { alert("Не удалось сохранить: " + (val.error||"")); return; }
+    alert(`Критерии для «${targetType}» сохранены (${val.items} пункт(ов)).`);
+    await loadEvalEquipmentTypes();
+    renderCritEditTypeSelect();
+    document.getElementById("critEditType").value = targetType;
+    loadCriteriaForEdit();
+    // Если в основной форме оценки сейчас выбран этот же тип — перегружаем его,
+    // чтобы форма сразу показывала свежие формулировки, а не старые из кэша.
+    if (document.getElementById("evalEquipmentType").value === targetType) {
+      onEvalEquipmentTypeChange();
+    }
+  } catch (e) {
+    alert("Ошибка сети: " + e.message);
   }
 }
 </script>
