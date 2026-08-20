@@ -2470,7 +2470,15 @@ function importEvaluationCriteria(p) {
   const finalRows = kept.concat(newRows);
   const lastRow = sheet.getLastRow();
   if (lastRow > 1) sheet.getRange(2, 1, lastRow - 1, HEADER.length).clearContent();
-  if (finalRows.length > 0) sheet.getRange(2, 1, finalRows.length, HEADER.length).setValues(finalRows);
+  if (finalRows.length > 0) {
+    // itemNum вида "1.1"/"2.3" Sheets самостоятельно интерпретирует как дату
+    // (день.месяц) при записи через setValues — тот же баг, что был с
+    // experienceYears. Фиксируем колонку C текстовым форматом ДО записи,
+    // иначе она один раз успевает неверно истолковать значение.
+    const itemNumCol = HEADER.indexOf("itemNum") + 1;
+    sheet.getRange(2, itemNumCol, finalRows.length, 1).setNumberFormat("@");
+    sheet.getRange(2, 1, finalRows.length, HEADER.length).setValues(finalRows);
+  }
 
   return json({ ok: true, equipmentType: type, items: newRows.length });
 }
