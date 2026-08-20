@@ -682,8 +682,8 @@ tr:hover td { background:#FAFBFD; }
           Текстовая сводка по топливу и осмотрам за выбранный период, с сравнением к предыдущему такому же периоду.
         </div>
         <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
-          <label style="font-size:13px;color:var(--gray)">Тренд по конкретной машине (необязательно):</label>
-          <select id="reportTrendEquipmentAlmaty" style="max-width:280px"><option value="">— не выбрано —</option></select>
+          <label style="font-size:13px;color:var(--gray)">Фильтр по машине (необязательно):</label>
+          <select id="reportTrendEquipmentAlmaty" style="max-width:280px"><option value="">— весь участок —</option></select>
         </div>
         <button class="btn btn-gold" style="width:auto;padding:10px 20px" onclick="generateReport('Алмалы')">📄 Сформировать отчёт</button>
       </div>
@@ -725,8 +725,8 @@ tr:hover td { background:#FAFBFD; }
           Текстовая сводка по топливу и осмотрам за выбранный период, с сравнением к предыдущему такому же периоду.
         </div>
         <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
-          <label style="font-size:13px;color:var(--gray)">Тренд по конкретной машине (необязательно):</label>
-          <select id="reportTrendEquipmentAshyktas" style="max-width:280px"><option value="">— не выбрано —</option></select>
+          <label style="font-size:13px;color:var(--gray)">Фильтр по машине (необязательно):</label>
+          <select id="reportTrendEquipmentAshyktas" style="max-width:280px"><option value="">— весь участок —</option></select>
         </div>
         <button class="btn btn-gold" style="width:auto;padding:10px 20px" onclick="generateReport('Ашыктас')">📄 Сформировать отчёт</button>
       </div>
@@ -5876,7 +5876,7 @@ function renderReportPeriodButtons(site) {
   const sel = document.getElementById("reportTrendEquipment"+suffix);
   if (sel && sel.options.length <= 1) {
     const prevVal = sel.value;
-    sel.innerHTML = `<option value="">— не выбрано —</option>` +
+    sel.innerHTML = `<option value="">— весь участок —</option>` +
       (DATA.equipment||[]).filter(e => (e.site||"").trim() === site)
         .slice().sort((a,b)=>String(a.equipmentId).localeCompare(String(b.equipmentId)))
         .map(e => `<option value="${e.equipmentId}">${e.equipmentId} — ${e.model}</option>`).join("");
@@ -6050,7 +6050,9 @@ async function generateReport(site) {
   const fmtShort = d => `${String(d.getDate()).padStart(2,"0")}.${String(d.getMonth()+1).padStart(2,"0")}`;
   const rangeLabel = `${fmtShort(start)}–${fmtShort(new Date(end - 1))}`;
 
-  const siteEquipment = (DATA.equipment||[]).filter(e => (e.site||"").trim() === site);
+  const trendEqId = (document.getElementById("reportTrendEquipment"+suffix)||{}).value;
+  let siteEquipment = (DATA.equipment||[]).filter(e => (e.site||"").trim() === site);
+  if (trendEqId) siteEquipment = siteEquipment.filter(e => String(e.equipmentId) === String(trendEqId));
   const eqIds = new Set(siteEquipment.map(e => String(e.equipmentId)));
 
   // ── ТОПЛИВО ──
@@ -6096,7 +6098,7 @@ async function generateReport(site) {
 
   // ── СБОРКА: карточки + таблицы вместо абзацев ──
   const lines = [];
-  lines.push(`<div style="font-size:15px;font-weight:800;color:var(--navy);margin-bottom:4px">Отчёт за ${periodLabel} (${rangeLabel}) — ${site}</div>`);
+  lines.push(`<div style="font-size:15px;font-weight:800;color:var(--navy);margin-bottom:4px">Отчёт за ${periodLabel} (${rangeLabel}) — ${site}${trendEqId ? ` · ${eqLabel(trendEqId)}` : ""}</div>`);
   lines.push(`<div style="font-size:11px;color:var(--gray);margin-bottom:16px">Сформирован ${fmtRecordDateTime(new Date().toISOString())}</div>`);
 
   // ⛽ Топливо
@@ -6148,17 +6150,19 @@ async function generateReport(site) {
     "Пока недостаточно показаний моточасов/пробега из чек-листов — нужно минимум два замера на машину в один период. Данные копятся по мере осмотров."
   ));
 
-  // 🏆 Топ проблемной техники за всё время
-  lines.push(reportSectionTitle("🏆","Топ проблемной техники за всё время"));
-  const allTimeTop = allTimeTopDefective(5, site);
-  lines.push(reportTable(
-    ["Техника","Неисправностей"],
-    allTimeTop.map(([id,c]) => [eqLabel(id), `<b>${c}</b>`]),
-    "Неисправностей за всё время ещё не зафиксировано."
-  ));
+  // 🏆 Топ проблемной техники за всё время (только для отчёта по всему участку —
+  // для одной машины это дублирует раздел «Осмотры и неисправности» выше)
+  if (!trendEqId) {
+    lines.push(reportSectionTitle("🏆","Топ проблемной техники за всё время"));
+    const allTimeTop = allTimeTopDefective(5, site);
+    lines.push(reportTable(
+      ["Техника","Неисправностей"],
+      allTimeTop.map(([id,c]) => [eqLabel(id), `<b>${c}</b>`]),
+      "Неисправностей за всё время ещё не зафиксировано."
+    ));
+  }
 
-  // 📈 Тренд по выбранной машине
-  const trendEqId = (document.getElementById("reportTrendEquipment"+suffix)||{}).value;
+  // 📈 Тренд по выбранной машине — по неделям
   if (trendEqId) {
     lines.push(reportSectionTitle("📈",`Тренд по машине ${eqLabel(trendEqId)} — по неделям`));
     const trend = equipmentTrend(trendEqId, 6);
