@@ -1214,6 +1214,12 @@ async function loadEvalHistoryFor(empId) {
 // ══════════════════════════════════════════════════════════
 let CRIT_EDIT_ROWS = { "1": [], "2": [], "3": [] };
 let CRIT_EDIT_PANEL_OPEN = false;
+// Токен поколения запроса: открытие панели само запускает загрузку "ВСЕ" по
+// умолчанию, не дожидаясь её; если пользователь сразу выберет другой тип,
+// оба запроса летят параллельно, и на слабой связи более старый может
+// ответить позже нового — тогда он молча перезапишет уже актуальный выбор.
+// Отбрасываем ответ, если с момента его отправки успел стартовать новый.
+let CRIT_LOAD_TOKEN = 0;
 
 function toggleCriteriaEditor() {
   CRIT_EDIT_PANEL_OPEN = !CRIT_EDIT_PANEL_OPEN;
@@ -1236,6 +1242,7 @@ function renderCritEditTypeSelect() {
 }
 
 async function loadCriteriaForEdit() {
+  const myToken = ++CRIT_LOAD_TOKEN;
   const type = document.getElementById("critEditType").value;
   const newWrap = document.getElementById("critEditNewTypeWrap");
   const b1wrap = document.getElementById("critEditBlock1Wrap");
@@ -1256,9 +1263,12 @@ async function loadCriteriaForEdit() {
   try {
     data = await fetchWithRetry(`${CFG.SHEET_URL}?action=getEvaluationCriteria&equipmentType=${encodeURIComponent(type)}`, 30000, 3);
   } catch (e) {
+    if (myToken !== CRIT_LOAD_TOKEN) return; // выбор уже сменился — не показываем ошибку от устаревшего запроса
     alert("Не удалось загрузить критерии: " + e.message);
     return;
   }
+  if (myToken !== CRIT_LOAD_TOKEN) return; // пока грузили — пользователь выбрал другой тип, этот ответ устарел
+
   const toRows = arr => (arr||[]).map(it => ({ itemText: it.itemText, relatedCourse: it.relatedCourse||"" }));
   CRIT_EDIT_ROWS = { "1": toRows(data.block1), "2": toRows(data.block2), "3": toRows(data.block3) };
 
