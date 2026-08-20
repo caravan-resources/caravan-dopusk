@@ -72,6 +72,15 @@ th { text-align:left; padding:8px; color:var(--gray); font-size:11px; text-trans
   border-bottom:2px solid var(--border); }
 td { padding:8px; border-bottom:1px solid var(--border); }
 .badge { font-weight:700; font-size:12px; padding:3px 8px; border-radius:6px; white-space:nowrap; }
+.eval-opt-btn { border:1.5px solid var(--border); background:#fff; border-radius:8px; padding:6px 13px;
+  font-size:13px; font-weight:700; cursor:pointer; color:var(--gray); }
+.eval-opt-btn.active { background:var(--gold); color:var(--navy); border-color:var(--gold); }
+.eval-opt-btn.active.low { background:var(--red); color:#fff; border-color:var(--red); }
+.eval-opt-btn.active.mid { background:var(--yellow); color:#fff; border-color:var(--yellow); }
+.eval-opt-btn.active.high { background:var(--green); color:#fff; border-color:var(--green); }
+.eval-score-box { text-align:center; min-width:100px; }
+.eval-score-val { font-size:26px; font-weight:800; }
+.eval-score-lbl { font-size:11px; color:var(--gray); margin-top:2px; }
 </style>
 </head>
 <body>
@@ -102,6 +111,7 @@ td { padding:8px; border-bottom:1px solid var(--border); }
     <button id="navGroup" onclick="showScreen('group')">👥 Группа</button>
     <button id="navHistory" onclick="showScreen('history')">✅ История</button>
     <button id="navCatalog" onclick="showScreen('catalog')">📚 Каталог курсов</button>
+    <button id="navEval" onclick="showScreen('eval')">🎯 Оценка</button>
   </div>
 
   <div class="wrap">
@@ -214,6 +224,80 @@ td { padding:8px; border-bottom:1px solid var(--border); }
         <div id="catalogList"></div>
       </div>
     </div>
+
+    <!-- ══ ОЦЕНКА ОПЕРАТОРА ══ -->
+    <div id="screenEval" class="screen">
+      <div class="panel">
+        <div class="panel-title">🎯 Новая оценка оператора</div>
+        <div class="field">
+          <label>Сотрудник</label>
+          <input type="text" id="evalEmpInput" list="evalEmpList" placeholder="Начните вводить имя..." oninput="onEvalEmpChange()">
+          <datalist id="evalEmpList"></datalist>
+        </div>
+        <div class="field">
+          <label>Должность</label>
+          <input type="text" id="evalPosition" readonly style="background:var(--light)">
+        </div>
+        <div class="field">
+          <label>Дата оценки</label>
+          <input type="date" id="evalDate">
+        </div>
+        <div class="field">
+          <label>Тип техники / профессия</label>
+          <select id="evalEquipmentType" onchange="onEvalEquipmentTypeChange()"><option value="">— выберите тип —</option></select>
+        </div>
+        <div class="field">
+          <label>Модель техники</label>
+          <input type="text" id="evalEquipmentModel" placeholder="напр. Sandvik DX800">
+        </div>
+        <div class="field">
+          <label>Вид выполняемых работ</label>
+          <input type="text" id="evalWorkType" placeholder="напр. Бурение взрывных скважин">
+        </div>
+        <div class="field">
+          <label>Инструктор (кто проводит оценку)</label>
+          <input type="text" id="evalInstructor" placeholder="ФИО инструктора">
+        </div>
+        <div class="field">
+          <label>Супервайзер (необязательно)</label>
+          <input type="text" id="evalSupervisor" placeholder="ФИО супервайзера">
+        </div>
+      </div>
+
+      <div class="panel" id="evalCriteriaPanel" style="display:none">
+        <div class="panel-title">Блок 1 · Обязанности оператора</div>
+        <div id="evalBlock1List"></div>
+      </div>
+      <div class="panel" id="evalBlock2Panel" style="display:none">
+        <div class="panel-title">Блок 2 · Состояние техники</div>
+        <div id="evalBlock2List"></div>
+      </div>
+      <div class="panel" id="evalBlock3Panel" style="display:none">
+        <div class="panel-title">Блок 3 · Эксплуатация</div>
+        <div id="evalBlock3List"></div>
+      </div>
+
+      <div class="panel" id="evalScorePanel" style="display:none">
+        <div class="panel-title">Баллы (считаются сразу при заполнении)</div>
+        <div id="evalScoreSummary" style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:16px"></div>
+        <div class="field">
+          <label>Резюме (для личного дела — можно сгенерировать и отредактировать)</label>
+          <textarea id="evalSummary" rows="4" placeholder="Резюме появится здесь после генерации, либо впишите вручную..."></textarea>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn-ghost" id="evalGenBtn" onclick="generateEvalSummaryClick()">✨ Сгенерировать резюме</button>
+          <button class="btn-gold" onclick="submitEvaluation()">💾 Сохранить оценку</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">📋 История оценок сотрудника</div>
+        <div style="font-size:12px;color:var(--gray);margin-bottom:10px" id="evalHistoryHint">
+          Выберите сотрудника выше, чтобы увидеть его прошлые оценки.
+        </div>
+        <div id="evalHistoryList"></div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -229,7 +313,7 @@ const CFG = {
   SHEET_URL: "https://script.google.com/macros/s/AKfycbwhdMV20k8US2BXUz1Xk2XCXE9MEwpHpQaadTF9xEfzbU1--dHL-Zuj06K2qXW-rFtKGw/exec",
 };
 
-let DATA = { employees: [], trainingPlan: [], trainingHistory: [], courseCatalog: [] };
+let DATA = { employees: [], trainingPlan: [], trainingHistory: [], courseCatalog: [], evaluationEquipmentTypes: [] };
 let CURRENT_SITE = "Алмалы";
 
 function checkPin() {
@@ -237,7 +321,10 @@ function checkPin() {
   if (val === CFG.PIN) {
     document.getElementById("loginScreen").style.display = "none";
     document.getElementById("app").style.display = "block";
+    const evalDateEl = document.getElementById("evalDate");
+    if (evalDateEl && !evalDateEl.value) evalDateEl.value = new Date().toISOString().slice(0,10);
     loadAll();
+    loadEvalEquipmentTypes();
   } else {
     document.getElementById("loginErr").style.display = "block";
     document.getElementById("pinInput").value = "";
@@ -251,7 +338,7 @@ function logout() {
 }
 
 function showScreen(name) {
-  ["plan","history","catalog","group"].forEach(s => {
+  ["plan","history","catalog","group","eval"].forEach(s => {
     document.getElementById("screen"+s.charAt(0).toUpperCase()+s.slice(1)).classList.remove("active");
     document.getElementById("nav"+s.charAt(0).toUpperCase()+s.slice(1)).classList.remove("active");
   });
@@ -325,6 +412,7 @@ async function loadAll(onlyKeys) {
 function renderAll() {
   renderSiteSwitch();
   renderEmpDatalist();
+  renderEvalEmpDatalist();
   renderCourseSelect();
   renderPlanList();
   renderHistory();
@@ -809,6 +897,271 @@ function renderCatalogList() {
       <span>${c}</span>
       <button class="btn-red" onclick="deleteCatalogItem('${c.replace(/'/g,"\\'")}')">Удалить</button>
     </div>`).join("");
+}
+
+// ══════════════════════════════════════════════════════════
+// ОЦЕНКА ОПЕРАТОРА
+// Три блока критериев (общий блок 1 + свои для типа техники блоки 2-3).
+// Баллы считаются и на клиенте (для мгновенной обратной связи при
+// заполнении), и на сервере (источник истины при сохранении) — по одной
+// и той же формуле, чтобы не расходились. Оценка не обязана быть
+// положительной: интерфейс не сглаживает низкие баллы визуально.
+// ══════════════════════════════════════════════════════════
+let EVAL_CRITERIA = { block1: [], block2: [], block3: [] };
+let EVAL_ANSWERS = {}; // itemNum -> { block, itemText, value }
+
+function renderEvalEmpDatalist() {
+  const el = document.getElementById("evalEmpList");
+  if (!el) return;
+  el.innerHTML = (DATA.employees||[])
+    .slice().sort((a,b)=>a.name.localeCompare(b.name))
+    .map(e => `<option value="${e.name.replace(/"/g,'&quot;')} [${e.id}]">`).join("");
+}
+
+async function loadEvalEquipmentTypes() {
+  try {
+    const val = await fetchWithRetry(`${CFG.SHEET_URL}?action=getEvaluationEquipmentTypes`, 30000, 3);
+    DATA.evaluationEquipmentTypes = Array.isArray(val) ? val : [];
+  } catch (e) {
+    DATA.evaluationEquipmentTypes = [];
+    console.error("evaluationEquipmentTypes:", e);
+  }
+  renderEvalEquipmentTypeSelect();
+}
+function renderEvalEquipmentTypeSelect() {
+  const el = document.getElementById("evalEquipmentType");
+  if (!el) return;
+  const cur = el.value;
+  el.innerHTML = `<option value="">— выберите тип —</option>` +
+    (DATA.evaluationEquipmentTypes||[]).map(t => `<option value="${t.replace(/"/g,'&quot;')}">${t}</option>`).join("");
+  if ((DATA.evaluationEquipmentTypes||[]).includes(cur)) el.value = cur;
+}
+
+function onEvalEmpChange() {
+  const empId = empIdFromInput(document.getElementById("evalEmpInput").value);
+  const emp = empById(empId);
+  document.getElementById("evalPosition").value = emp ? (emp.position||"") : "";
+  const hint = document.getElementById("evalHistoryHint");
+  if (emp) {
+    if (hint) hint.style.display = "none";
+    loadEvalHistoryFor(emp.id);
+  } else {
+    if (hint) hint.style.display = "block";
+    document.getElementById("evalHistoryList").innerHTML = "";
+  }
+}
+
+async function onEvalEquipmentTypeChange() {
+  const type = document.getElementById("evalEquipmentType").value;
+  EVAL_ANSWERS = {};
+  if (!type) {
+    ["evalCriteriaPanel","evalBlock2Panel","evalBlock3Panel","evalScorePanel"].forEach(id => {
+      document.getElementById(id).style.display = "none";
+    });
+    return;
+  }
+  try {
+    const val = await fetchWithRetry(`${CFG.SHEET_URL}?action=getEvaluationCriteria&equipmentType=${encodeURIComponent(type)}`, 30000, 3);
+    EVAL_CRITERIA = (val && val.ok) ? val : { block1: [], block2: [], block3: [] };
+  } catch (e) {
+    alert("Не удалось загрузить пункты оценки: " + e.message);
+    return;
+  }
+  renderEvalCriteriaBlocks();
+}
+
+// Пороги перевода % выполненных пунктов блока 1 в 1-5 — должны СОВПАДАТЬ
+// с EVAL_BLOCK1_THRESHOLDS в Код.gs, иначе клиентский предпросмотр и
+// серверный итог разойдутся.
+const EVAL_BLOCK1_THRESHOLDS = [
+  { min: 0.85, score: 5 }, { min: 0.75, score: 4 }, { min: 0.65, score: 3 },
+  { min: 0.55, score: 2 }, { min: 0, score: 1 },
+];
+function computeBlock1ScoreClient(values) {
+  const evaluated = values.filter(v => v === "1" || v === "0");
+  if (!evaluated.length) return "-";
+  const ones = evaluated.filter(v => v === "1").length;
+  const pct = ones / evaluated.length;
+  for (const t of EVAL_BLOCK1_THRESHOLDS) if (pct >= t.min) return t.score;
+  return 1;
+}
+function computeAvgScoreClient(values) {
+  const nums = values.filter(v => v !== "-" && v !== "").map(Number).filter(n => !isNaN(n));
+  if (!nums.length) return "-";
+  return Math.round((nums.reduce((a,b)=>a+b,0) / nums.length) * 100) / 100;
+}
+
+function renderEvalItem(item, block) {
+  const scaleOptions = block === "1" ? ["1","0","-"] : ["5","4","3","2","1","-"];
+  const labels = block === "1" ? {"1":"Да","0":"Нет","-":"Н/Д"} : {"5":"5","4":"4","3":"3","2":"2","1":"1","-":"Н/Д"};
+  const current = EVAL_ANSWERS[item.itemNum] ? EVAL_ANSWERS[item.itemNum].value : undefined;
+  const cls = v => {
+    if (v === "-" ) return "";
+    if (block === "1") return v === "1" ? "high" : "low";
+    const n = Number(v);
+    return n >= 4 ? "high" : (n <= 2 ? "low" : "mid");
+  };
+  return `<div style="padding:10px 0;border-bottom:1px solid var(--border)">
+    <div style="font-size:13px;margin-bottom:8px">${item.itemNum}. ${item.itemText}</div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap">
+      ${scaleOptions.map(v => `<button type="button" class="eval-opt-btn ${current===v?'active '+cls(v):''}"
+        onclick="setEvalAnswer('${item.itemNum}','${block}','${item.itemText.replace(/'/g,"\\'")}','${v}')">${labels[v]}</button>`).join("")}
+    </div>
+  </div>`;
+}
+
+function renderEvalCriteriaBlocks() {
+  const b1 = document.getElementById("evalBlock1List");
+  const b2 = document.getElementById("evalBlock2List");
+  const b3 = document.getElementById("evalBlock3List");
+  b1.innerHTML = (EVAL_CRITERIA.block1||[]).map(it => renderEvalItem(it,"1")).join("") || `<div class="empty">Нет пунктов</div>`;
+  b2.innerHTML = (EVAL_CRITERIA.block2||[]).map(it => renderEvalItem(it,"2")).join("") || `<div class="empty">Нет пунктов для этого типа техники — пришлите чек-лист, чтобы добавить</div>`;
+  b3.innerHTML = (EVAL_CRITERIA.block3||[]).map(it => renderEvalItem(it,"3")).join("") || `<div class="empty">Нет пунктов для этого типа техники — пришлите чек-лист, чтобы добавить</div>`;
+  document.getElementById("evalCriteriaPanel").style.display = (EVAL_CRITERIA.block1||[]).length ? "block" : "none";
+  document.getElementById("evalBlock2Panel").style.display = "block";
+  document.getElementById("evalBlock3Panel").style.display = "block";
+  document.getElementById("evalScorePanel").style.display = "block";
+  updateEvalScores();
+}
+
+function setEvalAnswer(itemNum, block, itemText, value) {
+  EVAL_ANSWERS[itemNum] = { block, itemText, value };
+  renderEvalCriteriaBlocks();
+}
+
+function updateEvalScores() {
+  const byBlock = b => Object.values(EVAL_ANSWERS).filter(a => a.block === b).map(a => a.value);
+  const s1 = computeBlock1ScoreClient(byBlock("1"));
+  const s2 = computeAvgScoreClient(byBlock("2"));
+  const s3 = computeAvgScoreClient(byBlock("3"));
+  const el = document.getElementById("evalScoreSummary");
+  if (!el) return;
+  const color = s => s === "-" ? "var(--gray)" : (Number(s) <= 2 ? "var(--red)" : (Number(s) >= 4 ? "var(--green)" : "var(--yellow)"));
+  el.innerHTML = [
+    ["Блок 1 · Обязанности", s1],
+    ["Блок 2 · Техника", s2],
+    ["Блок 3 · Эксплуатация", s3],
+  ].map(([label, val]) => `<div class="eval-score-box">
+    <div class="eval-score-val" style="color:${color(val)}">${val}</div>
+    <div class="eval-score-lbl">${label}</div>
+  </div>`).join("");
+}
+
+async function generateEvalSummaryClick() {
+  const empId = empIdFromInput(document.getElementById("evalEmpInput").value);
+  const emp = empById(empId);
+  if (!emp) { alert("Сначала выберите сотрудника"); return; }
+  const type = document.getElementById("evalEquipmentType").value;
+  if (!type) { alert("Сначала выберите тип техники"); return; }
+
+  const byBlock = b => Object.values(EVAL_ANSWERS).filter(a => a.block === b).map(a => a.value);
+  const s1 = computeBlock1ScoreClient(byBlock("1"));
+  const s2 = computeAvgScoreClient(byBlock("2"));
+  const s3 = computeAvgScoreClient(byBlock("3"));
+  const weakItems = Object.values(EVAL_ANSWERS)
+    .filter(a => (a.block === "1" && a.value === "0") || (a.block !== "1" && a.value !== "-" && Number(a.value) <= 2))
+    .map(a => a.itemText);
+  const strongItems = Object.values(EVAL_ANSWERS)
+    .filter(a => a.block !== "1" && a.value !== "-" && Number(a.value) >= 4)
+    .map(a => a.itemText);
+
+  const btn = document.getElementById("evalGenBtn");
+  const oldText = btn.textContent;
+  btn.textContent = "⏳ Генерирую...";
+  btn.disabled = true;
+  try {
+    const res = await fetch(CFG.SHEET_URL, {
+      method: "POST",
+      body: JSON.stringify({
+        action: "generateEvaluationSummary",
+        empName: emp.name, position: emp.position || "",
+        equipmentType: type,
+        block1Score: s1, block2Score: s2, block3Score: s3,
+        weakItems, strongItems,
+      }),
+    });
+    const val = await res.json();
+    if (!val.ok) { alert("Не удалось сгенерировать резюме: " + (val.error||"")); return; }
+    document.getElementById("evalSummary").value = val.summary;
+  } catch (e) {
+    alert("Ошибка сети: " + e.message);
+  } finally {
+    btn.textContent = oldText;
+    btn.disabled = false;
+  }
+}
+
+async function submitEvaluation() {
+  const empId = empIdFromInput(document.getElementById("evalEmpInput").value);
+  const emp = empById(empId);
+  if (!emp) { alert("Выберите сотрудника из списка подсказок (начните печатать имя)"); return; }
+  const type = document.getElementById("evalEquipmentType").value;
+  if (!type) { alert("Выберите тип техники"); return; }
+
+  const answers = Object.entries(EVAL_ANSWERS).map(([itemNum, a]) => ({
+    itemNum, block: a.block, itemText: a.itemText, value: a.value,
+  }));
+  if (!answers.length) { alert("Заполните хотя бы один пункт оценки"); return; }
+
+  const dateIso = document.getElementById("evalDate").value;
+  const payload = {
+    action: "saveEvaluation",
+    empId: emp.id, empName: emp.name, position: emp.position || "",
+    date: dateIso ? isoToRu(dateIso) : "",
+    equipmentType: type,
+    equipmentModel: document.getElementById("evalEquipmentModel").value.trim(),
+    site: CURRENT_SITE,
+    instructorName: document.getElementById("evalInstructor").value.trim(),
+    supervisorName: document.getElementById("evalSupervisor").value.trim(),
+    workType: document.getElementById("evalWorkType").value.trim(),
+    summary: document.getElementById("evalSummary").value.trim(),
+    answers,
+  };
+
+  try {
+    const res = await fetch(CFG.SHEET_URL, { method: "POST", body: JSON.stringify(payload) });
+    const val = await res.json();
+    if (!val.ok) { alert("Не удалось сохранить: " + (val.error||"")); return; }
+    let msg = `Оценка сохранена.\nБлок 1: ${val.block1Score} · Блок 2: ${val.block2Score} · Блок 3: ${val.block3Score}`;
+    if (val.coursesAdded) msg += `\n\nАвтоматически добавлено в план обучения курсов: ${val.coursesAdded}`;
+    alert(msg);
+    EVAL_ANSWERS = {};
+    document.getElementById("evalSummary").value = "";
+    document.getElementById("evalEquipmentModel").value = "";
+    document.getElementById("evalWorkType").value = "";
+    renderEvalCriteriaBlocks();
+    loadEvalHistoryFor(emp.id);
+  } catch (e) {
+    alert("Ошибка сети: " + e.message);
+  }
+}
+
+async function loadEvalHistoryFor(empId) {
+  const el = document.getElementById("evalHistoryList");
+  if (!el) return;
+  el.innerHTML = `<div class="empty"><div class="empty-icon">⏳</div>Загружаю...</div>`;
+  try {
+    const val = await fetchWithRetry(`${CFG.SHEET_URL}?action=getOperatorEvaluations&empId=${encodeURIComponent(empId)}`, 30000, 3);
+    const list = Array.isArray(val) ? val : [];
+    if (!list.length) { el.innerHTML = `<div class="empty"><div class="empty-icon">🗂</div>Оценок пока нет</div>`; return; }
+    const scoreColor = s => (s === "-" || s === undefined) ? "var(--gray)" : (Number(s) <= 2 ? "var(--red)" : (Number(s) >= 4 ? "var(--green)" : "var(--yellow)"));
+    el.innerHTML = list.map(e => `
+      <div style="padding:12px 0;border-bottom:1px solid var(--border)">
+        <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">
+          <div><b>${e.date}</b> · ${e.equipmentType}${e.equipmentModel ? " ("+e.equipmentModel+")" : ""}</div>
+          <div style="font-size:12px;color:var(--gray)">${e.instructorName||""}</div>
+        </div>
+        <div style="display:flex;gap:16px;margin-top:8px;font-size:13px">
+          <span>Блок 1: <b style="color:${scoreColor(e.block1Score)}">${e.block1Score}</b></span>
+          <span>Блок 2: <b style="color:${scoreColor(e.block2Score)}">${e.block2Score}</b></span>
+          <span>Блок 3: <b style="color:${scoreColor(e.block3Score)}">${e.block3Score}</b></span>
+        </div>
+        ${e.summary ? `<div style="font-size:13px;color:var(--navy);margin-top:8px;line-height:1.5">${e.summary}</div>` : ""}
+      </div>
+    `).join("");
+  } catch (err) {
+    el.innerHTML = `<div class="empty">Не удалось загрузить: ${err.message}</div>`;
+  }
 }
 </script>
 </body>
