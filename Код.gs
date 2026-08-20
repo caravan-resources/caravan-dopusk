@@ -2550,7 +2550,13 @@ function saveEvaluation(p) {
     a.value === undefined || a.value === null ? "" : String(a.value), a.comment || "",
   ]);
   ensureCapacity(ansSheet, ansRows.length);
-  ansSheet.getRange(ansSheet.getLastRow()+1, 1, ansRows.length, ANS_HEADER.length).setValues(ansRows);
+  // itemNum вида "1.1"/"2.3" — та же ловушка с автоопределением даты,
+  // что и в КаталогКритериевОценки (см. importEvaluationCriteria). Текстовый
+  // формат ставим ДО записи значений.
+  const ansItemNumCol = ANS_HEADER.indexOf("itemNum") + 1;
+  const ansStartRow = ansSheet.getLastRow() + 1;
+  ansSheet.getRange(ansStartRow, ansItemNumCol, ansRows.length, 1).setNumberFormat("@");
+  ansSheet.getRange(ansStartRow, 1, ansRows.length, ANS_HEADER.length).setValues(ansRows);
 
   // Низкий балл по пункту с привязанным курсом -> автоматически в план обучения.
   // Низким считаем: блок 1 значение "0", блоки 2-3 значение 1 или 2.
@@ -2642,12 +2648,27 @@ function getOperatorEvaluations(empId) {
   rows.slice(1).forEach((r, i) => {
     if (!r[0]) return;
     if (idCol >= 0 && String(r[idCol]).trim() !== String(empId).trim()) return;
-    const o = {};
-    headers.forEach((h,j) => { o[h] = r[j]; });
+    const o = { __sortDate: r[headers.indexOf("date")] };
+    headers.forEach((h,j) => {
+      const val = r[j];
+      if ((h === "date" || h === "createdAt") && val instanceof Date) {
+        o[h] = Utilities.formatDate(val, "Asia/Almaty", h === "createdAt" ? "dd.MM.yyyy HH:mm" : "dd.MM.yyyy");
+      } else {
+        o[h] = val;
+      }
+    });
     o.__row = i + 2;
     data.push(o);
   });
-  data.sort((a,b) => String(b.date).localeCompare(String(a.date)));
+  // Сортируем по исходному значению даты (Date или сравнимая строка), а не
+  // по уже отформатированной "dd.MM.yyyy" — иначе лексикографический порядок
+  // ломается (день впереди года).
+  data.sort((a,b) => {
+    const av = a.__sortDate, bv = b.__sortDate;
+    if (av instanceof Date && bv instanceof Date) return bv - av;
+    return String(bv).localeCompare(String(av));
+  });
+  data.forEach(o => delete o.__sortDate);
   return json(data);
 }
 
@@ -2697,15 +2718,23 @@ function getEvaluationAlerts() {
     if (isLow(b2)) lowBlocks.push("2");
     if (isLow(b3)) lowBlocks.push("3");
     if (!lowBlocks.length) return;
+    const rawDate = r[idx["date"]];
     alerts.push({
       evalId: r[idx["evalId"]], empId: r[idx["empId"]], empName: r[idx["empName"]],
-      date: r[idx["date"]], equipmentType: r[idx["equipmentType"]],
+      date: rawDate instanceof Date ? Utilities.formatDate(rawDate, "Asia/Almaty", "dd.MM.yyyy") : rawDate,
+      __sortDate: rawDate,
+      equipmentType: r[idx["equipmentType"]],
       block1Score: b1, block2Score: b2, block3Score: b3,
       lowBlocks: lowBlocks, summary: r[idx["summary"]] || "",
     });
   });
 
-  alerts.sort((a,b) => String(b.date).localeCompare(String(a.date)));
+  alerts.sort((a,b) => {
+    const av = a.__sortDate, bv = b.__sortDate;
+    if (av instanceof Date && bv instanceof Date) return bv - av;
+    return String(bv).localeCompare(String(av));
+  });
+  alerts.forEach(a => delete a.__sortDate);
   return json({ ok: true, total, lowCount: alerts.length, alerts: alerts.slice(0, 100) });
 }
 
