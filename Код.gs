@@ -27,6 +27,13 @@ const SHEET_EQUIPMENT = "Техника";
 const SHEET_CHECKLIST_TEMPLATES = "Чек-листы-Шаблоны";
 const SHEET_CHECKLIST_RECORDS = "Чек-листы-Записи";
 
+const SHEET_EVAL_CRITERIA   = "КаталогКритериевОценки";
+const SHEET_EVALUATIONS     = "ОценкиОператоров";
+const SHEET_EVAL_ANSWERS    = "ОтветыОценки";
+// Тип техники для пунктов блока 1 («Обязанности оператора») — общий для
+// всех профессий, не зависит от типа техники.
+const EVAL_UNIVERSAL_TYPE = "ВСЕ";
+
 function doGet(e) {
   const action   = e.parameter.action;
   const callback = e.parameter.callback;
@@ -49,6 +56,11 @@ function doGet(e) {
   else if (action === "getChecklistStats") result = getChecklistStats(e.parameter);
   else if (action === "getFuelRecords") result = getFuelRecords(e.parameter.site, e.parameter.days);
   else if (action === "getShiftAssignments") result = getShiftAssignments(e.parameter.site);
+  else if (action === "getEvaluationCriteria") result = getEvaluationCriteria(e.parameter.equipmentType);
+  else if (action === "getEvaluationEquipmentTypes") result = getEvaluationEquipmentTypes();
+  else if (action === "getOperatorEvaluations") result = getOperatorEvaluations(e.parameter.empId);
+  else if (action === "getEvaluationDetail") result = getEvaluationDetail(e.parameter.evalId);
+  else if (action === "getEvaluationAlerts") result = getEvaluationAlerts();
   else result = json({ ok: false, error: "unknown action" });
 
   if (callback) {
@@ -101,6 +113,10 @@ function doPost(e) {
     if (d.action === "deleteShiftAssignmentRow") return deleteShiftAssignmentRow(d);
     if (d.action === "swapDayNight") return swapDayNight(d);
     if (d.action === "clearShiftAssignments") return clearShiftAssignments();
+    if (d.action === "saveEvaluation") return saveEvaluation(d);
+    if (d.action === "deleteEvaluation") return deleteEvaluation(d);
+    if (d.action === "generateEvaluationSummary") return generateEvaluationSummary(d);
+    if (d.action === "importEvaluationCriteria") return importEvaluationCriteria(d);
     return json({ ok: false, error: "unknown action" });
   } catch(err) {
     return json({ ok: false, error: err.toString() });
@@ -2292,4 +2308,492 @@ function clearShiftAssignments() {
   const cleared = Math.max(0, lastRow - 1);
   if (lastRow > 1) sheet.deleteRows(2, lastRow - 1);
   return json({ ok: true, cleared });
+}
+
+// ══════════════════════════════════════════════════════════
+// ОЦЕНКА РАБОТЫ ОПЕРАТОРА
+// Три блока критериев (по образцу утверждённого чек-листа
+// «Машинист буровой установки v9»):
+//   Блок 1 «Обязанности оператора» — общий для ВСЕХ профессий (equipmentType
+//   в каталоге = "ВСЕ"), шкала 0/1/"-", итог блока — % выполненных пунктов,
+//   переведённый в 1-5 по порогам (совпадают с эталонным файлом).
+//   Блок 2 «Состояние техники» и Блок 3 «Эксплуатация» — свои пункты под
+//   каждый тип техники (equipmentType в каталоге = конкретный тип), шкала
+//   1-5/"-", итог блока — среднее.
+// Итоговой свёртки трёх блоков в одно число НЕТ (осознанно, по решению
+// пользователя) — три балла хранятся раздельно, плюс текстовое резюме.
+// Оценка может быть любой, включая целиком отрицательную — сервер ничего
+// не сглаживает и не подтягивает к среднему.
+// ══════════════════════════════════════════════════════════
+
+// Пороги перевода % выполненных пунктов блока 1 в шкалу 1-5.
+// Взяты из эталонного файла (лист «Списки» J2:J6) как фиксированные —
+// если понадобится их менять по профессиям, выносить в отдельный лист
+// настроек, но пока для всех профессий они общие.
+const EVAL_BLOCK1_THRESHOLDS = [
+  { min: 0.85, score: 5 },
+  { min: 0.75, score: 4 },
+  { min: 0.65, score: 3 },
+  { min: 0.55, score: 2 },
+  { min: 0,    score: 1 },
+];
+
+function computeEvalBlock1Score(values) {
+  const evaluated = values.filter(v => v === "1" || v === "0" || v === 1 || v === 0);
+  if (!evaluated.length) return "-";
+  const ones = evaluated.filter(v => String(v) === "1").length;
+  const pct = ones / evaluated.length;
+  for (const t of EVAL_BLOCK1_THRESHOLDS) {
+    if (pct >= t.min) return t.score;
+  }
+  return 1;
+}
+
+function computeEvalAvgScore(values) {
+  const evaluated = values
+    .filter(v => v !== "-" && v !== "" && v !== null && v !== undefined)
+    .map(Number)
+    .filter(n => !isNaN(n));
+  if (!evaluated.length) return "-";
+  const avg = evaluated.reduce((a, b) => a + b, 0) / evaluated.length;
+  return Math.round(avg * 100) / 100;
+}
+
+// ── Каталог критериев ────────────────────────────────────────
+// Лист: equipmentType | block | itemNum | itemText | scale (binary/scale5) |
+//       relatedCourse | active
+// equipmentType = "ВСЕ" — пункты блока 1, общие для всех профессий.
+// equipmentType = конкретный тип — пункты блоков 2 и 3 под эту профессию.
+// relatedCourse — необязательное имя курса из «КаталогКурсов»: если по
+// этому пункту оценка низкая, соответствующий курс автоматически попадает
+// в «ПланОбучения» (см. saveEvaluation).
+function getEvaluationCriteria(equipmentType) {
+  const type = String(equipmentType || "").trim();
+  const ss    = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName(SHEET_EVAL_CRITERIA);
+  if (!sheet) return json({ ok: true, block1: [], block2: [], block3: [] });
+
+  const rows = sheet.getDataRange().getValues();
+  if (rows.length < 2) return json({ ok: true, block1: [], block2: [], block3: [] });
+  const headers = rows[0];
+  const idx = {};
+  headers.forEach((h,i) => idx[h] = i);
+
+  const out = { ok: true, block1: [], block2: [], block3: [] };
+  rows.slice(1).forEach(r => {
+    if (!r[idx["equipmentType"]]) return;
+    const active = String(r[idx["active"]] || "да").trim().toLowerCase();
+    if (active === "нет" || active === "false") return;
+    const rowType = String(r[idx["equipmentType"]]).trim();
+    if (rowType !== EVAL_UNIVERSAL_TYPE && rowType !== type) return;
+
+    const block = String(r[idx["block"]] || "").trim();
+    const item = {
+      itemNum: String(r[idx["itemNum"]] || "").trim(),
+      itemText: String(r[idx["itemText"]] || "").trim(),
+      scale: String(r[idx["scale"]] || "").trim() || (block === "1" ? "binary" : "scale5"),
+      relatedCourse: idx["relatedCourse"] >= 0 ? String(r[idx["relatedCourse"]] || "").trim() : "",
+    };
+    if (block === "1") out.block1.push(item);
+    else if (block === "2") out.block2.push(item);
+    else if (block === "3") out.block3.push(item);
+  });
+
+  const byItemNum = (a,b) => a.itemNum.localeCompare(b.itemNum, undefined, { numeric: true });
+  out.block1.sort(byItemNum);
+  out.block2.sort(byItemNum);
+  out.block3.sort(byItemNum);
+
+  return json(out);
+}
+
+// Список типов техники/профессий, под которые уже есть свои пункты
+// блоков 2-3 в каталоге (для выпадающего списка в форме оценки).
+function getEvaluationEquipmentTypes() {
+  const ss    = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName(SHEET_EVAL_CRITERIA);
+  if (!sheet) return json([]);
+  const rows = sheet.getDataRange().getValues();
+  if (rows.length < 2) return json([]);
+  const headers = rows[0];
+  const typeCol = headers.indexOf("equipmentType");
+  if (typeCol < 0) return json([]);
+
+  const types = new Set();
+  rows.slice(1).forEach(r => {
+    const t = String(r[typeCol] || "").trim();
+    if (t && t !== EVAL_UNIVERSAL_TYPE) types.add(t);
+  });
+  return json(Array.from(types).sort());
+}
+
+// Заменяет весь набор пунктов конкретного типа техники разом (как
+// importChecklistTemplate) — используется при заведении нового типа
+// или полной переработке существующего.
+// items: [{ block: "2"|"3", itemNum: "2.1", itemText, scale, relatedCourse }]
+// Для типа "ВСЕ" (блок 1) — тем же способом, отдельным вызовом.
+function importEvaluationCriteria(p) {
+  const { equipmentType, items } = p || {};
+  const type = String(equipmentType || "").trim();
+  if (!type || !Array.isArray(items) || !items.length) {
+    return json({ ok: false, error: "Нужны equipmentType и непустой список items" });
+  }
+
+  const ss    = SpreadsheetApp.openById(SHEET_ID);
+  let sheet   = ss.getSheetByName(SHEET_EVAL_CRITERIA);
+  const HEADER = ["equipmentType","block","itemNum","itemText","scale","relatedCourse","active"];
+
+  if (!sheet) {
+    sheet = ss.insertSheet(SHEET_EVAL_CRITERIA);
+    sheet.appendRow(HEADER);
+    sheet.getRange(1,1,1,HEADER.length)
+      .setBackground("#0D1B3E").setFontColor("#F4A52A").setFontWeight("bold");
+    sheet.setFrozenRows(1);
+    sheet.setColumnWidth(1, 200);
+    sheet.setColumnWidth(4, 400);
+  }
+
+  const rows = sheet.getDataRange().getValues();
+  const body = rows.length > 1 ? rows.slice(1) : [];
+  const kept = body.filter(r => String(r[0] || "").trim() !== type);
+
+  const newRows = items.map(it => [
+    type,
+    String(it.block || ""),
+    String(it.itemNum || ""),
+    String(it.itemText || ""),
+    String(it.scale || (String(it.block) === "1" ? "binary" : "scale5")),
+    String(it.relatedCourse || ""),
+    "да",
+  ]);
+
+  const finalRows = kept.concat(newRows);
+  const lastRow = sheet.getLastRow();
+  if (lastRow > 1) sheet.getRange(2, 1, lastRow - 1, HEADER.length).clearContent();
+  if (finalRows.length > 0) sheet.getRange(2, 1, finalRows.length, HEADER.length).setValues(finalRows);
+
+  return json({ ok: true, equipmentType: type, items: newRows.length });
+}
+
+// ── Сохранение заполненной оценки ────────────────────────────
+// p: { empId, empName, position, date, equipmentType, equipmentModel, site,
+//      instructorName, supervisorName, workType, summary,
+//      answers: [{ block, itemNum, itemText, value, comment }] }
+// Баллы блоков считаются на сервере из ответов — не доверяем клиенту,
+// чтобы рейтинг и личное дело всегда были согласованы с фактическими
+// отметками, даже если фронтенд посчитал что-то иначе.
+function saveEvaluation(p) {
+  const { empId, empName, position, date, equipmentType, equipmentModel, site,
+          instructorName, supervisorName, workType, summary, answers } = p || {};
+
+  if (!empName || !equipmentType || !Array.isArray(answers) || !answers.length) {
+    return json({ ok: false, error: "Нужны как минимум empName, equipmentType и ответы по пунктам" });
+  }
+
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+
+  // Баллы по блокам
+  const b1values = answers.filter(a => String(a.block) === "1").map(a => a.value);
+  const b2values = answers.filter(a => String(a.block) === "2").map(a => a.value);
+  const b3values = answers.filter(a => String(a.block) === "3").map(a => a.value);
+  const block1Score = computeEvalBlock1Score(b1values);
+  const block2Score = computeEvalAvgScore(b2values);
+  const block3Score = computeEvalAvgScore(b3values);
+
+  // Заголовок оценки
+  let evalSheet = ss.getSheetByName(SHEET_EVALUATIONS);
+  const EVAL_HEADER = ["evalId","empId","empName","position","date","equipmentType","equipmentModel",
+                       "site","instructorName","supervisorName","workType",
+                       "block1Score","block2Score","block3Score","summary","createdAt"];
+  if (!evalSheet) {
+    evalSheet = ss.insertSheet(SHEET_EVALUATIONS);
+    evalSheet.appendRow(EVAL_HEADER);
+    evalSheet.getRange(1,1,1,EVAL_HEADER.length)
+      .setBackground("#0D1B3E").setFontColor("#F4A52A").setFontWeight("bold");
+    evalSheet.setFrozenRows(1);
+    evalSheet.setColumnWidth(3, 200);
+    evalSheet.setColumnWidth(15, 400);
+  }
+
+  const evalId = "eval" + Date.now();
+  const dateStr = date || Utilities.formatDate(new Date(), "Asia/Almaty", "dd.MM.yyyy");
+  const createdAt = Utilities.formatDate(new Date(), "Asia/Almaty", "dd.MM.yyyy HH:mm");
+
+  ensureCapacity(evalSheet, 1);
+  evalSheet.appendRow([
+    evalId, empId || "", empName, position || "", dateStr, equipmentType, equipmentModel || "",
+    site || "", instructorName || "", supervisorName || "", workType || "",
+    block1Score, block2Score, block3Score, summary || "", createdAt,
+  ]);
+
+  // Детализация по пунктам
+  let ansSheet = ss.getSheetByName(SHEET_EVAL_ANSWERS);
+  const ANS_HEADER = ["evalId","block","itemNum","itemText","value","comment"];
+  if (!ansSheet) {
+    ansSheet = ss.insertSheet(SHEET_EVAL_ANSWERS);
+    ansSheet.appendRow(ANS_HEADER);
+    ansSheet.getRange(1,1,1,ANS_HEADER.length)
+      .setBackground("#0D1B3E").setFontColor("#F4A52A").setFontWeight("bold");
+    ansSheet.setFrozenRows(1);
+    ansSheet.setColumnWidth(4, 400);
+  }
+  const ansRows = answers.map(a => [
+    evalId, String(a.block || ""), String(a.itemNum || ""), String(a.itemText || ""),
+    a.value === undefined || a.value === null ? "" : String(a.value), a.comment || "",
+  ]);
+  ensureCapacity(ansSheet, ansRows.length);
+  ansSheet.getRange(ansSheet.getLastRow()+1, 1, ansRows.length, ANS_HEADER.length).setValues(ansRows);
+
+  // Низкий балл по пункту с привязанным курсом -> автоматически в план обучения.
+  // Низким считаем: блок 1 значение "0", блоки 2-3 значение 1 или 2.
+  // Критерии с relatedCourse ищем по каталогу для этого типа техники.
+  let coursesAdded = 0;
+  try {
+    const critResp = JSON.parse(getEvaluationCriteria(equipmentType).getContent());
+    const courseByKey = {};
+    ["block1","block2","block3"].forEach(bk => {
+      (critResp[bk] || []).forEach(it => {
+        if (it.relatedCourse) courseByKey[it.itemNum] = it.relatedCourse;
+      });
+    });
+    answers.forEach(a => {
+      const isLow = String(a.block) === "1" ? String(a.value) === "0"
+                  : (Number(a.value) === 1 || Number(a.value) === 2);
+      if (!isLow) return;
+      const course = courseByKey[String(a.itemNum)];
+      if (!course) return;
+      addTrainingPlan(empId || "", empName, course, "", site || "");
+      coursesAdded++;
+    });
+  } catch (e) {
+    // Не блокируем сохранение оценки, если авто-рекомендация не удалась
+  }
+
+  // Личное дело — та же запись видна в истории сотрудника рядом со взысканиями/поощрениями.
+  const scoresText = "Блок 1: " + block1Score + ", Блок 2: " + block2Score + ", Блок 3: " + block3Score;
+  savePersonnelEvent(
+    empId || "", empName, "Оценка",
+    dateStr,
+    scoresText + (summary ? (". " + summary) : ""),
+    instructorName || ""
+  );
+
+  return json({ ok: true, evalId, block1Score, block2Score, block3Score, coursesAdded });
+}
+
+function deleteEvaluation(p) {
+  const { row, evalId } = p || {};
+  if (!row) return json({ ok: false, error: "Нужен номер строки (row)" });
+
+  const ss    = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName(SHEET_EVALUATIONS);
+  if (!sheet) return json({ ok: false, error: "Лист «ОценкиОператоров» не найден" });
+
+  const rowNum = Number(row);
+  if (!rowNum || rowNum < 2 || rowNum > sheet.getLastRow()) {
+    return json({ ok: false, error: "Строка не найдена — список успел измениться, обновите страницу." });
+  }
+
+  if (evalId) {
+    const headers = sheet.getRange(1,1,1,sheet.getLastColumn()).getValues()[0];
+    const idCol = headers.indexOf("evalId");
+    const actualId = idCol >= 0 ? String(sheet.getRange(rowNum, idCol + 1).getValue()).trim() : "";
+    if (actualId !== String(evalId).trim()) {
+      return json({ ok: false, error: "Строка сдвинулась (список изменился параллельно). Обновите страницу и повторите." });
+    }
+  }
+
+  sheet.deleteRow(rowNum);
+
+  // Чистим детализацию по этой оценке, чтобы не копить осиротевшие строки
+  if (evalId) {
+    const ansSheet = ss.getSheetByName(SHEET_EVAL_ANSWERS);
+    if (ansSheet) {
+      const ansRows = ansSheet.getDataRange().getValues();
+      for (let i = ansRows.length - 1; i >= 1; i--) {
+        if (String(ansRows[i][0]).trim() === String(evalId).trim()) ansSheet.deleteRow(i + 1);
+      }
+    }
+  }
+
+  return json({ ok: true, deleted: rowNum });
+}
+
+// ── История оценок сотрудника (для личного дела) ─────────────
+function getOperatorEvaluations(empId) {
+  if (!empId) return json([]);
+  const ss    = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName(SHEET_EVALUATIONS);
+  if (!sheet) return json([]);
+  const rows = sheet.getDataRange().getValues();
+  if (rows.length < 2) return json([]);
+  const headers = rows[0];
+  const idCol = headers.indexOf("empId");
+
+  const data = [];
+  rows.slice(1).forEach((r, i) => {
+    if (!r[0]) return;
+    if (idCol >= 0 && String(r[idCol]).trim() !== String(empId).trim()) return;
+    const o = {};
+    headers.forEach((h,j) => { o[h] = r[j]; });
+    o.__row = i + 2;
+    data.push(o);
+  });
+  data.sort((a,b) => String(b.date).localeCompare(String(a.date)));
+  return json(data);
+}
+
+// Детализация по пунктам одной конкретной оценки — подгружается отдельно,
+// чтобы список истории (getOperatorEvaluations) оставался лёгким.
+function getEvaluationDetail(evalId) {
+  if (!evalId) return json([]);
+  const ss    = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName(SHEET_EVAL_ANSWERS);
+  if (!sheet) return json([]);
+  const rows = sheet.getDataRange().getValues();
+  if (rows.length < 2) return json([]);
+  const headers = rows[0];
+  const idCol = headers.indexOf("evalId");
+
+  const data = rows.slice(1)
+    .filter(r => idCol >= 0 && String(r[idCol]).trim() === String(evalId).trim())
+    .map(r => {
+      const o = {}; headers.forEach((h,i) => { o[h] = r[i]; }); return o;
+    });
+  return json(data);
+}
+
+// ── Сводка для дашборда: недавние оценки с низкими баллами ───
+// Низким считаем блок 1 или 2 или 3, если ≤2 — независимо, по любому блоку.
+// Не выбираем среднее, не сглаживаем: любой слабый блок = запись в списке.
+function getEvaluationAlerts() {
+  const ss    = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName(SHEET_EVALUATIONS);
+  if (!sheet) return json({ ok: true, total: 0, lowCount: 0, alerts: [] });
+  const rows = sheet.getDataRange().getValues();
+  if (rows.length < 2) return json({ ok: true, total: 0, lowCount: 0, alerts: [] });
+  const headers = rows[0];
+  const idx = {};
+  headers.forEach((h,i) => idx[h] = i);
+
+  const isLow = v => v !== "-" && v !== "" && !isNaN(Number(v)) && Number(v) <= 2;
+
+  const alerts = [];
+  let total = 0;
+  rows.slice(1).forEach(r => {
+    if (!r[idx["evalId"]]) return;
+    total++;
+    const b1 = r[idx["block1Score"]], b2 = r[idx["block2Score"]], b3 = r[idx["block3Score"]];
+    const lowBlocks = [];
+    if (isLow(b1)) lowBlocks.push("1");
+    if (isLow(b2)) lowBlocks.push("2");
+    if (isLow(b3)) lowBlocks.push("3");
+    if (!lowBlocks.length) return;
+    alerts.push({
+      evalId: r[idx["evalId"]], empId: r[idx["empId"]], empName: r[idx["empName"]],
+      date: r[idx["date"]], equipmentType: r[idx["equipmentType"]],
+      block1Score: b1, block2Score: b2, block3Score: b3,
+      lowBlocks: lowBlocks, summary: r[idx["summary"]] || "",
+    });
+  });
+
+  alerts.sort((a,b) => String(b.date).localeCompare(String(a.date)));
+  return json({ ok: true, total, lowCount: alerts.length, alerts: alerts.slice(0, 100) });
+}
+
+// ── Резюме оценки через Claude API ────────────────────────────
+// Тот же ключ и модель, что и recognizeRoster (Script Properties,
+// ANTHROPIC_API_KEY). Резюме объективное — без обязательного баланса
+// плюсов и минусов: если оценка низкая, текст должен прямо это отражать,
+// а не сглаживать дежурными формулировками.
+function generateEvaluationSummary(p) {
+  const apiKey = PropertiesService.getScriptProperties().getProperty("ANTHROPIC_API_KEY");
+  if (!apiKey) {
+    return json({ ok: false, error: "API-ключ не настроен. Project Settings → Script Properties → ANTHROPIC_API_KEY." });
+  }
+
+  const { empName, position, equipmentType, block1Score, block2Score, block3Score, weakItems, strongItems } = p || {};
+
+  const weakText = Array.isArray(weakItems) && weakItems.length
+    ? weakItems.map(i => "- " + i).join("\n") : "нет отмеченных слабых пунктов";
+  const strongText = Array.isArray(strongItems) && strongItems.length
+    ? strongItems.map(i => "- " + i).join("\n") : "нет отдельно отмеченных сильных пунктов";
+
+  const prompt =
+    "Составь краткое объективное резюме (2-4 предложения, на русском) по результатам оценки " +
+    "профессиональной деятельности оператора на месте работы.\n\n" +
+    "Оператор: " + (empName || "не указан") + ", должность: " + (position || "не указана") + ".\n" +
+    "Тип техники: " + (equipmentType || "не указан") + ".\n" +
+    "Балл по блоку «Обязанности оператора» (1-5, или «-» если не оценивалось): " + block1Score + "\n" +
+    "Балл по блоку «Состояние техники» (1-5): " + block2Score + "\n" +
+    "Балл по блоку «Эксплуатация» (1-5): " + block3Score + "\n\n" +
+    "Пункты с низкой оценкой:\n" + weakText + "\n\n" +
+    "Пункты с высокой оценкой:\n" + strongText + "\n\n" +
+    "ВАЖНО: резюме должно быть объективным и точным отражением баллов. Если баллы низкие — " +
+    "резюме должно прямо и honestly это отражать, без искусственного смягчения, без обязательного " +
+    "упоминания \"положительных сторон\" ради баланса, если их по факту нет. Не используй общие " +
+    "фразы-клише. Пиши по существу, для внесения в личное дело сотрудника.";
+
+  const payload = {
+    model: "claude-haiku-4-5-20251001",
+    max_tokens: 400,
+    messages: [{ role: "user", content: prompt }],
+  };
+
+  const options = {
+    method: "post",
+    contentType: "application/json",
+    headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true,
+  };
+
+  try {
+    const response = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", options);
+    const code = response.getResponseCode();
+    const body = JSON.parse(response.getContentText());
+    if (code !== 200) {
+      const msg = (body.error && body.error.message) || `HTTP ${code}`;
+      return json({ ok: false, error: msg });
+    }
+    const text = (body.content && body.content[0] && body.content[0].text) || "";
+    return json({ ok: true, summary: text.trim() });
+  } catch (e) {
+    return json({ ok: false, error: e.message });
+  }
+}
+
+// ── Разовая заготовка каталога: блок 1 (общий) + Буровая установка (2-3) ──
+// Запустить ОДИН раз вручную из редактора Apps Script (выбрать функцию
+// seedEvaluationCriteria → Run), чтобы наполнить пустой каталог стартовыми
+// данными по эталонному чек-листу. Повторный запуск безопасен —
+// importEvaluationCriteria полностью заменяет набор пунктов по каждому
+// типу техники, а не дублирует.
+function seedEvaluationCriteria() {
+  importEvaluationCriteria({
+    equipmentType: EVAL_UNIVERSAL_TYPE,
+    items: [
+      { block: "1", itemNum: "1.1", itemText: "Обязанности оператора (наряд-допуск, инструктаж, предсменные проверки)", scale: "binary" },
+      { block: "1", itemNum: "1.2", itemText: "Поддержание чистоты и порядка на рабочем месте", scale: "binary" },
+      { block: "1", itemNum: "1.3", itemText: "Средства индивидуальной защиты (СИЗ)", scale: "binary" },
+      { block: "1", itemNum: "1.4", itemText: "Использование радиосвязи, включая аварийную", scale: "binary" },
+      { block: "1", itemNum: "1.5", itemText: "Аварийная остановка станка", scale: "binary" },
+    ],
+  });
+  importEvaluationCriteria({
+    equipmentType: "Буровая установка",
+    items: [
+      { block: "2", itemNum: "2.1", itemText: "Диагностика неисправностей бурового станка", scale: "scale5" },
+      { block: "2", itemNum: "2.2", itemText: "Установка станка к бурению скважины", scale: "scale5" },
+      { block: "2", itemNum: "2.3", itemText: "Работа с бортовой системой диспетчеризации/мониторинга", scale: "scale5" },
+      { block: "2", itemNum: "2.4", itemText: "Техническое обслуживание и устранение неисправностей оборудования", scale: "scale5" },
+      { block: "2", itemNum: "2.5", itemText: "Поддержание работоспособности оборудования при бурении", scale: "scale5" },
+      { block: "3", itemNum: "3.1", itemText: "Планирование и подготовка работ по бурению", scale: "scale5" },
+      { block: "3", itemNum: "3.2", itemText: "Поверхностное бурение взрывных скважин", scale: "scale5" },
+      { block: "3", itemNum: "3.3", itemText: "Вращательное и ударно-вращательное бурение", scale: "scale5" },
+      { block: "3", itemNum: "3.4", itemText: "Бурение наклонных скважин", scale: "scale5" },
+      { block: "3", itemNum: "3.5", itemText: "Реагирование на возникающие проблемы при бурении", scale: "scale5" },
+      { block: "3", itemNum: "3.6", itemText: "Завершение работ и уборка рабочего места", scale: "scale5" },
+    ],
+  });
 }
