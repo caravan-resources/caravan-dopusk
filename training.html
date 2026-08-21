@@ -78,9 +78,6 @@ td { padding:8px; border-bottom:1px solid var(--border); }
 .eval-opt-btn.active.low { background:var(--red); color:#fff; border-color:var(--red); }
 .eval-opt-btn.active.mid { background:var(--yellow); color:#fff; border-color:var(--yellow); }
 .eval-opt-btn.active.high { background:var(--green); color:#fff; border-color:var(--green); }
-.eval-score-box { text-align:center; min-width:100px; }
-.eval-score-val { font-size:26px; font-weight:800; }
-.eval-score-lbl { font-size:11px; color:var(--gray); margin-top:2px; }
 .crit-row { display:flex; gap:8px; align-items:flex-start; padding:8px 0; border-bottom:1px solid var(--border); }
 .crit-row-num { font-size:12px; color:var(--gray); font-weight:700; padding-top:10px; min-width:34px; }
 .crit-row input[type=text] { flex:1; }
@@ -1096,6 +1093,34 @@ function setEvalAnswer(itemNum, block, itemText, value) {
   renderEvalCriteriaBlocks();
 }
 
+// Единые названия трёх блоков оценки — используются везде, где раньше
+// было "Блок 1/2/3" (форма оценки, история, дашборд, личное дело).
+const EVAL_BLOCK_NAMES = ["Обязанности", "Техническое состояние", "Эксплуатация"];
+
+// Общая мини-диаграмма из трёх столбиков для отображения баллов оценки.
+// compact=true — уменьшенная версия для списков (история, дашборд).
+function evalBarsHtml(b1, b2, b3, compact) {
+  const barMaxH = compact ? 28 : 40;
+  const barW = compact ? 16 : 20;
+  const boxW = compact ? 44 : 56;
+  const vals = [b1, b2, b3];
+  const bars = vals.map((v, i) => {
+    const num = (v === "-" || v === undefined || v === null || v === "") ? null : Number(v);
+    const h = num === null ? 3 : Math.max(3, Math.round((num/5)*barMaxH));
+    const color = num === null ? "var(--border)" : (num <= 2 ? "var(--red)" : (num >= 4 ? "var(--green)" : "var(--yellow)"));
+    const valText = num === null ? "—" : num;
+    return `
+      <div style="display:flex;flex-direction:column;align-items:center;width:${boxW}px">
+        <div style="font-size:${compact?11:13}px;font-weight:800;color:${color};margin-bottom:2px">${valText}</div>
+        <div style="width:${barW}px;height:${barMaxH}px;background:var(--light);border-radius:4px;display:flex;align-items:flex-end;overflow:hidden">
+          <div style="width:100%;height:${h}px;background:${color};border-radius:3px 3px 0 0"></div>
+        </div>
+        <div style="font-size:${compact?9:10}px;color:var(--gray);text-align:center;margin-top:4px;line-height:1.2">${EVAL_BLOCK_NAMES[i]}</div>
+      </div>`;
+  }).join("");
+  return `<div style="display:flex;gap:${compact?8:14}px">${bars}</div>`;
+}
+
 function updateEvalScores() {
   const byBlock = b => Object.values(EVAL_ANSWERS).filter(a => a.block === b).map(a => a.value);
   const s1 = computeBlock1ScoreClient(byBlock("1"));
@@ -1103,15 +1128,7 @@ function updateEvalScores() {
   const s3 = computeAvgScoreClient(byBlock("3"));
   const el = document.getElementById("evalScoreSummary");
   if (!el) return;
-  const color = s => s === "-" ? "var(--gray)" : (Number(s) <= 2 ? "var(--red)" : (Number(s) >= 4 ? "var(--green)" : "var(--yellow)"));
-  el.innerHTML = [
-    ["Блок 1 · Обязанности", s1],
-    ["Блок 2 · Техника", s2],
-    ["Блок 3 · Эксплуатация", s3],
-  ].map(([label, val]) => `<div class="eval-score-box">
-    <div class="eval-score-val" style="color:${color(val)}">${val}</div>
-    <div class="eval-score-lbl">${label}</div>
-  </div>`).join("");
+  el.innerHTML = evalBarsHtml(s1, s2, s3, false);
 }
 
 async function generateEvalSummaryClick() {
@@ -1220,23 +1237,21 @@ async function loadEvalHistoryFor(empId) {
     EVAL_HISTORY_CACHE = {};
     list.forEach(e => { EVAL_HISTORY_CACHE[e.evalId] = e; });
     if (!list.length) { el.innerHTML = `<div class="empty"><div class="empty-icon">🗂</div>Оценок пока нет</div>`; return; }
-    const scoreColor = s => (s === "-" || s === undefined) ? "var(--gray)" : (Number(s) <= 2 ? "var(--red)" : (Number(s) >= 4 ? "var(--green)" : "var(--yellow)"));
     el.innerHTML = list.map(e => `
-      <div style="padding:12px 0;border-bottom:1px solid var(--border)">
-        <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">
-          <div><b>${e.date}</b> · ${e.equipmentType}${e.equipmentModel ? " ("+e.equipmentModel+")" : ""}</div>
-          <div style="display:flex;align-items:center;gap:8px">
+      <div style="border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:12px;background:#fff">
+        <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:12px">
+          <div>
+            <div style="font-size:14px;font-weight:800;color:var(--navy)">${e.empName||""}</div>
+            <div style="font-size:12px;color:var(--gray);margin-top:2px">${e.date} · ${e.equipmentType}${e.equipmentModel ? " ("+e.equipmentModel+")" : ""}</div>
+          </div>
+          <div style="display:flex;align-items:flex-start;gap:8px">
             <span style="font-size:12px;color:var(--gray)">${e.instructorName||""}</span>
             <button type="button" class="btn-ghost" style="padding:3px 10px;font-size:12px"
               onclick="editEvaluation('${String(e.evalId).replace(/'/g,"\\'")}')">✏️ Редактировать</button>
           </div>
         </div>
-        <div style="display:flex;gap:16px;margin-top:8px;font-size:13px">
-          <span>Блок 1: <b style="color:${scoreColor(e.block1Score)}">${e.block1Score}</b></span>
-          <span>Блок 2: <b style="color:${scoreColor(e.block2Score)}">${e.block2Score}</b></span>
-          <span>Блок 3: <b style="color:${scoreColor(e.block3Score)}">${e.block3Score}</b></span>
-        </div>
-        ${e.summary ? `<div style="font-size:13px;color:var(--navy);margin-top:8px;line-height:1.5">${e.summary}</div>` : ""}
+        ${evalBarsHtml(e.block1Score, e.block2Score, e.block3Score, true)}
+        ${e.summary ? `<div style="font-size:13px;color:var(--navy);margin-top:12px;line-height:1.5">${e.summary}</div>` : ""}
       </div>
     `).join("");
   } catch (err) {
