@@ -61,6 +61,7 @@ function doGet(e) {
   else if (action === "getOperatorEvaluations") result = getOperatorEvaluations(e.parameter.empId);
   else if (action === "getEvaluationDetail") result = getEvaluationDetail(e.parameter.evalId);
   else if (action === "getEvaluationAlerts") result = getEvaluationAlerts();
+  else if (action === "getEvaluationStats") result = getEvaluationStats(e.parameter);
   else result = json({ ok: false, error: "unknown action" });
 
   if (callback) {
@@ -2866,6 +2867,78 @@ function getEvaluationAlerts() {
   });
   alerts.forEach(a => delete a.__sortDate);
   return json({ ok: true, total, lowCount: alerts.length, alerts: alerts.slice(0, 100) });
+}
+
+// ── Рейтинг по оценкам работы — независимый от рейтинга по осмотрам ──
+// Усредняет три блока по каждому оператору за период/участок (те же
+// фильтры, что уже есть на вкладке «Рейтинг операторов»). Сортировка по
+// среднему трёх блоков — только для порядка вывода (кто выше в списке),
+// пользователю всегда показываются три отдельных балла, не единая цифра —
+// сводить их в один рейтинг с осмотрами техники осознанно не стали.
+function getEvaluationStats(p) {
+  const siteFilter = (p && p.site && p.site !== "all") ? String(p.site).trim() : "";
+  const days = Number((p && p.days) || 0);
+
+  const ss    = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName(SHEET_EVALUATIONS);
+  if (!sheet) return json({ ok: true, operators: [] });
+  const rows = sheet.getDataRange().getValues();
+  if (rows.length < 2) return json({ ok: true, operators: [] });
+  const headers = rows[0];
+  const idx = {};
+  headers.forEach((h,i) => idx[h] = i);
+
+  let since = null;
+  if (days > 0) {
+    since = new Date();
+    since.setDate(since.getDate() - days);
+    since.setHours(0,0,0,0);
+  }
+
+  const byOp = {}; // empName -> { empId, count, sums[3], counts[3], lastDate }
+  rows.slice(1).forEach(r => {
+    if (!r[idx["evalId"]]) return;
+    const site = String(r[idx["site"]] || "").trim();
+    if (siteFilter && site !== siteFilter) return;
+
+    const rawDate = r[idx["date"]];
+    const d = rawDate instanceof Date ? rawDate : new Date(rawDate);
+    if (since && (isNaN(d) || d < since)) return;
+
+    const empName = String(r[idx["empName"]] || "").trim();
+    if (!empName) return;
+    const empId = r[idx["empId"]] || "";
+
+    if (!byOp[empName]) byOp[empName] = { empId: empId, count: 0, sums: [0,0,0], counts: [0,0,0], lastDate: null };
+    const op = byOp[empName];
+    op.count++;
+    if (empId && !op.empId) op.empId = empId;
+    [idx["block1Score"], idx["block2Score"], idx["block3Score"]].forEach((col, bi) => {
+      const v = r[col];
+      if (v !== "-" && v !== "" && v !== undefined && v !== null && !isNaN(Number(v))) {
+        op.sums[bi] += Number(v);
+        op.counts[bi]++;
+      }
+    });
+    if (!isNaN(d) && (!op.lastDate || d > op.lastDate)) op.lastDate = d;
+  });
+
+  const operators = Object.keys(byOp).map(name => {
+    const o = byOp[name];
+    const avg = i => o.counts[i] ? Math.round((o.sums[i]/o.counts[i])*100)/100 : "-";
+    const b1 = avg(0), b2 = avg(1), b3 = avg(2);
+    const nums = [b1,b2,b3].filter(v => v !== "-");
+    const overallForSortOnly = nums.length ? nums.reduce((a,b)=>a+b,0)/nums.length : 0;
+    return {
+      empName: name, empId: o.empId, count: o.count,
+      block1Avg: b1, block2Avg: b2, block3Avg: b3,
+      lastDate: o.lastDate ? Utilities.formatDate(o.lastDate, "Asia/Almaty", "dd.MM.yyyy") : "",
+      __sort: overallForSortOnly,
+    };
+  }).sort((a,b) => b.__sort - a.__sort);
+  operators.forEach(o => delete o.__sort);
+
+  return json({ ok: true, operators });
 }
 
 // ── Резюме оценки через Claude API ────────────────────────────
