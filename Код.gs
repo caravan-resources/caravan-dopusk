@@ -2595,7 +2595,7 @@ function saveEvaluation(p) {
   }
 
   // Личное дело — та же запись видна в истории сотрудника рядом со взысканиями/поощрениями.
-  const scoresText = "Блок 1: " + block1Score + ", Блок 2: " + block2Score + ", Блок 3: " + block3Score;
+  const scoresText = "Обязанности: " + block1Score + ", Техническое состояние: " + block2Score + ", Эксплуатация: " + block3Score;
   savePersonnelEvent(
     empId || "", empName, "Оценка",
     dateStr,
@@ -2692,7 +2692,7 @@ function updateEvaluation(p) {
   // Личное дело: обновляем связанную запись (по evalId), а не создаём новую.
   // Для оценок, сохранённых до появления поля evalId, связи нет — тогда
   // создаём запись, как при первом сохранении.
-  const scoresText = "Блок 1: " + block1Score + ", Блок 2: " + block2Score + ", Блок 3: " + block3Score;
+  const scoresText = "Обязанности: " + block1Score + ", Техническое состояние: " + block2Score + ", Эксплуатация: " + block3Score;
   const peSheet = ss.getSheetByName(SHEET_PERSONNEL_EVENTS);
   let peUpdated = false;
   if (peSheet) {
@@ -2891,8 +2891,8 @@ function generateEvaluationSummary(p) {
     "профессиональной деятельности оператора на месте работы.\n\n" +
     "Оператор: " + (empName || "не указан") + ", должность: " + (position || "не указана") + ".\n" +
     "Тип техники: " + (equipmentType || "не указан") + ".\n" +
-    "Балл по блоку «Обязанности оператора» (1-5, или «-» если не оценивалось): " + block1Score + "\n" +
-    "Балл по блоку «Состояние техники» (1-5): " + block2Score + "\n" +
+    "Балл по блоку «Обязанности» (1-5, или «-» если не оценивалось): " + block1Score + "\n" +
+    "Балл по блоку «Техническое состояние» (1-5): " + block2Score + "\n" +
     "Балл по блоку «Эксплуатация» (1-5): " + block3Score + "\n\n" +
     "Пункты с низкой оценкой:\n" + weakText + "\n\n" +
     "Пункты с высокой оценкой:\n" + strongText + "\n\n" +
