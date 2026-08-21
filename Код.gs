@@ -114,6 +114,7 @@ function doPost(e) {
     if (d.action === "swapDayNight") return swapDayNight(d);
     if (d.action === "clearShiftAssignments") return clearShiftAssignments();
     if (d.action === "saveEvaluation") return saveEvaluation(d);
+    if (d.action === "updateEvaluation") return updateEvaluation(d);
     if (d.action === "deleteEvaluation") return deleteEvaluation(d);
     if (d.action === "generateEvaluationSummary") return generateEvaluationSummary(d);
     if (d.action === "importEvaluationCriteria") return importEvaluationCriteria(d);
@@ -1033,7 +1034,11 @@ function getPersonnelEvents() {
   return json(data);
 }
 
-function savePersonnelEvent(empId, empName, type, date, description, issuedBy) {
+// evalId (необязательный) — если событие создано автоматически из
+// saveEvaluation/updateEvaluation, связывает запись личного дела с
+// конкретной оценкой, чтобы при редактировании оценки обновлять эту же
+// строку, а не плодить дубликаты в личном деле на каждое сохранение.
+function savePersonnelEvent(empId, empName, type, date, description, issuedBy, evalId) {
   if (!empName || !type) {
     return json({ ok: false, error: "Нужны как минимум имя сотрудника и тип события" });
   }
@@ -1042,8 +1047,8 @@ function savePersonnelEvent(empId, empName, type, date, description, issuedBy) {
   let sheet   = ss.getSheetByName(SHEET_PERSONNEL_EVENTS);
   if (!sheet) {
     sheet = ss.insertSheet(SHEET_PERSONNEL_EVENTS);
-    sheet.appendRow(["empId", "empName", "date", "type", "description", "issuedBy"]);
-    sheet.getRange(1,1,1,6)
+    sheet.appendRow(["empId", "empName", "date", "type", "description", "issuedBy", "evalId"]);
+    sheet.getRange(1,1,1,7)
       .setBackground("#0D1B3E").setFontColor("#F4A52A").setFontWeight("bold");
     sheet.setFrozenRows(1);
     sheet.setColumnWidth(1, 80);
@@ -1052,11 +1057,17 @@ function savePersonnelEvent(empId, empName, type, date, description, issuedBy) {
     sheet.setColumnWidth(4, 120);
     sheet.setColumnWidth(5, 350);
     sheet.setColumnWidth(6, 180);
+  } else {
+    const headerRow = sheet.getRange(1,1,1,Math.max(7, sheet.getLastColumn())).getValues()[0];
+    if (headerRow[6] !== "evalId") {
+      sheet.getRange(1,7).setValue("evalId");
+      sheet.getRange(1,7).setBackground("#0D1B3E").setFontColor("#F4A52A").setFontWeight("bold");
+    }
   }
 
   const dateStr = date || Utilities.formatDate(new Date(), "Asia/Almaty", "dd.MM.yyyy");
   ensureCapacity(sheet, 1);
-  sheet.appendRow([empId || "", empName, dateStr, type, description || "", issuedBy || ""]);
+  sheet.appendRow([empId || "", empName, dateStr, type, description || "", issuedBy || "", evalId || ""]);
   return json({ ok: true });
 }
 
@@ -2589,10 +2600,129 @@ function saveEvaluation(p) {
     empId || "", empName, "Оценка",
     dateStr,
     scoresText + (summary ? (". " + summary) : ""),
-    instructorName || ""
+    instructorName || "",
+    evalId
   );
 
   return json({ ok: true, evalId, block1Score, block2Score, block3Score, coursesAdded });
+}
+
+// ── Редактирование уже сохранённой оценки ────────────────────
+// В отличие от saveEvaluation: находит существующую строку по evalId и
+// перезаписывает её (не создаёт новую), удаляет и пишет заново детализацию
+// по пунктам, обновляет СВЯЗАННУЮ запись личного дела (не плодит вторую).
+// Авто-рекомендацию курса при низком балле НЕ повторяет — иначе повторное
+// редактирование одной и той же слабой оценки плодило бы дубликаты в
+// «ПланОбучения»; рекомендация ставится только при первом создании.
+function updateEvaluation(p) {
+  const { evalId, empId, empName, position, date, equipmentType, equipmentModel, site,
+          instructorName, supervisorName, workType, summary, answers } = p || {};
+
+  if (!evalId) return json({ ok: false, error: "Нужен evalId" });
+  if (!empName || !equipmentType || !Array.isArray(answers) || !answers.length) {
+    return json({ ok: false, error: "Нужны как минимум empName, equipmentType и ответы по пунктам" });
+  }
+
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const evalSheet = ss.getSheetByName(SHEET_EVALUATIONS);
+  if (!evalSheet) return json({ ok: false, error: "Лист «ОценкиОператоров» не найден" });
+
+  const rows = evalSheet.getDataRange().getValues();
+  const headers = rows[0];
+  const idCol = headers.indexOf("evalId");
+  if (idCol < 0) return json({ ok: false, error: "Не найдена колонка evalId" });
+
+  let rowNum = -1;
+  for (let i = 1; i < rows.length; i++) {
+    if (String(rows[i][idCol]).trim() === String(evalId).trim()) { rowNum = i + 1; break; }
+  }
+  if (rowNum < 0) return json({ ok: false, error: "Оценка с таким evalId не найдена — возможно, была удалена. Обновите список." });
+
+  const b1values = answers.filter(a => String(a.block) === "1").map(a => a.value);
+  const b2values = answers.filter(a => String(a.block) === "2").map(a => a.value);
+  const b3values = answers.filter(a => String(a.block) === "3").map(a => a.value);
+  const block1Score = computeEvalBlock1Score(b1values);
+  const block2Score = computeEvalAvgScore(b2values);
+  const block3Score = computeEvalAvgScore(b3values);
+
+  const dateStr = date || Utilities.formatDate(new Date(), "Asia/Almaty", "dd.MM.yyyy");
+  const col = h => headers.indexOf(h) + 1;
+  // evalId и createdAt намеренно не трогаем — сохраняем исходную идентичность записи
+  evalSheet.getRange(rowNum, col("empId")).setValue(empId || "");
+  evalSheet.getRange(rowNum, col("empName")).setValue(empName);
+  evalSheet.getRange(rowNum, col("position")).setValue(position || "");
+  evalSheet.getRange(rowNum, col("date")).setValue(dateStr);
+  evalSheet.getRange(rowNum, col("equipmentType")).setValue(equipmentType);
+  evalSheet.getRange(rowNum, col("equipmentModel")).setValue(equipmentModel || "");
+  evalSheet.getRange(rowNum, col("site")).setValue(site || "");
+  evalSheet.getRange(rowNum, col("instructorName")).setValue(instructorName || "");
+  evalSheet.getRange(rowNum, col("supervisorName")).setValue(supervisorName || "");
+  evalSheet.getRange(rowNum, col("workType")).setValue(workType || "");
+  evalSheet.getRange(rowNum, col("block1Score")).setValue(block1Score);
+  evalSheet.getRange(rowNum, col("block2Score")).setValue(block2Score);
+  evalSheet.getRange(rowNum, col("block3Score")).setValue(block3Score);
+  evalSheet.getRange(rowNum, col("summary")).setValue(summary || "");
+
+  // Детализация: старые строки по этому evalId удаляем, пишем актуальные заново
+  let ansSheet = ss.getSheetByName(SHEET_EVAL_ANSWERS);
+  const ANS_HEADER = ["evalId","block","itemNum","itemText","value","comment"];
+  if (!ansSheet) {
+    ansSheet = ss.insertSheet(SHEET_EVAL_ANSWERS);
+    ansSheet.appendRow(ANS_HEADER);
+    ansSheet.getRange(1,1,1,ANS_HEADER.length)
+      .setBackground("#0D1B3E").setFontColor("#F4A52A").setFontWeight("bold");
+    ansSheet.setFrozenRows(1);
+    ansSheet.setColumnWidth(4, 400);
+  } else {
+    const ansRows = ansSheet.getDataRange().getValues();
+    for (let i = ansRows.length - 1; i >= 1; i--) {
+      if (String(ansRows[i][0]).trim() === String(evalId).trim()) ansSheet.deleteRow(i + 1);
+    }
+  }
+  const newAnsRows = answers.map(a => [
+    evalId, String(a.block || ""), String(a.itemNum || ""), String(a.itemText || ""),
+    a.value === undefined || a.value === null ? "" : String(a.value), a.comment || "",
+  ]);
+  ensureCapacity(ansSheet, newAnsRows.length);
+  const ansItemNumCol = ANS_HEADER.indexOf("itemNum") + 1;
+  const ansStartRow = ansSheet.getLastRow() + 1;
+  ansSheet.getRange(ansStartRow, ansItemNumCol, newAnsRows.length, 1).setNumberFormat("@");
+  ansSheet.getRange(ansStartRow, 1, newAnsRows.length, ANS_HEADER.length).setValues(newAnsRows);
+
+  // Личное дело: обновляем связанную запись (по evalId), а не создаём новую.
+  // Для оценок, сохранённых до появления поля evalId, связи нет — тогда
+  // создаём запись, как при первом сохранении.
+  const scoresText = "Блок 1: " + block1Score + ", Блок 2: " + block2Score + ", Блок 3: " + block3Score;
+  const peSheet = ss.getSheetByName(SHEET_PERSONNEL_EVENTS);
+  let peUpdated = false;
+  if (peSheet) {
+    const peRows = peSheet.getDataRange().getValues();
+    const peHeaders = peRows[0];
+    const peEvalIdCol = peHeaders.indexOf("evalId");
+    if (peEvalIdCol >= 0) {
+      for (let i = 1; i < peRows.length; i++) {
+        if (String(peRows[i][peEvalIdCol]).trim() === String(evalId).trim()) {
+          const dateColNum = peHeaders.indexOf("date") + 1;
+          const descColNum = peHeaders.indexOf("description") + 1;
+          const issColNum  = peHeaders.indexOf("issuedBy") + 1;
+          peSheet.getRange(i + 1, dateColNum).setValue(dateStr);
+          peSheet.getRange(i + 1, descColNum).setValue(scoresText + (summary ? (". " + summary) : ""));
+          if (issColNum > 0) peSheet.getRange(i + 1, issColNum).setValue(instructorName || "");
+          peUpdated = true;
+          break;
+        }
+      }
+    }
+  }
+  if (!peUpdated) {
+    savePersonnelEvent(
+      empId || "", empName, "Оценка", dateStr,
+      scoresText + (summary ? (". " + summary) : ""),
+      instructorName || "", evalId
+    );
+  }
+
+  return json({ ok: true, evalId, block1Score, block2Score, block3Score });
 }
 
 function deleteEvaluation(p) {
