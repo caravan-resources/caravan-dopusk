@@ -979,6 +979,11 @@ async function loadEvalEquipmentTypes() {
     console.error("evaluationEquipmentTypes:", e);
   }
   renderEvalEquipmentTypeSelect();
+  // Селект редактора критериев тоже нужно обновить: если панель "⚙️ Критерии"
+  // открыли раньше, чем пришли эти данные (вполне реально на слабой связи),
+  // её список типов иначе так и останется пустым до перезагрузки страницы —
+  // ничего больше не перерисовывает этот конкретный select.
+  if (document.getElementById("critEditType")) renderCritEditTypeSelect();
 }
 function renderEvalEquipmentTypeSelect() {
   const el = document.getElementById("evalEquipmentType");
