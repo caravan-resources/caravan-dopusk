@@ -1102,7 +1102,7 @@ const EVAL_BLOCK_NAMES = ["Обязанности", "Техническое со
 function evalBarsHtml(b1, b2, b3, compact) {
   const barMaxH = compact ? 28 : 40;
   const barW = compact ? 16 : 20;
-  const boxW = compact ? 44 : 56;
+  const boxW = compact ? 60 : 74;
   const vals = [b1, b2, b3];
   const bars = vals.map((v, i) => {
     const num = (v === "-" || v === undefined || v === null || v === "") ? null : Number(v);
@@ -1110,15 +1110,15 @@ function evalBarsHtml(b1, b2, b3, compact) {
     const color = num === null ? "var(--border)" : (num <= 2 ? "var(--red)" : (num >= 4 ? "var(--green)" : "var(--yellow)"));
     const valText = num === null ? "—" : num;
     return `
-      <div style="display:flex;flex-direction:column;align-items:center;width:${boxW}px">
+      <div style="display:flex;flex-direction:column;align-items:center;width:${boxW}px;flex-shrink:0">
         <div style="font-size:${compact?11:13}px;font-weight:800;color:${color};margin-bottom:2px">${valText}</div>
         <div style="width:${barW}px;height:${barMaxH}px;background:var(--light);border-radius:4px;display:flex;align-items:flex-end;overflow:hidden">
           <div style="width:100%;height:${h}px;background:${color};border-radius:3px 3px 0 0"></div>
         </div>
-        <div style="font-size:${compact?9:10}px;color:var(--gray);text-align:center;margin-top:4px;line-height:1.2">${EVAL_BLOCK_NAMES[i]}</div>
+        <div style="font-size:${compact?9:10}px;color:var(--gray);text-align:center;margin-top:4px;line-height:1.25;width:100%;word-break:break-word">${EVAL_BLOCK_NAMES[i]}</div>
       </div>`;
   }).join("");
-  return `<div style="display:flex;gap:${compact?8:14}px">${bars}</div>`;
+  return `<div style="display:flex;gap:${compact?6:14}px;overflow-x:auto">${bars}</div>`;
 }
 
 function updateEvalScores() {
