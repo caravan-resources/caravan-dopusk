@@ -2903,7 +2903,7 @@ function getEvaluationStats(p) {
     since.setHours(0,0,0,0);
   }
 
-  const byOp = {}; // empName -> { empId, count, sums[3], counts[3], lastDate }
+  const byOp = {}; // empName -> { empId, count, sums[3], counts[3], lastDate, evaluations[] }
   rows.slice(1).forEach(r => {
     if (!r[idx["evalId"]]) return;
     const site = String(r[idx["site"]] || "").trim();
@@ -2918,18 +2918,28 @@ function getEvaluationStats(p) {
     if (!empName) return;
     const empId = r[idx["empId"]] || "";
 
-    if (!byOp[empName]) byOp[empName] = { empId: empId, count: 0, sums: [0,0,0], counts: [0,0,0], lastDate: null };
+    if (!byOp[empName]) byOp[empName] = { empId: empId, count: 0, sums: [0,0,0], counts: [0,0,0], lastDate: null, evaluations: [] };
     const op = byOp[empName];
     op.count++;
     if (empId && !op.empId) op.empId = empId;
-    [idx["block1Score"], idx["block2Score"], idx["block3Score"]].forEach((col, bi) => {
-      const v = r[col];
+    const b1 = r[idx["block1Score"]], b2 = r[idx["block2Score"]], b3 = r[idx["block3Score"]];
+    [b1, b2, b3].forEach((v, bi) => {
       if (v !== "-" && v !== "" && v !== undefined && v !== null && !isNaN(Number(v))) {
         op.sums[bi] += Number(v);
         op.counts[bi]++;
       }
     });
     if (!isNaN(d) && (!op.lastDate || d > op.lastDate)) op.lastDate = d;
+
+    // Резюме и детали по каждой конкретной оценке (не только агрегат) — для
+    // отображения под общей карточкой оператора, если у него их несколько.
+    op.evaluations.push({
+      date: !isNaN(d) ? Utilities.formatDate(d, "Asia/Almaty", "dd.MM.yyyy") : String(rawDate || ""),
+      __sortDate: !isNaN(d) ? d.getTime() : 0,
+      block1Score: b1, block2Score: b2, block3Score: b3,
+      equipmentType: r[idx["equipmentType"]] || "",
+      summary: r[idx["summary"]] || "",
+    });
   });
 
   const operators = Object.keys(byOp).map(name => {
@@ -2937,12 +2947,18 @@ function getEvaluationStats(p) {
     const avg = i => o.counts[i] ? Math.round((o.sums[i]/o.counts[i])*100)/100 : "-";
     const b1 = avg(0), b2 = avg(1), b3 = avg(2);
     const nums = [b1,b2,b3].filter(v => v !== "-");
-    const overallForSortOnly = nums.length ? nums.reduce((a,b)=>a+b,0)/nums.length : 0;
+    // Средний балл по трём блокам — теперь отдаём его и в ответе API, не
+    // только используем для сортировки (раньше намеренно скрывали).
+    const overallAvg = nums.length ? Math.round((nums.reduce((a,b)=>a+b,0)/nums.length)*100)/100 : "-";
+    const evaluations = o.evaluations
+      .sort((a,b) => b.__sortDate - a.__sortDate)
+      .map(e => { const { __sortDate, ...rest } = e; return rest; });
     return {
       empName: name, empId: o.empId, count: o.count,
-      block1Avg: b1, block2Avg: b2, block3Avg: b3,
+      block1Avg: b1, block2Avg: b2, block3Avg: b3, overallAvg: overallAvg,
       lastDate: o.lastDate ? Utilities.formatDate(o.lastDate, "Asia/Almaty", "dd.MM.yyyy") : "",
-      __sort: overallForSortOnly,
+      evaluations: evaluations,
+      __sort: nums.length ? nums.reduce((a,b)=>a+b,0)/nums.length : 0,
     };
   }).sort((a,b) => b.__sort - a.__sort);
   operators.forEach(o => delete o.__sort);
