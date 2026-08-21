@@ -2878,6 +2878,11 @@ function getEvaluationAlerts() {
 function getEvaluationStats(p) {
   const siteFilter = (p && p.site && p.site !== "all") ? String(p.site).trim() : "";
   const days = Number((p && p.days) || 0);
+  // Точное окно [from, to) — для отчётов за конкретный период (тот же
+  // принцип, что уже используется в getChecklistStats). from/to в приоритете
+  // над days, если переданы оба.
+  const fromParam = p && p.from ? new Date(p.from) : null;
+  const toParam   = p && p.to   ? new Date(p.to)   : null;
 
   const ss    = SpreadsheetApp.openById(SHEET_ID);
   const sheet = ss.getSheetByName(SHEET_EVALUATIONS);
@@ -2888,8 +2893,11 @@ function getEvaluationStats(p) {
   const idx = {};
   headers.forEach((h,i) => idx[h] = i);
 
-  let since = null;
-  if (days > 0) {
+  let since = null, until = null;
+  if (fromParam && !isNaN(fromParam.getTime())) {
+    since = fromParam;
+    until = (toParam && !isNaN(toParam.getTime())) ? toParam : new Date();
+  } else if (days > 0) {
     since = new Date();
     since.setDate(since.getDate() - days);
     since.setHours(0,0,0,0);
@@ -2904,6 +2912,7 @@ function getEvaluationStats(p) {
     const rawDate = r[idx["date"]];
     const d = rawDate instanceof Date ? rawDate : new Date(rawDate);
     if (since && (isNaN(d) || d < since)) return;
+    if (until && !isNaN(d) && d >= until) return;
 
     const empName = String(r[idx["empName"]] || "").trim();
     if (!empName) return;
