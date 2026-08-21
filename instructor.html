@@ -311,6 +311,15 @@ tr:hover td { background:#FAFBFD; }
       </div>
 
       <div class="panel">
+        <div class="panel-title">🎯 Оценки операторов — низкие баллы</div>
+        <div class="hint" style="margin-bottom:10px">
+          Оценки работы (не осмотры техники), где хотя бы один из трёх блоков — 2 балла или ниже.
+          Полная история по каждому оператору — в его личном деле.
+        </div>
+        <div id="evaluationAlertsList"></div>
+      </div>
+
+      <div class="panel">
         <div class="panel-title">
           📋 Последние сдачи тестов
           <span style="font-size:12px;color:var(--gray)" id="lastTestsDate"></span>
@@ -1381,6 +1390,7 @@ async function loadAll() {
     { key: "fuel",              action: "getFuelRecords",          cb: "cb_fuel_records"                          },
 
     { key: "personnelEvents",   action: "getPersonnelEvents",      cb: "cb_personnel_events"                      },
+    { key: "evaluationAlerts",  action: "getEvaluationAlerts",     cb: "cb_evaluation_alerts"                     },
   ];
 
   // Грузим пачками по 3, а не все 12 разом. Браузер держит к одному домену
@@ -1413,7 +1423,7 @@ async function loadAll() {
     res.forEach((r, j) => {
       const f = part[j];
       if (r.status !== "fulfilled") return;
-      if (f.key === "checklistStats" || f.key === "personnelStats") {
+      if (f.key === "checklistStats" || f.key === "personnelStats" || f.key === "evaluationAlerts") {
         if (r.value && r.value.ok) DATA[f.key] = r.value;
       }
       else if (Array.isArray(r.value)) DATA[f.key] = r.value;
@@ -1425,7 +1435,7 @@ async function loadAll() {
   settled.forEach((res, i) => {
     const f = fetches[i];
     // Агрегаты (checklistStats, personnelStats) приходят объектом, остальное — массивами
-    const isObj = f.key === "checklistStats" || f.key === "personnelStats";
+    const isObj = f.key === "checklistStats" || f.key === "personnelStats" || f.key === "evaluationAlerts";
     const val = res.status === "fulfilled" ? res.value : null;
     const ok = res.status === "fulfilled" &&
       (isObj ? (val && val.ok) : Array.isArray(val) && (f.critical ? val.length > 0 : true));
@@ -1445,6 +1455,7 @@ async function loadAll() {
 
 function renderAll() {
   renderDashboard();
+  renderEvaluationAlerts();
   renderTestsTable();
   renderRequirementsPanel();
   renderAccessTable();
@@ -1963,6 +1974,59 @@ function renderDashboard() {
         `;
       }).join("")
     : `<div class="empty"><div class="empty-icon">✓</div>Неисправностей за последние 7 дней не найдено</div>`;
+}
+
+// ══════════════════════════════════════════════════════
+// ОЦЕНКИ ОПЕРАТОРОВ — виджет дашборда (низкие баллы)
+// Использует getEvaluationAlerts с бэкенда: он уже сам отбирает записи, где
+// хотя бы один из трёх блоков ≤2, и сортирует по дате. Здесь только вёрстка.
+// ══════════════════════════════════════════════════════
+function renderEvaluationAlerts() {
+  const el = document.getElementById("evaluationAlertsList");
+  if (!el) return;
+  const ea = DATA.evaluationAlerts;
+
+  if (!ea) {
+    el.innerHTML = `<div style="display:flex;align-items:center;gap:8px;padding:10px 12px;background:var(--light);border-radius:8px;font-size:13px;color:var(--gray)">
+      ⏳ Загружаю оценки...
+    </div>`;
+    return;
+  }
+  if (!ea.total) {
+    el.innerHTML = `<div class="empty"><div class="empty-icon">🎯</div>Оценок операторов пока не проводилось</div>`;
+    return;
+  }
+  if (!ea.lowCount) {
+    el.innerHTML = `<div style="display:flex;align-items:center;gap:8px;padding:10px 12px;background:var(--greenbg,#EAF7ED);border-radius:8px;font-size:13px;color:var(--green,#2E7D32);font-weight:700">
+      ✓ Все оценки (${ea.total}) без низких баллов
+    </div>`;
+    return;
+  }
+
+  const scoreColor = s => (s === "-" || s === undefined) ? "var(--gray)" : (Number(s) <= 2 ? "var(--red)" : (Number(s) >= 4 ? "var(--green)" : "var(--yellow)"));
+  const scoreSpan = (label, val) => `<span style="color:${scoreColor(val)};font-weight:700">${label}: ${val}</span>`;
+
+  el.innerHTML = ea.alerts.slice(0, 8).map(a => `
+    <div style="padding:10px 0;border-bottom:1px solid var(--border)">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap">
+        <div>
+          <div style="font-size:13px;font-weight:700;color:var(--navy)">${a.empName}</div>
+          <div style="font-size:11px;color:var(--gray)">${a.equipmentType||""}</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:12px;color:var(--gray)">${a.date}</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:14px;margin-top:6px;font-size:12px">
+        ${scoreSpan("Блок 1", a.block1Score)}
+        ${scoreSpan("Блок 2", a.block2Score)}
+        ${scoreSpan("Блок 3", a.block3Score)}
+      </div>
+      ${a.summary ? `<div style="font-size:12px;color:var(--navy);margin-top:6px;line-height:1.4">${a.summary}</div>` : ""}
+    </div>
+  `).join("") + (ea.lowCount > 8
+    ? `<div style="font-size:12px;color:var(--gray);text-align:center;padding-top:10px">Показаны 8 из ${ea.lowCount} — остальные смотрите в личном деле сотрудника</div>`
+    : "");
 }
 
 // ══════════════════════════════════════════════════════
@@ -3319,6 +3383,7 @@ function personnelEventBadge(type) {
   const t = String(type||"").toLowerCase();
   if (t === "взыскание") return `<span style="background:var(--redbg);color:var(--red);font-size:11px;font-weight:700;padding:2px 8px;border-radius:99px">⚠ Взыскание</span>`;
   if (t === "награда")   return `<span style="background:#FFFBEB;color:#B45309;font-size:11px;font-weight:700;padding:2px 8px;border-radius:99px">🏆 Награда</span>`;
+  if (t === "оценка")    return `<span style="background:#EEF2FF;color:#4338CA;font-size:11px;font-weight:700;padding:2px 8px;border-radius:99px">🎯 Оценка</span>`;
   return `<span style="background:var(--greenbg);color:var(--green);font-size:11px;font-weight:700;padding:2px 8px;border-radius:99px">✓ Поощрение</span>`;
 }
 
