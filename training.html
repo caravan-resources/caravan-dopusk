@@ -318,6 +318,12 @@ td { padding:8px; border-bottom:1px solid var(--border); }
       </div>
 
       <div class="panel" id="evalScorePanel" style="display:none">
+        <div id="evalEditingBanner" style="display:none;background:#EEF2FF;color:#4338CA;font-size:12px;
+          font-weight:700;padding:8px 12px;border-radius:8px;margin-bottom:12px;justify-content:space-between;
+          align-items:center;gap:8px">
+          <span>✏️ Редактирование ранее сохранённой оценки</span>
+          <button type="button" class="btn-ghost" style="padding:3px 10px;font-size:12px" onclick="cancelEvalEdit()">Отменить</button>
+        </div>
         <div class="panel-title">Баллы (считаются сразу при заполнении)</div>
         <div id="evalScoreSummary" style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:16px"></div>
         <div class="field">
@@ -326,7 +332,7 @@ td { padding:8px; border-bottom:1px solid var(--border); }
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <button class="btn-ghost" id="evalGenBtn" onclick="generateEvalSummaryClick()">✨ Сгенерировать резюме</button>
-          <button class="btn-gold" onclick="submitEvaluation()">💾 Сохранить оценку</button>
+          <button class="btn-gold" id="evalSubmitBtn" onclick="submitEvaluation()">💾 Сохранить оценку</button>
         </div>
       </div>
 
@@ -949,6 +955,12 @@ function renderCatalogList() {
 // ══════════════════════════════════════════════════════════
 let EVAL_CRITERIA = { block1: [], block2: [], block3: [] };
 let EVAL_ANSWERS = {}; // itemNum -> { block, itemText, value }
+// Режим редактирования уже сохранённой оценки: null — создаём новую,
+// иначе — evalId той, что редактируем. EVAL_HISTORY_CACHE хранит полные
+// объекты оценок из истории по evalId, чтобы кнопка "Редактировать" не
+// делала отдельный запрос за шапкой (только за детализацией по пунктам).
+let EVAL_EDITING_ID = null;
+let EVAL_HISTORY_CACHE = {};
 
 function renderEvalEmpDatalist() {
   const el = document.getElementById("evalEmpList");
@@ -1144,8 +1156,9 @@ async function submitEvaluation() {
   if (!answers.length) { alert("Заполните хотя бы один пункт оценки"); return; }
 
   const dateIso = document.getElementById("evalDate").value;
+  const isEditing = !!EVAL_EDITING_ID;
   const payload = {
-    action: "saveEvaluation",
+    action: isEditing ? "updateEvaluation" : "saveEvaluation",
     empId: emp.id, empName: emp.name, position: emp.position || "",
     date: dateIso ? isoToRu(dateIso) : "",
     equipmentType: type,
@@ -1157,14 +1170,20 @@ async function submitEvaluation() {
     summary: document.getElementById("evalSummary").value.trim(),
     answers,
   };
+  if (isEditing) payload.evalId = EVAL_EDITING_ID;
 
   try {
     const res = await fetch(CFG.SHEET_URL, { method: "POST", body: JSON.stringify(payload) });
     const val = await res.json();
     if (!val.ok) { alert("Не удалось сохранить: " + (val.error||"")); return; }
-    let msg = `Оценка сохранена.\nБлок 1: ${val.block1Score} · Блок 2: ${val.block2Score} · Блок 3: ${val.block3Score}`;
+    let msg = isEditing
+      ? `Оценка обновлена.\nБлок 1: ${val.block1Score} · Блок 2: ${val.block2Score} · Блок 3: ${val.block3Score}`
+      : `Оценка сохранена.\nБлок 1: ${val.block1Score} · Блок 2: ${val.block2Score} · Блок 3: ${val.block3Score}`;
     if (val.coursesAdded) msg += `\n\nАвтоматически добавлено в план обучения курсов: ${val.coursesAdded}`;
     alert(msg);
+    EVAL_EDITING_ID = null;
+    document.getElementById("evalEditingBanner").style.display = "none";
+    document.getElementById("evalSubmitBtn").textContent = "💾 Сохранить оценку";
     EVAL_ANSWERS = {};
     document.getElementById("evalSummary").value = "";
     document.getElementById("evalEquipmentModel").value = "";
@@ -1183,13 +1202,19 @@ async function loadEvalHistoryFor(empId) {
   try {
     const val = await fetchWithRetry(`${CFG.SHEET_URL}?action=getOperatorEvaluations&empId=${encodeURIComponent(empId)}`, 30000, 3);
     const list = Array.isArray(val) ? val : [];
+    EVAL_HISTORY_CACHE = {};
+    list.forEach(e => { EVAL_HISTORY_CACHE[e.evalId] = e; });
     if (!list.length) { el.innerHTML = `<div class="empty"><div class="empty-icon">🗂</div>Оценок пока нет</div>`; return; }
     const scoreColor = s => (s === "-" || s === undefined) ? "var(--gray)" : (Number(s) <= 2 ? "var(--red)" : (Number(s) >= 4 ? "var(--green)" : "var(--yellow)"));
     el.innerHTML = list.map(e => `
       <div style="padding:12px 0;border-bottom:1px solid var(--border)">
         <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">
           <div><b>${e.date}</b> · ${e.equipmentType}${e.equipmentModel ? " ("+e.equipmentModel+")" : ""}</div>
-          <div style="font-size:12px;color:var(--gray)">${e.instructorName||""}</div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="font-size:12px;color:var(--gray)">${e.instructorName||""}</span>
+            <button type="button" class="btn-ghost" style="padding:3px 10px;font-size:12px"
+              onclick="editEvaluation('${String(e.evalId).replace(/'/g,"\\'")}')">✏️ Редактировать</button>
+          </div>
         </div>
         <div style="display:flex;gap:16px;margin-top:8px;font-size:13px">
           <span>Блок 1: <b style="color:${scoreColor(e.block1Score)}">${e.block1Score}</b></span>
@@ -1203,6 +1228,71 @@ async function loadEvalHistoryFor(empId) {
     el.innerHTML = `<div class="empty">Не удалось загрузить: ${err.message}</div>`;
   }
 }
+
+// ── Редактирование ранее сохранённой оценки ──────────────────
+// Заполняет форму данными существующей оценки (шапка — из кэша истории,
+// ответы по пунктам — отдельным запросом getEvaluationDetail, чтобы список
+// истории оставался лёгким). Дальнейшее сохранение идёт через
+// updateEvaluation, а не saveEvaluation — см. submitEvaluation().
+async function editEvaluation(evalId) {
+  const e = EVAL_HISTORY_CACHE[evalId];
+  if (!e) { alert("Не удалось найти эту оценку — обновите список истории."); return; }
+
+  EVAL_EDITING_ID = evalId;
+  document.getElementById("evalEditingBanner").style.display = "flex";
+  document.getElementById("evalSubmitBtn").textContent = "💾 Сохранить изменения";
+
+  document.getElementById("evalEmpInput").value = `${e.empName} [${e.empId}]`;
+  document.getElementById("evalPosition").value = e.position || "";
+  const isoDate = (() => {
+    const d = parseAnyDate(e.date);
+    return d ? Utilities_formatIso(d) : "";
+  })();
+  document.getElementById("evalDate").value = isoDate;
+  document.getElementById("evalEquipmentModel").value = e.equipmentModel || "";
+  document.getElementById("evalWorkType").value = e.workType || "";
+  document.getElementById("evalInstructor").value = e.instructorName || "";
+  document.getElementById("evalSupervisor").value = e.supervisorName || "";
+  document.getElementById("evalSummary").value = e.summary || "";
+
+  document.getElementById("evalEquipmentType").value = e.equipmentType || "";
+  await onEvalEquipmentTypeChange(); // грузит критерии и отрисовывает блоки (пустые)
+
+  // Подгружаем сами ответы и подставляем их в уже отрисованные блоки
+  try {
+    const details = await fetchWithRetry(`${CFG.SHEET_URL}?action=getEvaluationDetail&evalId=${encodeURIComponent(evalId)}`, 30000, 3);
+    EVAL_ANSWERS = {};
+    (Array.isArray(details) ? details : []).forEach(d => {
+      EVAL_ANSWERS[d.itemNum] = { block: d.block, itemText: d.itemText, value: d.value };
+    });
+    renderEvalCriteriaBlocks();
+  } catch (err) {
+    alert("Не удалось загрузить пункты оценки: " + err.message);
+  }
+
+  document.getElementById("screenEval").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function cancelEvalEdit() {
+  EVAL_EDITING_ID = null;
+  document.getElementById("evalEditingBanner").style.display = "none";
+  document.getElementById("evalSubmitBtn").textContent = "💾 Сохранить оценку";
+  EVAL_ANSWERS = {};
+  document.getElementById("evalSummary").value = "";
+  document.getElementById("evalEquipmentModel").value = "";
+  document.getElementById("evalWorkType").value = "";
+  renderEvalCriteriaBlocks();
+}
+
+// Локальный аналог Utilities.formatDate("yyyy-MM-dd") для JS Date —
+// на бэкенде используется Apps Script Utilities, здесь пишем руками.
+function Utilities_formatIso(d) {
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth()+1).padStart(2,"0");
+  const dd = String(d.getDate()).padStart(2,"0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
 
 // ══════════════════════════════════════════════════════════
 // РЕДАКТОР КАТАЛОГА КРИТЕРИЕВ
