@@ -525,8 +525,18 @@ function renderEmpDatalist() {
 }
 // Достаём empId из строки вида "Имя Фамилия [123]", которую оставляет datalist
 function empIdFromInput(text) {
-  const m = String(text||"").match(/\[([^\]]+)\]\s*$/);
-  return m ? m[1] : "";
+  const raw = String(text||"").trim();
+  const m = raw.match(/\[([^\]]+)\]\s*$/);
+  if (m) return m[1];
+  // Резерв: если "[id]" не найден — датлист мог подставить только видимое
+  // имя без скобок (случается на некоторых браузерах/устройствах при выборе
+  // подсказки касанием, особенно на слабой связи, когда список подсказок
+  // не успевает полностью прогрузиться). Пробуем найти сотрудника по точному
+  // совпадению имени, чтобы форма не оставалась молча пустой.
+  if (!raw) return "";
+  const nameOnly = raw.toLowerCase();
+  const match = (DATA.employees||[]).find(e => String(e.name||"").trim().toLowerCase() === nameOnly);
+  return match ? match.id : "";
 }
 
 function renderCourseSelect() {
