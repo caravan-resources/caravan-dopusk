@@ -2009,6 +2009,10 @@ function renderDashboard() {
 // основной рейтинг по осмотрам, но данные и сортировка полностью отдельные —
 // см. getEvaluationStats в Код.gs.
 // ══════════════════════════════════════════════════════
+// Кэш последнего ответа — нужен, чтобы раскрывать детали строки по клику,
+// не делая повторный запрос за теми же данными.
+let EVAL_RATING_DATA = [];
+
 async function loadEvaluationRatingSection() {
   const el = document.getElementById("evalRatingList");
   if (!el) return;
@@ -2025,6 +2029,7 @@ async function loadEvaluationRatingSection() {
   try {
     const val = await jsonpFetchRetry(`${CFG.SHEET_URL}?${params.toString()}`, "cb_evaluation_stats", 30000, 3);
     const operators = (val && val.ok && Array.isArray(val.operators)) ? val.operators : [];
+    EVAL_RATING_DATA = operators;
     if (!operators.length) {
       el.innerHTML = `<div class="empty"><div class="empty-icon">🎯</div>Оценок работы за выбранный период нет</div>`;
       return;
@@ -2032,44 +2037,49 @@ async function loadEvaluationRatingSection() {
     const medal = i => ["🥇","🥈","🥉"][i] || `${i+1}.`;
     const clickable = (o, inner) => o.empId
       ? `<span style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted"
-           onclick="goToEmployeeProfile('${String(o.empId).replace(/'/g,"\\'")}')">${inner}</span>`
+           onclick="event.stopPropagation();goToEmployeeProfile('${String(o.empId).replace(/'/g,"\\'")}')">${inner}</span>`
       : inner;
-    const wordEval = n => n === 1 ? "оценка" : (n >= 2 && n <= 4 ? "оценки" : "оценок");
-    const avgColor = v => (v === "-" || v === undefined) ? "var(--gray)" : (Number(v) <= 2 ? "var(--red)" : (Number(v) >= 4 ? "var(--green)" : "var(--yellow)"));
+    const scoreColor = v => (v === "-" || v === undefined) ? "var(--gray)" : (Number(v) <= 2 ? "var(--red)" : (Number(v) >= 4 ? "var(--green)" : "var(--yellow)"));
+    const scoreCell = v => `<b style="color:${scoreColor(v)}">${v}</b>`;
 
-    el.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px">` +
-      operators.map((o,i) => {
-        const withSummary = (o.evaluations||[]).filter(e => e.summary);
-        return `
-      <div style="border:1px solid var(--border);border-radius:12px;padding:12px;background:#fff">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:10px">
-          <div style="display:flex;align-items:center;gap:8px;min-width:0">
-            <span style="font-size:15px;flex-shrink:0">${medal(i)}</span>
-            <div style="min-width:0">
-              <div style="font-size:13px;font-weight:700;color:var(--navy);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${clickable(o, o.empName)}</div>
-              <div style="font-size:11px;color:var(--gray)">${o.count} ${wordEval(o.count)} · посл. ${o.lastDate}</div>
-            </div>
-          </div>
-          <div style="text-align:center;flex-shrink:0">
-            <div style="font-size:19px;font-weight:800;color:${avgColor(o.overallAvg)}">${o.overallAvg}</div>
-            <div style="font-size:9px;color:var(--gray);white-space:nowrap">средний балл</div>
-          </div>
-        </div>
-        ${evalBarsHtml(o.block1Avg, o.block2Avg, o.block3Avg, true)}
-        ${withSummary.length ? `
-          <div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border)">
-            ${withSummary.map(e => `
-              <div style="font-size:11px;color:var(--navy);line-height:1.4;margin-bottom:6px">
-                <span style="color:var(--gray)">${e.date}${e.equipmentType?" · "+e.equipmentType:""}:</span> ${e.summary}
+    el.innerHTML = `<div class="tbl-wrap"><table style="font-size:13px">
+      <thead><tr>
+        <th>#</th><th>Оператор</th><th>Обязанности</th><th>Техническое состояние</th>
+        <th>Эксплуатация</th><th>Средний балл</th><th>Оценок</th><th>Последняя</th>
+      </tr></thead>
+      <tbody>${operators.map((o,i) => `
+        <tr style="cursor:pointer" onclick="toggleEvalRatingDetail(${i})">
+          <td>${medal(i)}</td>
+          <td><b>${clickable(o, o.empName)}</b></td>
+          <td>${scoreCell(o.block1Avg)}</td>
+          <td>${scoreCell(o.block2Avg)}</td>
+          <td>${scoreCell(o.block3Avg)}</td>
+          <td>${scoreCell(o.overallAvg)}</td>
+          <td>${o.count}</td>
+          <td style="font-size:12px;color:var(--gray)">${o.lastDate}</td>
+        </tr>
+        <tr id="evalRatingDetail${i}" style="display:none;background:var(--light)">
+          <td colspan="8" style="padding:10px 14px">
+            ${(o.evaluations||[]).map(e => `
+              <div style="font-size:12px;padding:6px 0;border-bottom:1px solid var(--border)">
+                <b>${e.date}</b> · ${e.equipmentType||""} ·
+                Обяз.: ${e.block1Score} · Техн.: ${e.block2Score} · Экспл.: ${e.block3Score}
+                ${e.summary ? `<div style="color:var(--navy);margin-top:3px;line-height:1.4">${e.summary}</div>` : ""}
               </div>
-            `).join("")}
-          </div>` : ""}
-      </div>`;
-      }).join("") +
-    `</div>`;
+            `).join("") || `<div style="font-size:12px;color:var(--gray)">Нет данных.</div>`}
+          </td>
+        </tr>
+      `).join("")}</tbody>
+    </table></div>`;
   } catch (err) {
     el.innerHTML = `<div class="empty">Не удалось загрузить: ${err.message}</div>`;
   }
+}
+
+function toggleEvalRatingDetail(i) {
+  const row = document.getElementById("evalRatingDetail"+i);
+  if (!row) return;
+  row.style.display = row.style.display === "none" ? "table-row" : "none";
 }
 
 // ══════════════════════════════════════════════════════
