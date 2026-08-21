@@ -830,6 +830,16 @@ tr:hover td { background:#FAFBFD; }
         </div>
         <div id="ratingTable"></div>
       </div>
+
+      <div class="panel" style="border-top:3px solid #4338CA">
+        <div class="panel-title">🎯 Рейтинг по оценкам работы</div>
+        <div class="hint" style="margin-bottom:10px">
+          Независимый рейтинг — по итогам формальных оценок работы, а не осмотров техники.
+          Три параметра усредняются по всем оценкам оператора за выбранный период/участок
+          (фильтры выше). Сюда попадают только сотрудники, которых уже оценивали.
+        </div>
+        <div id="evalRatingList"></div>
+      </div>
     </div>
 
     <!-- ══ ГРАФИК ОБУЧЕНИЯ ══ -->
@@ -1197,7 +1207,7 @@ const EVAL_BLOCK_NAMES = ["Обязанности", "Техническое со
 function evalBarsHtml(b1, b2, b3, compact) {
   const barMaxH = compact ? 28 : 40;
   const barW = compact ? 16 : 20;
-  const boxW = compact ? 44 : 56;
+  const boxW = compact ? 60 : 74;
   const vals = [b1, b2, b3];
   const bars = vals.map((v, i) => {
     const num = (v === "-" || v === undefined || v === null || v === "") ? null : Number(v);
@@ -1205,15 +1215,15 @@ function evalBarsHtml(b1, b2, b3, compact) {
     const color = num === null ? "var(--border)" : (num <= 2 ? "var(--red)" : (num >= 4 ? "var(--green)" : "var(--yellow)"));
     const valText = num === null ? "—" : num;
     return `
-      <div style="display:flex;flex-direction:column;align-items:center;width:${boxW}px">
+      <div style="display:flex;flex-direction:column;align-items:center;width:${boxW}px;flex-shrink:0">
         <div style="font-size:${compact?11:13}px;font-weight:800;color:${color};margin-bottom:2px">${valText}</div>
         <div style="width:${barW}px;height:${barMaxH}px;background:var(--light);border-radius:4px;display:flex;align-items:flex-end;overflow:hidden">
           <div style="width:100%;height:${h}px;background:${color};border-radius:3px 3px 0 0"></div>
         </div>
-        <div style="font-size:${compact?9:10}px;color:var(--gray);text-align:center;margin-top:4px;line-height:1.2">${EVAL_BLOCK_NAMES[i]}</div>
+        <div style="font-size:${compact?9:10}px;color:var(--gray);text-align:center;margin-top:4px;line-height:1.25;width:100%;word-break:break-word">${EVAL_BLOCK_NAMES[i]}</div>
       </div>`;
   }).join("");
-  return `<div style="display:flex;gap:${compact?8:14}px">${bars}</div>`;
+  return `<div style="display:flex;gap:${compact?6:14}px;overflow-x:auto">${bars}</div>`;
 }
 
 // ══════════════════════════════════════════════════════
@@ -2046,6 +2056,56 @@ function renderEvaluationAlerts() {
   `).join("") + (ea.lowCount > 8
     ? `<div style="font-size:12px;color:var(--gray);text-align:center;padding-top:10px">Показаны 8 из ${ea.lowCount} — остальные смотрите в личном деле сотрудника</div>`
     : "");
+}
+
+// ══════════════════════════════════════════════════════
+// РЕЙТИНГ ПО ОЦЕНКАМ РАБОТЫ — независимая секция вкладки «Рейтинг операторов».
+// Использует те же фильтры участка/периода (ratingSite/ratingPeriod), что и
+// основной рейтинг по осмотрам, но данные и сортировка полностью отдельные —
+// см. getEvaluationStats в Код.gs.
+// ══════════════════════════════════════════════════════
+async function loadEvaluationRatingSection() {
+  const el = document.getElementById("evalRatingList");
+  if (!el) return;
+  el.innerHTML = `<div class="empty"><div class="empty-icon">⏳</div>Загружаю...</div>`;
+
+  const site = document.getElementById("ratingSite")?.value || "all";
+  const pv = document.getElementById("ratingPeriod")?.value || "30";
+  const days = pv === "all" ? 0 : Number(pv);
+
+  const params = new URLSearchParams({ action: "getEvaluationStats" });
+  if (site !== "all") params.set("site", site);
+  if (days) params.set("days", days);
+
+  try {
+    const val = await jsonpFetchRetry(`${CFG.SHEET_URL}?${params.toString()}`, "cb_evaluation_stats", 30000, 3);
+    const operators = (val && val.ok && Array.isArray(val.operators)) ? val.operators : [];
+    if (!operators.length) {
+      el.innerHTML = `<div class="empty"><div class="empty-icon">🎯</div>Оценок работы за выбранный период нет</div>`;
+      return;
+    }
+    const medal = i => ["🥇","🥈","🥉"][i] || `${i+1}.`;
+    const clickable = (o, inner) => o.empId
+      ? `<span style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted"
+           onclick="goToEmployeeProfile('${String(o.empId).replace(/'/g,"\\'")}')">${inner}</span>`
+      : inner;
+    const wordEval = n => n === 1 ? "оценка" : (n >= 2 && n <= 4 ? "оценки" : "оценок");
+
+    el.innerHTML = operators.map((o,i) => `
+      <div style="border:1px solid var(--border);border-radius:12px;padding:12px;margin-bottom:10px;background:#fff">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+          <span style="font-size:16px;min-width:28px">${medal(i)}</span>
+          <div>
+            <div style="font-size:13px;font-weight:700;color:var(--navy)">${clickable(o, o.empName)}</div>
+            <div style="font-size:11px;color:var(--gray)">${o.count} ${wordEval(o.count)} · последняя ${o.lastDate}</div>
+          </div>
+        </div>
+        ${evalBarsHtml(o.block1Avg, o.block2Avg, o.block3Avg, true)}
+      </div>
+    `).join("");
+  } catch (err) {
+    el.innerHTML = `<div class="empty">Не удалось загрузить: ${err.message}</div>`;
+  }
 }
 
 // ══════════════════════════════════════════════════════
@@ -3531,7 +3591,7 @@ function selectPersonnelEmployee(id) {
       </div>
 
       <div style="margin-bottom:16px">
-        <div style="font-size:12px;font-weight:700;color:var(--navy);margin-bottom:8px">🎯 Оценки работы (${evaluationEvents.length})</div>
+        <div style="font-size:12px;font-weight:700;color:var(--navy);margin-bottom:8px">🎯 Оценки работы (<span id="evalWorkCount">…</span>)</div>
         <div id="evalWorkSection">
           <div style="display:flex;align-items:center;gap:8px;padding:10px 12px;background:var(--light);border-radius:8px;font-size:12px;color:var(--gray)">
             ⏳ Загружаю...
@@ -3591,11 +3651,13 @@ function selectPersonnelEmployee(id) {
 // не перезаписывает уже открытую карточку.
 async function loadEvalWorkSection(empId) {
   const el = document.getElementById("evalWorkSection");
+  const countEl = document.getElementById("evalWorkCount");
   if (!el) return;
   try {
     const val = await jsonpFetchRetry(`${CFG.SHEET_URL}?action=getOperatorEvaluations&empId=${encodeURIComponent(empId)}`, "cb_operator_evaluations", 30000, 3);
     if (CURRENT_PROFILE_ID !== empId) return; // выбор сменился, пока грузили
     const list = Array.isArray(val) ? val : [];
+    if (countEl) countEl.textContent = list.length;
     if (!list.length) {
       el.innerHTML = `<div style="font-size:12px;color:var(--gray)">Оценок пока нет.</div>`;
       return;
@@ -3613,6 +3675,7 @@ async function loadEvalWorkSection(empId) {
     `).join("") + `<div style="font-size:11px;color:var(--gray);margin-top:4px">Редактирование — во вкладке «Оценка» приложения обучения.</div>`;
   } catch (err) {
     if (CURRENT_PROFILE_ID !== empId) return;
+    if (countEl) countEl.textContent = "?";
     el.innerHTML = `<div style="font-size:12px;color:var(--gray)">Не удалось загрузить: ${err.message}</div>`;
   }
 }
@@ -5413,6 +5476,7 @@ async function renderOperatorRating() {
   // Догружаем агрегат за выбранный период, если его ещё нет
   const pv = document.getElementById("ratingPeriod")?.value || "30";
   await statsForDays(pv === "all" ? 0 : Number(pv));
+  loadEvaluationRatingSection(); // независимая секция, не блокирует остальное
   renderWeeklyAward();
   const rows = computeOperatorRating();
   const sum = document.getElementById("ratingSummary");
