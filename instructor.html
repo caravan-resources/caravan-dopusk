@@ -311,15 +311,6 @@ tr:hover td { background:#FAFBFD; }
       </div>
 
       <div class="panel">
-        <div class="panel-title">🎯 Оценки операторов — низкие баллы</div>
-        <div class="hint" style="margin-bottom:10px">
-          Оценки работы (не осмотры техники), где хотя бы один из трёх блоков — 2 балла или ниже.
-          Полная история по каждому оператору — в его личном деле.
-        </div>
-        <div id="evaluationAlertsList"></div>
-      </div>
-
-      <div class="panel">
         <div class="panel-title">
           📋 Последние сдачи тестов
           <span style="font-size:12px;color:var(--gray)" id="lastTestsDate"></span>
@@ -1428,7 +1419,6 @@ async function loadAll() {
     { key: "fuel",              action: "getFuelRecords",          cb: "cb_fuel_records"                          },
 
     { key: "personnelEvents",   action: "getPersonnelEvents",      cb: "cb_personnel_events"                      },
-    { key: "evaluationAlerts",  action: "getEvaluationAlerts",     cb: "cb_evaluation_alerts"                     },
   ];
 
   // Грузим пачками по 3, а не все 12 разом. Браузер держит к одному домену
@@ -1461,7 +1451,7 @@ async function loadAll() {
     res.forEach((r, j) => {
       const f = part[j];
       if (r.status !== "fulfilled") return;
-      if (f.key === "checklistStats" || f.key === "personnelStats" || f.key === "evaluationAlerts") {
+      if (f.key === "checklistStats" || f.key === "personnelStats") {
         if (r.value && r.value.ok) DATA[f.key] = r.value;
       }
       else if (Array.isArray(r.value)) DATA[f.key] = r.value;
@@ -1473,7 +1463,7 @@ async function loadAll() {
   settled.forEach((res, i) => {
     const f = fetches[i];
     // Агрегаты (checklistStats, personnelStats) приходят объектом, остальное — массивами
-    const isObj = f.key === "checklistStats" || f.key === "personnelStats" || f.key === "evaluationAlerts";
+    const isObj = f.key === "checklistStats" || f.key === "personnelStats";
     const val = res.status === "fulfilled" ? res.value : null;
     const ok = res.status === "fulfilled" &&
       (isObj ? (val && val.ok) : Array.isArray(val) && (f.critical ? val.length > 0 : true));
@@ -1493,7 +1483,6 @@ async function loadAll() {
 
 function renderAll() {
   renderDashboard();
-  renderEvaluationAlerts();
   renderTestsTable();
   renderRequirementsPanel();
   renderAccessTable();
@@ -2012,50 +2001,6 @@ function renderDashboard() {
         `;
       }).join("")
     : `<div class="empty"><div class="empty-icon">✓</div>Неисправностей за последние 7 дней не найдено</div>`;
-}
-
-// ══════════════════════════════════════════════════════
-// ОЦЕНКИ ОПЕРАТОРОВ — виджет дашборда (низкие баллы)
-// Использует getEvaluationAlerts с бэкенда: он уже сам отбирает записи, где
-// хотя бы один из трёх блоков ≤2, и сортирует по дате. Здесь только вёрстка.
-// ══════════════════════════════════════════════════════
-function renderEvaluationAlerts() {
-  const el = document.getElementById("evaluationAlertsList");
-  if (!el) return;
-  const ea = DATA.evaluationAlerts;
-
-  if (!ea) {
-    el.innerHTML = `<div style="display:flex;align-items:center;gap:8px;padding:10px 12px;background:var(--light);border-radius:8px;font-size:13px;color:var(--gray)">
-      ⏳ Загружаю оценки...
-    </div>`;
-    return;
-  }
-  if (!ea.total) {
-    el.innerHTML = `<div class="empty"><div class="empty-icon">🎯</div>Оценок операторов пока не проводилось</div>`;
-    return;
-  }
-  if (!ea.lowCount) {
-    el.innerHTML = `<div style="display:flex;align-items:center;gap:8px;padding:10px 12px;background:var(--greenbg,#EAF7ED);border-radius:8px;font-size:13px;color:var(--green,#2E7D32);font-weight:700">
-      ✓ Все оценки (${ea.total}) без низких баллов
-    </div>`;
-    return;
-  }
-
-  el.innerHTML = ea.alerts.slice(0, 8).map(a => `
-    <div style="border:1px solid var(--border);border-radius:12px;padding:12px;margin-bottom:10px;background:#fff">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap;margin-bottom:10px">
-        <div>
-          <div style="font-size:13px;font-weight:700;color:var(--navy)">${a.empName}</div>
-          <div style="font-size:11px;color:var(--gray)">${a.equipmentType||""}</div>
-        </div>
-        <div style="font-size:12px;color:var(--gray)">${a.date}</div>
-      </div>
-      ${evalBarsHtml(a.block1Score, a.block2Score, a.block3Score, true)}
-      ${a.summary ? `<div style="font-size:12px;color:var(--navy);margin-top:10px;line-height:1.4">${a.summary}</div>` : ""}
-    </div>
-  `).join("") + (ea.lowCount > 8
-    ? `<div style="font-size:12px;color:var(--gray);text-align:center;padding-top:10px">Показаны 8 из ${ea.lowCount} — остальные смотрите в личном деле сотрудника</div>`
-    : "");
 }
 
 // ══════════════════════════════════════════════════════
@@ -6391,6 +6336,27 @@ async function generateReport(site) {
     ["🌙 Ночь — неисправностей", `${shiftD["Ночь"].defects} из ${shiftD["Ночь"].items}`],
     ["🌙 Ночь — % дефектных", `${nightRate}%`, nightRate ? "var(--red)" : "var(--gold)"],
   ]));
+
+  // 🎯 Оценки работы операторов — независимый от осмотров источник данных,
+  // грузим отдельным запросом с точным окном периода (as-is у getChecklistStats).
+  // К технике по trendEqId не привязываем: оценка — про человека, а не про
+  // конкретную единицу техники (equipmentType/model в оценке — текст, не id).
+  lines.push(reportSectionTitle("🎯","Оценки работы"));
+  try {
+    const evalParams = new URLSearchParams({
+      action: "getEvaluationStats", site: site,
+      from: start.toISOString(), to: end.toISOString(),
+    });
+    const evalVal = await jsonpFetchRetry(`${CFG.SHEET_URL}?${evalParams.toString()}`, "cb_report_eval_stats", 30000, 3);
+    const evalOperators = (evalVal && evalVal.ok && Array.isArray(evalVal.operators)) ? evalVal.operators : [];
+    lines.push(reportTable(
+      ["Оператор","Обязанности","Техническое состояние","Эксплуатация","Оценок"],
+      evalOperators.map(o => [o.empName, o.block1Avg, o.block2Avg, o.block3Avg, o.count]),
+      "Оценок работы за период не проводилось."
+    ));
+  } catch (evalErr) {
+    lines.push(`<div style="font-size:13px;color:var(--gray);padding:6px 0 14px">Не удалось загрузить оценки работы: ${evalErr.message}</div>`);
+  }
 
   document.getElementById("reportOutput"+suffix).innerHTML = lines.join("\n");
   document.getElementById("reportOutputPanel"+suffix).style.display = "block";
