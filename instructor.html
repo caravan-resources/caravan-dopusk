@@ -2035,19 +2035,38 @@ async function loadEvaluationRatingSection() {
            onclick="goToEmployeeProfile('${String(o.empId).replace(/'/g,"\\'")}')">${inner}</span>`
       : inner;
     const wordEval = n => n === 1 ? "оценка" : (n >= 2 && n <= 4 ? "оценки" : "оценок");
+    const avgColor = v => (v === "-" || v === undefined) ? "var(--gray)" : (Number(v) <= 2 ? "var(--red)" : (Number(v) >= 4 ? "var(--green)" : "var(--yellow)"));
 
-    el.innerHTML = operators.map((o,i) => `
-      <div style="border:1px solid var(--border);border-radius:12px;padding:12px;margin-bottom:10px;background:#fff">
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
-          <span style="font-size:16px;min-width:28px">${medal(i)}</span>
-          <div>
-            <div style="font-size:13px;font-weight:700;color:var(--navy)">${clickable(o, o.empName)}</div>
-            <div style="font-size:11px;color:var(--gray)">${o.count} ${wordEval(o.count)} · последняя ${o.lastDate}</div>
+    el.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px">` +
+      operators.map((o,i) => {
+        const withSummary = (o.evaluations||[]).filter(e => e.summary);
+        return `
+      <div style="border:1px solid var(--border);border-radius:12px;padding:12px;background:#fff">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:10px">
+          <div style="display:flex;align-items:center;gap:8px;min-width:0">
+            <span style="font-size:15px;flex-shrink:0">${medal(i)}</span>
+            <div style="min-width:0">
+              <div style="font-size:13px;font-weight:700;color:var(--navy);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${clickable(o, o.empName)}</div>
+              <div style="font-size:11px;color:var(--gray)">${o.count} ${wordEval(o.count)} · посл. ${o.lastDate}</div>
+            </div>
+          </div>
+          <div style="text-align:center;flex-shrink:0">
+            <div style="font-size:19px;font-weight:800;color:${avgColor(o.overallAvg)}">${o.overallAvg}</div>
+            <div style="font-size:9px;color:var(--gray);white-space:nowrap">средний балл</div>
           </div>
         </div>
         ${evalBarsHtml(o.block1Avg, o.block2Avg, o.block3Avg, true)}
-      </div>
-    `).join("");
+        ${withSummary.length ? `
+          <div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border)">
+            ${withSummary.map(e => `
+              <div style="font-size:11px;color:var(--navy);line-height:1.4;margin-bottom:6px">
+                <span style="color:var(--gray)">${e.date}${e.equipmentType?" · "+e.equipmentType:""}:</span> ${e.summary}
+              </div>
+            `).join("")}
+          </div>` : ""}
+      </div>`;
+      }).join("") +
+    `</div>`;
   } catch (err) {
     el.innerHTML = `<div class="empty">Не удалось загрузить: ${err.message}</div>`;
   }
@@ -6350,8 +6369,8 @@ async function generateReport(site) {
     const evalVal = await jsonpFetchRetry(`${CFG.SHEET_URL}?${evalParams.toString()}`, "cb_report_eval_stats", 30000, 3);
     const evalOperators = (evalVal && evalVal.ok && Array.isArray(evalVal.operators)) ? evalVal.operators : [];
     lines.push(reportTable(
-      ["Оператор","Обязанности","Техническое состояние","Эксплуатация","Оценок"],
-      evalOperators.map(o => [o.empName, o.block1Avg, o.block2Avg, o.block3Avg, o.count]),
+      ["Оператор","Обязанности","Техническое состояние","Эксплуатация","Средний балл","Оценок"],
+      evalOperators.map(o => [o.empName, o.block1Avg, o.block2Avg, o.block3Avg, `<b>${o.overallAvg}</b>`, o.count]),
       "Оценок работы за период не проводилось."
     ));
   } catch (evalErr) {
