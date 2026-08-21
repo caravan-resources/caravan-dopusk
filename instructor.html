@@ -1188,6 +1188,34 @@ const CFG = {
 // ══════════════════════════════════════════════════════
 let DATA = { employees: [], results: [], training: [], requirements: [], personnelEvents: [], surveys: [], equipment: [], checklistTemplates: [], checklistRecords: [], courseCatalog: [] };
 
+// Единые названия трёх блоков оценки — используются везде вместо "Блок 1/2/3"
+// (дашборд, личное дело). Совпадают с training.html — если меняете здесь,
+// меняйте и там, чтобы термины не расходились между приложениями.
+const EVAL_BLOCK_NAMES = ["Обязанности", "Техническое состояние", "Эксплуатация"];
+
+// Общая мини-диаграмма из трёх столбиков для отображения баллов оценки.
+function evalBarsHtml(b1, b2, b3, compact) {
+  const barMaxH = compact ? 28 : 40;
+  const barW = compact ? 16 : 20;
+  const boxW = compact ? 44 : 56;
+  const vals = [b1, b2, b3];
+  const bars = vals.map((v, i) => {
+    const num = (v === "-" || v === undefined || v === null || v === "") ? null : Number(v);
+    const h = num === null ? 3 : Math.max(3, Math.round((num/5)*barMaxH));
+    const color = num === null ? "var(--border)" : (num <= 2 ? "var(--red)" : (num >= 4 ? "var(--green)" : "var(--yellow)"));
+    const valText = num === null ? "—" : num;
+    return `
+      <div style="display:flex;flex-direction:column;align-items:center;width:${boxW}px">
+        <div style="font-size:${compact?11:13}px;font-weight:800;color:${color};margin-bottom:2px">${valText}</div>
+        <div style="width:${barW}px;height:${barMaxH}px;background:var(--light);border-radius:4px;display:flex;align-items:flex-end;overflow:hidden">
+          <div style="width:100%;height:${h}px;background:${color};border-radius:3px 3px 0 0"></div>
+        </div>
+        <div style="font-size:${compact?9:10}px;color:var(--gray);text-align:center;margin-top:4px;line-height:1.2">${EVAL_BLOCK_NAMES[i]}</div>
+      </div>`;
+  }).join("");
+  return `<div style="display:flex;gap:${compact?8:14}px">${bars}</div>`;
+}
+
 // ══════════════════════════════════════════════════════
 // УТИЛИТЫ
 // ══════════════════════════════════════════════════════
@@ -2003,26 +2031,17 @@ function renderEvaluationAlerts() {
     return;
   }
 
-  const scoreColor = s => (s === "-" || s === undefined) ? "var(--gray)" : (Number(s) <= 2 ? "var(--red)" : (Number(s) >= 4 ? "var(--green)" : "var(--yellow)"));
-  const scoreSpan = (label, val) => `<span style="color:${scoreColor(val)};font-weight:700">${label}: ${val}</span>`;
-
   el.innerHTML = ea.alerts.slice(0, 8).map(a => `
-    <div style="padding:10px 0;border-bottom:1px solid var(--border)">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap">
+    <div style="border:1px solid var(--border);border-radius:12px;padding:12px;margin-bottom:10px;background:#fff">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap;margin-bottom:10px">
         <div>
           <div style="font-size:13px;font-weight:700;color:var(--navy)">${a.empName}</div>
           <div style="font-size:11px;color:var(--gray)">${a.equipmentType||""}</div>
         </div>
-        <div style="text-align:right">
-          <div style="font-size:12px;color:var(--gray)">${a.date}</div>
-        </div>
+        <div style="font-size:12px;color:var(--gray)">${a.date}</div>
       </div>
-      <div style="display:flex;gap:14px;margin-top:6px;font-size:12px">
-        ${scoreSpan("Блок 1", a.block1Score)}
-        ${scoreSpan("Блок 2", a.block2Score)}
-        ${scoreSpan("Блок 3", a.block3Score)}
-      </div>
-      ${a.summary ? `<div style="font-size:12px;color:var(--navy);margin-top:6px;line-height:1.4">${a.summary}</div>` : ""}
+      ${evalBarsHtml(a.block1Score, a.block2Score, a.block3Score, true)}
+      ${a.summary ? `<div style="font-size:12px;color:var(--navy);margin-top:10px;line-height:1.4">${a.summary}</div>` : ""}
     </div>
   `).join("") + (ea.lowCount > 8
     ? `<div style="font-size:12px;color:var(--gray);text-align:center;padding-top:10px">Показаны 8 из ${ea.lowCount} — остальные смотрите в личном деле сотрудника</div>`
@@ -3422,6 +3441,11 @@ function selectPersonnelEmployee(id) {
   const gap = competencyGap(emp);
   const events = (DATA.personnelEvents||[]).filter(ev => String(ev.empId)===String(emp.id) || ev.empName===emp.name)
     .sort((a,b) => new Date(b.date)-new Date(a.date));
+  // Оценки работы — отдельная сущность, не взыскание/поощрение. Выводим их
+  // своим блоком с диаграммой баллов, а не строкой текста в общем списке
+  // личного дела, чтобы такой важный показатель не терялся среди прочего.
+  const personnelEventsOnly = events.filter(ev => String(ev.type||"").toLowerCase() !== "оценка");
+  const evaluationEvents = events.filter(ev => String(ev.type||"").toLowerCase() === "оценка");
   const trainings = (DATA.training||[]).filter(t => String(t.empId)===String(emp.id) || t.empName===emp.name)
     .sort((a,b) => new Date(b.date)-new Date(a.date));
   const tests = (DATA.results||[]).filter(r => r.empName===emp.name)
@@ -3507,8 +3531,17 @@ function selectPersonnelEmployee(id) {
       </div>
 
       <div style="margin-bottom:16px">
-        <div style="font-size:12px;font-weight:700;color:var(--navy);margin-bottom:8px">Личное дело (${events.length})</div>
-        ${events.length ? events.map(ev=>`
+        <div style="font-size:12px;font-weight:700;color:var(--navy);margin-bottom:8px">🎯 Оценки работы (${evaluationEvents.length})</div>
+        <div id="evalWorkSection">
+          <div style="display:flex;align-items:center;gap:8px;padding:10px 12px;background:var(--light);border-radius:8px;font-size:12px;color:var(--gray)">
+            ⏳ Загружаю...
+          </div>
+        </div>
+      </div>
+
+      <div style="margin-bottom:16px">
+        <div style="font-size:12px;font-weight:700;color:var(--navy);margin-bottom:8px">Личное дело (${personnelEventsOnly.length})</div>
+        ${personnelEventsOnly.length ? personnelEventsOnly.map(ev=>`
           <div style="padding:8px 0;border-bottom:1px solid var(--border);font-size:12px">
             <div style="display:flex;justify-content:space-between;align-items:center">
               <div style="display:flex;gap:8px;align-items:center">
@@ -3547,6 +3580,41 @@ function selectPersonnelEmployee(id) {
 
     </div>
   `;
+
+  loadEvalWorkSection(emp.id);
+}
+
+// Оценки работы грузятся отдельным запросом (как и в training.html), а не
+// из уже загруженного personnelEvents — там нет числовых баллов, только
+// текстовое описание. CURRENT_PROFILE_ID — защита от гонки: если человек
+// успел кликнуть на другого сотрудника, пока шёл запрос, устаревший ответ
+// не перезаписывает уже открытую карточку.
+async function loadEvalWorkSection(empId) {
+  const el = document.getElementById("evalWorkSection");
+  if (!el) return;
+  try {
+    const val = await jsonpFetchRetry(`${CFG.SHEET_URL}?action=getOperatorEvaluations&empId=${encodeURIComponent(empId)}`, "cb_operator_evaluations", 30000, 3);
+    if (CURRENT_PROFILE_ID !== empId) return; // выбор сменился, пока грузили
+    const list = Array.isArray(val) ? val : [];
+    if (!list.length) {
+      el.innerHTML = `<div style="font-size:12px;color:var(--gray)">Оценок пока нет.</div>`;
+      return;
+    }
+    el.innerHTML = list.map(e => `
+      <div style="border:1px solid var(--border);border-radius:12px;padding:12px;margin-bottom:10px;background:#fff">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+          <div style="font-size:12px;color:var(--gray)">${e.equipmentType||""}${e.equipmentModel?" ("+e.equipmentModel+")":""}</div>
+          <div style="font-size:12px;color:var(--gray)">${e.date}</div>
+        </div>
+        ${evalBarsHtml(e.block1Score, e.block2Score, e.block3Score, true)}
+        ${e.summary ? `<div style="font-size:12px;color:var(--navy);margin-top:10px;line-height:1.4">${e.summary}</div>` : ""}
+        ${e.instructorName ? `<div style="color:var(--gray);font-size:11px;margin-top:6px">Оценил: ${e.instructorName}</div>` : ""}
+      </div>
+    `).join("") + `<div style="font-size:11px;color:var(--gray);margin-top:4px">Редактирование — во вкладке «Оценка» приложения обучения.</div>`;
+  } catch (err) {
+    if (CURRENT_PROFILE_ID !== empId) return;
+    el.innerHTML = `<div style="font-size:12px;color:var(--gray)">Не удалось загрузить: ${err.message}</div>`;
+  }
 }
 
 
