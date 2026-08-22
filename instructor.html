@@ -302,17 +302,6 @@ tr:hover td { background:#FAFBFD; }
       <div style="font-size:15px;font-weight:800;color:var(--navy);margin:28px 0 12px;padding-top:20px;border-top:2px solid var(--border)">👥 Кадры, допуск и обучение</div>
       <div class="stats-grid" id="statsGridPersonnel"></div>
 
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px" id="trainingBySiteWrap">
-        <div class="panel">
-          <div class="panel-title">🎓 Обучение — Алмалы</div>
-          <div id="trainingBySiteAlmaty"></div>
-        </div>
-        <div class="panel">
-          <div class="panel-title">🎓 Обучение — Ашыктас</div>
-          <div id="trainingBySiteAshyktas"></div>
-        </div>
-      </div>
-
       <div class="panel" style="margin-top:16px">
         <div class="panel-title">
           🔔 Требует внимания
@@ -332,38 +321,6 @@ tr:hover td { background:#FAFBFD; }
 
     <!-- ══ РЕЗУЛЬТАТЫ ТЕСТОВ ══ -->
     <div id="tabTests" class="screen">
-      <div class="panel">
-        <div class="panel-title">📎 Прикрепить протокол экзамена</div>
-        <div class="hint" style="margin-bottom:12px">
-          Скан/фото протокола сохранится на Google Диске и привяжется к выбранному тесту —
-          его можно будет открыть прямо отсюда в любой момент.
-        </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px">
-          <div>
-            <label style="font-size:12px;font-weight:700;color:var(--gray);display:block;margin-bottom:4px">Тест</label>
-            <select id="protocolTestSelect" style="width:100%"><option value="">— выберите тест —</option></select>
-          </div>
-          <div>
-            <label style="font-size:12px;font-weight:700;color:var(--gray);display:block;margin-bottom:4px">Дата</label>
-            <input type="date" id="protocolDate" style="width:100%">
-          </div>
-          <div>
-            <label style="font-size:12px;font-weight:700;color:var(--gray);display:block;margin-bottom:4px">Участок</label>
-            <select id="protocolSite" style="width:100%">
-              <option value="Алмалы">Алмалы</option>
-              <option value="Ашыктас">Ашыктас</option>
-              <option value="">Оба участка</option>
-            </select>
-          </div>
-        </div>
-        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-          <label class="btn btn-ghost" style="cursor:pointer" for="protocolFile">📎 Выбрать файл (фото или PDF)</label>
-          <input type="file" id="protocolFile" accept="image/*,application/pdf" style="display:none" onchange="submitProtocolUpload(this)">
-          <span id="protocolUploadStatus" style="font-size:12px;color:var(--gray)"></span>
-        </div>
-        <div id="protocolList" style="margin-top:14px"></div>
-      </div>
-
       <div class="panel">
         <div class="filters">
           <input type="text" id="searchTest" placeholder="🔍 Поиск по имени..."
@@ -1528,7 +1485,6 @@ function renderAll() {
   renderDashboard();
   renderTestsTable();
   renderRequirementsPanel();
-  renderProtocolPanel();
   renderAccessTable();
   renderPrintSelect();
   renderDrivingPrintSelect();
@@ -1881,7 +1837,6 @@ function renderDashboard() {
       <div class="stat-lbl">${s.lbl}</div>
     </div>
   `).join("");
-  renderTrainingBySite();
 
   // Требует внимания — допуски (просроченные+истекающие), несданные тесты,
   // вакансии по вахтам — всё в одном месте вместо отдельной вкладки.
@@ -2049,61 +2004,6 @@ function renderDashboard() {
 }
 
 // ══════════════════════════════════════════════════════
-// ОБУЧЕНИЕ ПО УЧАСТКАМ — сколько человек прошло каждый курс, отдельно по
-// Алмалы и Ашыктас, плюс те, у кого вообще нет ни одной записи. Считаем
-// уникальных людей на курс (Set по empId) — повторное прохождение одного
-// курса не должно задваивать счётчик.
-// ══════════════════════════════════════════════════════
-function renderTrainingBySite() {
-  const sites = [
-    { key: "Алмалы", elId: "trainingBySiteAlmaty" },
-    { key: "Ашыктас", elId: "trainingBySiteAshyktas" },
-  ];
-  const training = DATA.training || [];
-
-  sites.forEach(({ key, elId }) => {
-    const el = document.getElementById(elId);
-    if (!el) return;
-    const emps = (DATA.employees||[]).filter(e => (e.site||"").trim() === key);
-    if (!emps.length) { el.innerHTML = `<div style="font-size:12px;color:var(--gray)">Нет данных</div>`; return; }
-    const empIds = new Set(emps.map(e => String(e.id)));
-
-    const byCourse = {};       // название курса -> Set(empId), только этот участок
-    const trainedEmpIds = new Set();
-    training.forEach(t => {
-      const eid = String(t.empId||"");
-      if (!empIds.has(eid)) return;
-      const course = String(t.course||"").trim();
-      if (!course) return;
-      if (!byCourse[course]) byCourse[course] = new Set();
-      byCourse[course].add(eid);
-      trainedEmpIds.add(eid);
-    });
-
-    const untrained = emps.length - trainedEmpIds.size;
-    const courseEntries = Object.entries(byCourse).sort((a,b) => b[1].size - a[1].size);
-
-    if (!courseEntries.length) {
-      el.innerHTML = `<div style="font-size:12px;color:var(--gray)">Записей об обучении пока нет.</div>` +
-        `<div style="display:flex;justify-content:space-between;padding:8px 0 0;margin-top:6px;font-size:13px">
-          <b style="color:var(--red)">Не обучены</b><b style="color:var(--red)">${emps.length}</b>
-        </div>`;
-      return;
-    }
-
-    el.innerHTML = courseEntries.map(([course, set]) => `
-      <div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border);font-size:13px">
-        <span>${course}</span><b>${set.size}</b>
-      </div>
-    `).join("") + `
-      <div style="display:flex;justify-content:space-between;padding:8px 0 0;margin-top:6px;font-size:13px">
-        <b style="color:var(--red)">Не обучены</b><b style="color:var(--red)">${untrained}</b>
-      </div>
-    `;
-  });
-}
-
-// ══════════════════════════════════════════════════════
 // РЕЙТИНГ ПО ОЦЕНКАМ РАБОТЫ — независимая секция вкладки «Рейтинг операторов».
 // Использует те же фильтры участка/периода (ratingSite/ratingPeriod), что и
 // основной рейтинг по осмотрам, но данные и сортировка полностью отдельные —
@@ -2162,7 +2062,7 @@ async function loadEvaluationRatingSection() {
           <td colspan="8" style="padding:10px 14px">
             ${(o.evaluations||[]).map(e => `
               <div style="font-size:12px;padding:6px 0;border-bottom:1px solid var(--border)">
-                <b>${e.date}</b> · ${e.equipmentType||""} ·
+                <b>${e.date}</b> · ${e.equipmentType||""}${e.workType?" · "+e.workType:""} ·
                 Обяз.: ${e.block1Score} · Техн.: ${e.block2Score} · Экспл.: ${e.block3Score}
                 ${e.summary ? `<div style="color:var(--navy);margin-top:3px;line-height:1.4">${e.summary}</div>` : ""}
               </div>
@@ -2243,125 +2143,6 @@ function renderTestsTable() {
       <td style="color:var(--gray)">${dur}</td>
     </tr>`;
   }).join("");
-}
-
-// ══════════════════════════════════════════════════════
-// ПРОТОКОЛЫ ЭКЗАМЕНОВ — сканы/фото привязываются к тесту через архив
-// документов (uploadDocument/getDocuments в Код.gs, тот же архив, что и
-// ростеры в training.html). linkedIds = id теста.
-// ══════════════════════════════════════════════════════
-function renderProtocolPanel() {
-  const sel = document.getElementById("protocolTestSelect");
-  if (!sel) return;
-  if (sel.options.length <= 1) {
-    const cur = sel.value;
-    sel.innerHTML = `<option value="">— выберите тест —</option>` +
-      (DATA.tests||[]).map(t => `<option value="${t.id}">${t.title}</option>`).join("");
-    if (cur) sel.value = cur;
-    sel.onchange = () => loadProtocolsForSelectedTest();
-  }
-}
-
-// Изображения сжимаем перед отправкой (та же логика, что в training.html) —
-// PDF отправляем как есть, canvas с ним работать не умеет.
-function resizeImageForUpload(file, maxDim) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const img = new Image();
-      img.onload = () => {
-        let w = img.width, h = img.height;
-        if (w > maxDim || h > maxDim) {
-          if (w > h) { h = Math.round(h * maxDim / w); w = maxDim; }
-          else { w = Math.round(w * maxDim / h); h = maxDim; }
-        }
-        const canvas = document.createElement("canvas");
-        canvas.width = w; canvas.height = h;
-        canvas.getContext("2d").drawImage(img, 0, 0, w, h);
-        resolve(canvas.toDataURL("image/jpeg", 0.85).split(",")[1]);
-      };
-      img.onerror = () => reject(new Error("Не удалось прочитать изображение"));
-      img.src = e.target.result;
-    };
-    reader.onerror = () => reject(new Error("Не удалось прочитать файл"));
-    reader.readAsDataURL(file);
-  });
-}
-function fileToBase64Raw(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = (e) => resolve(e.target.result.split(",")[1]);
-    reader.onerror = () => reject(new Error("Не удалось прочитать файл"));
-    reader.readAsDataURL(file);
-  });
-}
-async function prepareFileForUpload(file) {
-  if (file.type.startsWith("image/")) {
-    return { base64: await resizeImageForUpload(file, 1600), mimeType: "image/jpeg" };
-  }
-  return { base64: await fileToBase64Raw(file), mimeType: file.type || "application/pdf" };
-}
-function isoToRuLocal(iso) {
-  const m = String(iso||"").match(/^(\d{4})-(\d{2})-(\d{2})/);
-  return m ? `${m[3]}.${m[2]}.${m[1]}` : "";
-}
-
-async function submitProtocolUpload(input) {
-  const file = input.files[0];
-  if (!file) return;
-  const testId = document.getElementById("protocolTestSelect").value;
-  if (!testId) { alert("Сначала выберите тест"); input.value = ""; return; }
-  const test = (DATA.tests||[]).find(t => t.id === testId);
-  const dateIso = document.getElementById("protocolDate").value;
-  const site = document.getElementById("protocolSite").value;
-  const statusEl = document.getElementById("protocolUploadStatus");
-  if (statusEl) statusEl.textContent = "⏳ Загружаю...";
-  try {
-    const { base64, mimeType } = await prepareFileForUpload(file);
-    const res = await fetch(CFG.SHEET_URL, { method:"POST", body: JSON.stringify({
-      action: "uploadDocument",
-      image: base64, mimeType,
-      fileName: file.name,
-      type: "протокол экзамена",
-      title: test ? test.title : testId,
-      date: dateIso ? isoToRuLocal(dateIso) : "",
-      site,
-      linkedIds: testId,
-    })});
-    const val = await res.json();
-    if (!val.ok) { if (statusEl) statusEl.textContent = ""; alert("Не удалось загрузить: " + (val.error||"")); return; }
-    if (statusEl) statusEl.textContent = "✓ Загружено";
-    await loadProtocolsForSelectedTest();
-  } catch (e) {
-    if (statusEl) statusEl.textContent = "";
-    alert("Ошибка: " + e.message);
-  } finally {
-    input.value = "";
-  }
-}
-
-async function loadProtocolsForSelectedTest() {
-  const testId = document.getElementById("protocolTestSelect")?.value;
-  const listEl = document.getElementById("protocolList");
-  if (!listEl) return;
-  if (!testId) { listEl.innerHTML = ""; return; }
-  listEl.innerHTML = `<div style="font-size:12px;color:var(--gray)">Загружаю список...</div>`;
-  try {
-    const res = await fetch(`${CFG.SHEET_URL}?action=getDocuments&linkedId=${encodeURIComponent(testId)}`);
-    const docs = await res.json();
-    if (!Array.isArray(docs) || !docs.length) {
-      listEl.innerHTML = `<div style="font-size:12px;color:var(--gray)">Для этого теста пока ничего не загружено.</div>`;
-      return;
-    }
-    listEl.innerHTML = `<div style="font-size:12px;font-weight:700;color:var(--gray);margin-bottom:6px">Загруженные протоколы (${docs.length}):</div>` +
-      docs.map(d => `
-        <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px">
-          <div>${d.date||"—"} ${d.site?"· "+d.site:""} <span style="color:var(--gray)">— ${d.fileName||""}</span></div>
-          <a href="${d.fileUrl}" target="_blank" class="btn btn-ghost" style="width:auto;padding:4px 12px;font-size:12px;text-decoration:none">Открыть</a>
-        </div>`).join("");
-  } catch (e) {
-    listEl.innerHTML = `<div style="font-size:12px;color:var(--red)">Ошибка загрузки списка: ${e.message}</div>`;
-  }
 }
 
 // ══════════════════════════════════════════════════════
@@ -3858,7 +3639,7 @@ async function loadEvalWorkSection(empId) {
     el.innerHTML = list.map(e => `
       <div style="border:1px solid var(--border);border-radius:12px;padding:12px;margin-bottom:10px;background:#fff">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap;margin-bottom:10px">
-          <div style="font-size:12px;color:var(--gray)">${e.equipmentType||""}${e.equipmentModel?" ("+e.equipmentModel+")":""}</div>
+          <div style="font-size:12px;color:var(--gray)">${e.equipmentType||""}${e.equipmentModel?" ("+e.equipmentModel+")":""}${e.workType?" · "+e.workType:""}</div>
           <div style="font-size:12px;color:var(--gray)">${e.date}</div>
         </div>
         ${evalBarsHtml(e.block1Score, e.block2Score, e.block3Score, true)}
