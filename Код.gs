@@ -58,6 +58,7 @@ function doGet(e) {
   else if (action === "getShiftAssignments") result = getShiftAssignments(e.parameter.site);
   else if (action === "getEvaluationCriteria") result = getEvaluationCriteria(e.parameter.equipmentType);
   else if (action === "getEvaluationEquipmentTypes") result = getEvaluationEquipmentTypes();
+  else if (action === "getEvaluationWorkTypes") result = getEvaluationWorkTypes();
   else if (action === "getOperatorEvaluations") result = getOperatorEvaluations(e.parameter.empId);
   else if (action === "getEvaluationDetail") result = getEvaluationDetail(e.parameter.evalId);
   else if (action === "getEvaluationAlerts") result = getEvaluationAlerts();
@@ -2437,6 +2438,27 @@ function getEvaluationEquipmentTypes() {
     if (t && t !== EVAL_UNIVERSAL_TYPE) types.add(t);
   });
   return json(Array.from(types).sort());
+}
+
+// Подсказки для поля «Вид выполняемых работ» — свободный текст, не жёсткий
+// каталог (в отличие от equipmentType), поэтому просто отдаём уникальные
+// значения, которые уже вводили раньше, для датлиста на фронтенде.
+function getEvaluationWorkTypes() {
+  const ss    = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName(SHEET_EVALUATIONS);
+  if (!sheet) return json([]);
+  const rows = sheet.getDataRange().getValues();
+  if (rows.length < 2) return json([]);
+  const headers = rows[0];
+  const col = headers.indexOf("workType");
+  if (col < 0) return json([]);
+
+  const values = new Set();
+  rows.slice(1).forEach(r => {
+    const v = String(r[col] || "").trim();
+    if (v) values.add(v);
+  });
+  return json(Array.from(values).sort());
 }
 
 // Заменяет весь набор пунктов конкретного типа техники разом (как
