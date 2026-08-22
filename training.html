@@ -253,11 +253,10 @@ td { padding:8px; border-bottom:1px solid var(--border); }
         </div>
         <div class="field">
           <label>Модель техники</label>
-          <input type="text" id="evalEquipmentModel" list="evalEquipmentModelList" placeholder="напр. Sandvik DX800">
-          <datalist id="evalEquipmentModelList"></datalist>
+          <input type="text" id="evalEquipmentModel" placeholder="напр. Sandvik DX800">
         </div>
         <div class="field">
-          <label>Вид выполняемых работ</label>
+          <label>Вид выполняемых работ *</label>
           <input type="text" id="evalWorkType" placeholder="напр. Бурение взрывных скважин">
         </div>
         <div class="field">
@@ -428,7 +427,6 @@ async function loadAll(onlyKeys) {
     { key: "trainingPlan",    action: "getTrainingPlan",  siteScoped: true },
     { key: "trainingHistory", action: "getTraining" },
     { key: "courseCatalog",   action: "getCourseCatalog" },
-    { key: "equipment",       action: "getEquipment",     siteScoped: true },
   ];
   const fetches = onlyKeys ? fetchDefs.filter(f => onlyKeys.includes(f.key)) : fetchDefs;
 
@@ -556,7 +554,6 @@ function renderCourseSelect() {
 // не пишем в базу того, в ком не уверены молча.
 // ══════════════════════════════════════════════════════════
 let GROUP_MATCH_ROWS = [];
-let LAST_ROSTER_PHOTO = null; // {base64, mimeType} — фото, загруженное для распознавания; архивируется при зачислении
 
 function normalizeName(s) {
   return String(s||"").trim().toLowerCase().replace(/\s+/g," ").replace(/[.,]/g,"");
@@ -640,9 +637,6 @@ async function uploadRosterPhoto(input) {
   if (statusEl) statusEl.textContent = "⏳ Распознаю фото...";
   try {
     const base64 = await resizeImageForUpload(file, 1400);
-    // Храним фото — при успешном зачислении сохраним его же в архив
-    // документов, привязав к batchId. Второй раз просить не нужно.
-    LAST_ROSTER_PHOTO = { base64, mimeType: "image/jpeg" };
     const res = await fetch(CFG.SHEET_URL, {
       method: "POST",
       body: JSON.stringify({ action: "recognizeRoster", image: base64, mimeType: "image/jpeg" }),
@@ -738,30 +732,10 @@ async function submitGroupEnroll() {
     const res = await fetch(CFG.SHEET_URL, { method:"POST", body: JSON.stringify({ action:"bulkAddTrainingFacts", records }) });
     const val = await res.json();
     if (!val.ok) { alert("Не удалось зачислить: " + (val.error||"")); return; }
-
-    // Зачисление уже прошло успешно — архивирование скана вторично и не
-    // должно выглядеть как провал всего действия, если вдруг не удастся.
-    if (LAST_ROSTER_PHOTO && val.batchId) {
-      try {
-        const docRes = await fetch(CFG.SHEET_URL, { method:"POST", body: JSON.stringify({
-          action: "uploadDocument",
-          image: LAST_ROSTER_PHOTO.base64, mimeType: LAST_ROSTER_PHOTO.mimeType,
-          fileName: `ростер_${course}_${dateRu||""}.jpg`,
-          type: "ростер", title: course, date: dateRu, site: CURRENT_SITE,
-          linkedIds: val.batchId,
-        })});
-        const docVal = await docRes.json();
-        if (!docVal.ok) console.error("Скан не сохранён в архив:", docVal.error);
-      } catch (e) {
-        console.error("Скан не сохранён в архив:", e);
-      }
-    }
-
     alert(`Готово: зачислено ${val.added} чел. на курс «${course}».`);
     document.getElementById("groupRoster").value = "";
     document.getElementById("groupMatchPanel").style.display = "none";
     GROUP_MATCH_ROWS = [];
-    LAST_ROSTER_PHOTO = null;
     await loadAll(["trainingHistory"]);
   } catch (e) {
     alert("Ошибка сети: " + e.message);
@@ -926,29 +900,15 @@ function renderHistory() {
 
   const shown = list.slice(0, 100);
   el.innerHTML = `<div style="overflow-x:auto"><table>
-    <thead><tr><th>Сотрудник</th><th>Курс</th><th>Дата</th><th>Действует до</th><th></th></tr></thead>
+    <thead><tr><th>Сотрудник</th><th>Курс</th><th>Дата</th><th>Действует до</th></tr></thead>
     <tbody>${shown.map(r => `
       <tr>
         <td><b>${r.empName}</b></td>
         <td style="color:var(--gray)">${r.course}</td>
         <td>${formatRu(parseAnyDate(r.date))}</td>
         <td>${r.validUntil ? formatRu(parseAnyDate(r.validUntil)) : "—"}</td>
-        <td>${r.batchId ? `<button class="btn-ghost" style="padding:3px 10px;font-size:11px" onclick="viewScan('${r.batchId}')">📎 Скан</button>` : ""}</td>
       </tr>`).join("")}</tbody>
   </table></div>` + (list.length>100 ? `<div style="text-align:center;color:var(--gray);font-size:12px;padding-top:10px">Показаны последние 100 из ${list.length} — уточните поиск</div>` : "");
-}
-
-// Скан ищем по требованию (по клику), а не заранее для всей истории —
-// незачем гонять лишний запрос на каждую запись при простой прокрутке списка.
-async function viewScan(batchId) {
-  try {
-    const res = await fetch(`${CFG.SHEET_URL}?action=getDocuments&linkedId=${encodeURIComponent(batchId)}`);
-    const docs = await res.json();
-    if (!Array.isArray(docs) || !docs.length) { alert("Скан не найден в архиве"); return; }
-    window.open(docs[0].fileUrl, "_blank");
-  } catch (e) {
-    alert("Ошибка: " + e.message);
-  }
 }
 
 // ══════════════════════════════════════════════════════════
@@ -1055,36 +1015,9 @@ function onEvalEmpChange() {
   }
 }
 
-// Названия типов техники в критериях оценки НЕ совпадают буквально с
-// названиями типов в реальном парке («Карьерный самосвал» — «Самосвал»,
-// «Экскаватор с обратной/прямой лопатой» — там просто «Экскаватор», лопата
-// в парке никак не различается). Явный маппинг — иначе подсказки моделей
-// были бы всегда пустыми.
-const EVAL_TYPE_TO_PARK_TYPE = {
-  "Буровая установка": ["Буровой станок"],
-  "Гусеничный бульдозер": ["Бульдозер"],
-  "Карьерный самосвал": ["Самосвал"],
-  "Колесный погрузчик": ["Погрузчик"],
-  "Экскаватор с обратной лопатой": ["Экскаватор"],
-  "Экскаватор с прямой лопатой": ["Экскаватор"],
-};
-function renderEvalEquipmentModelList(evalType) {
-  const dl = document.getElementById("evalEquipmentModelList");
-  if (!dl) return;
-  const parkTypes = EVAL_TYPE_TO_PARK_TYPE[evalType] || [];
-  const models = new Set(
-    (DATA.equipment||[])
-      .filter(e => parkTypes.includes((e.type||"").trim()))
-      .map(e => (e.model||"").trim())
-      .filter(Boolean)
-  );
-  dl.innerHTML = [...models].sort().map(m => `<option value="${m.replace(/"/g,'&quot;')}">`).join("");
-}
-
 async function onEvalEquipmentTypeChange() {
   const type = document.getElementById("evalEquipmentType").value;
   EVAL_ANSWERS = {};
-  renderEvalEquipmentModelList(type);
   if (!type) {
     ["evalCriteriaPanel","evalBlock2Panel","evalBlock3Panel","evalScorePanel"].forEach(id => {
       document.getElementById(id).style.display = "none";
@@ -1248,6 +1181,8 @@ async function submitEvaluation() {
   if (!emp) { alert("Выберите сотрудника из списка подсказок (начните печатать имя)"); return; }
   const type = document.getElementById("evalEquipmentType").value;
   if (!type) { alert("Выберите тип техники"); return; }
+  const workTypeVal = document.getElementById("evalWorkType").value.trim();
+  if (!workTypeVal) { alert("Укажите вид выполняемых работ"); return; }
 
   const answers = Object.entries(EVAL_ANSWERS).map(([itemNum, a]) => ({
     itemNum, block: a.block, itemText: a.itemText, value: a.value,
@@ -1309,7 +1244,7 @@ async function loadEvalHistoryFor(empId) {
         <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:12px">
           <div>
             <div style="font-size:14px;font-weight:800;color:var(--navy)">${e.empName||""}</div>
-            <div style="font-size:12px;color:var(--gray);margin-top:2px">${e.date} · ${e.equipmentType}${e.equipmentModel ? " ("+e.equipmentModel+")" : ""}</div>
+            <div style="font-size:12px;color:var(--gray);margin-top:2px">${e.date} · ${e.equipmentType}${e.equipmentModel ? " ("+e.equipmentModel+")" : ""}${e.workType ? " · "+e.workType : ""}</div>
           </div>
           <div style="display:flex;align-items:flex-start;gap:8px">
             <span style="font-size:12px;color:var(--gray)">${e.instructorName||""}</span>
