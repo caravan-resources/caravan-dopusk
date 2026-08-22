@@ -302,6 +302,17 @@ tr:hover td { background:#FAFBFD; }
       <div style="font-size:15px;font-weight:800;color:var(--navy);margin:28px 0 12px;padding-top:20px;border-top:2px solid var(--border)">👥 Кадры, допуск и обучение</div>
       <div class="stats-grid" id="statsGridPersonnel"></div>
 
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px" id="trainingBySiteWrap">
+        <div class="panel">
+          <div class="panel-title">🎓 Обучение — Алмалы</div>
+          <div id="trainingBySiteAlmaty"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-title">🎓 Обучение — Ашыктас</div>
+          <div id="trainingBySiteAshyktas"></div>
+        </div>
+      </div>
+
       <div class="panel" style="margin-top:16px">
         <div class="panel-title">
           🔔 Требует внимания
@@ -1840,6 +1851,7 @@ function renderDashboard() {
       <div class="stat-lbl">${s.lbl}</div>
     </div>
   `).join("");
+  renderTrainingBySite();
 
   // Требует внимания — допуски (просроченные+истекающие), несданные тесты,
   // вакансии по вахтам — всё в одном месте вместо отдельной вкладки.
@@ -2004,6 +2016,61 @@ function renderDashboard() {
         `;
       }).join("")
     : `<div class="empty"><div class="empty-icon">✓</div>Неисправностей за последние 7 дней не найдено</div>`;
+}
+
+// ══════════════════════════════════════════════════════
+// ОБУЧЕНИЕ ПО УЧАСТКАМ — сколько человек прошло каждый курс, отдельно по
+// Алмалы и Ашыктас, плюс те, у кого вообще нет ни одной записи. Считаем
+// уникальных людей на курс (Set по empId) — повторное прохождение одного
+// курса не должно задваивать счётчик.
+// ══════════════════════════════════════════════════════
+function renderTrainingBySite() {
+  const sites = [
+    { key: "Алмалы", elId: "trainingBySiteAlmaty" },
+    { key: "Ашыктас", elId: "trainingBySiteAshyktas" },
+  ];
+  const training = DATA.training || [];
+
+  sites.forEach(({ key, elId }) => {
+    const el = document.getElementById(elId);
+    if (!el) return;
+    const emps = (DATA.employees||[]).filter(e => (e.site||"").trim() === key);
+    if (!emps.length) { el.innerHTML = `<div style="font-size:12px;color:var(--gray)">Нет данных</div>`; return; }
+    const empIds = new Set(emps.map(e => String(e.id)));
+
+    const byCourse = {};       // название курса -> Set(empId), только этот участок
+    const trainedEmpIds = new Set();
+    training.forEach(t => {
+      const eid = String(t.empId||"");
+      if (!empIds.has(eid)) return;
+      const course = String(t.course||"").trim();
+      if (!course) return;
+      if (!byCourse[course]) byCourse[course] = new Set();
+      byCourse[course].add(eid);
+      trainedEmpIds.add(eid);
+    });
+
+    const untrained = emps.length - trainedEmpIds.size;
+    const courseEntries = Object.entries(byCourse).sort((a,b) => b[1].size - a[1].size);
+
+    if (!courseEntries.length) {
+      el.innerHTML = `<div style="font-size:12px;color:var(--gray)">Записей об обучении пока нет.</div>` +
+        `<div style="display:flex;justify-content:space-between;padding:8px 0 0;margin-top:6px;font-size:13px">
+          <b style="color:var(--red)">Не обучены</b><b style="color:var(--red)">${emps.length}</b>
+        </div>`;
+      return;
+    }
+
+    el.innerHTML = courseEntries.map(([course, set]) => `
+      <div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border);font-size:13px">
+        <span>${course}</span><b>${set.size}</b>
+      </div>
+    `).join("") + `
+      <div style="display:flex;justify-content:space-between;padding:8px 0 0;margin-top:6px;font-size:13px">
+        <b style="color:var(--red)">Не обучены</b><b style="color:var(--red)">${untrained}</b>
+      </div>
+    `;
+  });
 }
 
 // ══════════════════════════════════════════════════════
