@@ -257,7 +257,8 @@ td { padding:8px; border-bottom:1px solid var(--border); }
         </div>
         <div class="field">
           <label>Вид выполняемых работ *</label>
-          <input type="text" id="evalWorkType" placeholder="напр. Бурение взрывных скважин">
+          <input type="text" id="evalWorkType" list="evalWorkTypeList" placeholder="напр. Бурение взрывных скважин">
+          <datalist id="evalWorkTypeList"></datalist>
         </div>
         <div class="field">
           <label>Инструктор (кто проводит оценку)</label>
@@ -290,10 +291,10 @@ td { padding:8px; border-bottom:1px solid var(--border); }
           <button class="btn-ghost" style="margin-top:8px" onclick="addCritRow('1')">+ Добавить пункт</button>
         </div>
         <div id="critEditBlock23Wrap" style="display:none">
-          <div class="panel-title" style="margin-top:6px;font-size:13px">Блок 2 · Состояние техники</div>
+          <div class="panel-title" style="margin-top:6px;font-size:13px">Техническое состояние</div>
           <div id="critEditBlock2List"></div>
           <button class="btn-ghost" style="margin-top:8px" onclick="addCritRow('2')">+ Добавить пункт</button>
-          <div class="panel-title" style="margin-top:18px;font-size:13px">Блок 3 · Эксплуатация</div>
+          <div class="panel-title" style="margin-top:18px;font-size:13px">Эксплуатация</div>
           <div id="critEditBlock3List"></div>
           <button class="btn-ghost" style="margin-top:8px" onclick="addCritRow('3')">+ Добавить пункт</button>
         </div>
@@ -302,15 +303,15 @@ td { padding:8px; border-bottom:1px solid var(--border); }
       </div>
 
       <div class="panel" id="evalCriteriaPanel" style="display:none">
-        <div class="panel-title">Блок 1 · Обязанности оператора</div>
+        <div class="panel-title">Обязанности оператора</div>
         <div id="evalBlock1List"></div>
       </div>
       <div class="panel" id="evalBlock2Panel" style="display:none">
-        <div class="panel-title">Блок 2 · Состояние техники</div>
+        <div class="panel-title">Техническое состояние</div>
         <div id="evalBlock2List"></div>
       </div>
       <div class="panel" id="evalBlock3Panel" style="display:none">
-        <div class="panel-title">Блок 3 · Эксплуатация</div>
+        <div class="panel-title">Эксплуатация</div>
         <div id="evalBlock3List"></div>
       </div>
 
@@ -368,6 +369,7 @@ function checkPin() {
     if (evalDateEl && !evalDateEl.value) evalDateEl.value = new Date().toISOString().slice(0,10);
     loadAll();
     loadEvalEquipmentTypes();
+    loadEvalWorkTypes();
   } else {
     document.getElementById("loginErr").style.display = "block";
     document.getElementById("pinInput").value = "";
@@ -992,6 +994,18 @@ async function loadEvalEquipmentTypes() {
   // ничего больше не перерисовывает этот конкретный select.
   if (document.getElementById("critEditType")) renderCritEditTypeSelect();
 }
+
+async function loadEvalWorkTypes() {
+  try {
+    const val = await fetchWithRetry(`${CFG.SHEET_URL}?action=getEvaluationWorkTypes`, 30000, 3);
+    DATA.evaluationWorkTypes = Array.isArray(val) ? val : [];
+  } catch (e) {
+    DATA.evaluationWorkTypes = [];
+    console.error("evaluationWorkTypes:", e);
+  }
+  const el = document.getElementById("evalWorkTypeList");
+  if (el) el.innerHTML = DATA.evaluationWorkTypes.map(t => `<option value="${t.replace(/"/g,'&quot;')}">`).join("");
+}
 function renderEvalEquipmentTypeSelect() {
   const el = document.getElementById("evalEquipmentType");
   if (!el) return;
@@ -1211,8 +1225,8 @@ async function submitEvaluation() {
     const val = await res.json();
     if (!val.ok) { alert("Не удалось сохранить: " + (val.error||"")); return; }
     let msg = isEditing
-      ? `Оценка обновлена.\nБлок 1: ${val.block1Score} · Блок 2: ${val.block2Score} · Блок 3: ${val.block3Score}`
-      : `Оценка сохранена.\nБлок 1: ${val.block1Score} · Блок 2: ${val.block2Score} · Блок 3: ${val.block3Score}`;
+      ? `Оценка обновлена.\n${EVAL_BLOCK_NAMES[0]}: ${val.block1Score} · ${EVAL_BLOCK_NAMES[1]}: ${val.block2Score} · ${EVAL_BLOCK_NAMES[2]}: ${val.block3Score}`
+      : `Оценка сохранена.\n${EVAL_BLOCK_NAMES[0]}: ${val.block1Score} · ${EVAL_BLOCK_NAMES[1]}: ${val.block2Score} · ${EVAL_BLOCK_NAMES[2]}: ${val.block3Score}`;
     if (val.coursesAdded) msg += `\n\nАвтоматически добавлено в план обучения курсов: ${val.coursesAdded}`;
     alert(msg);
     EVAL_EDITING_ID = null;
@@ -1224,6 +1238,7 @@ async function submitEvaluation() {
     document.getElementById("evalWorkType").value = "";
     renderEvalCriteriaBlocks();
     loadEvalHistoryFor(emp.id);
+    loadEvalWorkTypes(); // новый вид работ (если был введён впервые) сразу попадёт в подсказки
   } catch (e) {
     alert("Ошибка сети: " + e.message);
   }
@@ -1357,7 +1372,7 @@ function renderCritEditTypeSelect() {
   const el = document.getElementById("critEditType");
   if (!el) return;
   const cur = el.value;
-  el.innerHTML = `<option value="ВСЕ">Блок 1 (общий для всех профессий)</option>` +
+  el.innerHTML = `<option value="ВСЕ">Обязанности (общий для всех профессий)</option>` +
     (DATA.evaluationEquipmentTypes||[]).map(t => `<option value="${t.replace(/"/g,'&quot;')}">${t}</option>`).join("") +
     `<option value="__new__">+ Новый тип техники...</option>`;
   if (cur && [...el.options].some(o => o.value === cur)) el.value = cur;
