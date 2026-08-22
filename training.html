@@ -253,7 +253,8 @@ td { padding:8px; border-bottom:1px solid var(--border); }
         </div>
         <div class="field">
           <label>Модель техники</label>
-          <input type="text" id="evalEquipmentModel" placeholder="напр. Sandvik DX800">
+          <input type="text" id="evalEquipmentModel" list="evalEquipmentModelList" placeholder="напр. Sandvik DX800">
+          <datalist id="evalEquipmentModelList"></datalist>
         </div>
         <div class="field">
           <label>Вид выполняемых работ</label>
@@ -427,6 +428,7 @@ async function loadAll(onlyKeys) {
     { key: "trainingPlan",    action: "getTrainingPlan",  siteScoped: true },
     { key: "trainingHistory", action: "getTraining" },
     { key: "courseCatalog",   action: "getCourseCatalog" },
+    { key: "equipment",       action: "getEquipment",     siteScoped: true },
   ];
   const fetches = onlyKeys ? fetchDefs.filter(f => onlyKeys.includes(f.key)) : fetchDefs;
 
@@ -1053,9 +1055,36 @@ function onEvalEmpChange() {
   }
 }
 
+// Названия типов техники в критериях оценки НЕ совпадают буквально с
+// названиями типов в реальном парке («Карьерный самосвал» — «Самосвал»,
+// «Экскаватор с обратной/прямой лопатой» — там просто «Экскаватор», лопата
+// в парке никак не различается). Явный маппинг — иначе подсказки моделей
+// были бы всегда пустыми.
+const EVAL_TYPE_TO_PARK_TYPE = {
+  "Буровая установка": ["Буровой станок"],
+  "Гусеничный бульдозер": ["Бульдозер"],
+  "Карьерный самосвал": ["Самосвал"],
+  "Колесный погрузчик": ["Погрузчик"],
+  "Экскаватор с обратной лопатой": ["Экскаватор"],
+  "Экскаватор с прямой лопатой": ["Экскаватор"],
+};
+function renderEvalEquipmentModelList(evalType) {
+  const dl = document.getElementById("evalEquipmentModelList");
+  if (!dl) return;
+  const parkTypes = EVAL_TYPE_TO_PARK_TYPE[evalType] || [];
+  const models = new Set(
+    (DATA.equipment||[])
+      .filter(e => parkTypes.includes((e.type||"").trim()))
+      .map(e => (e.model||"").trim())
+      .filter(Boolean)
+  );
+  dl.innerHTML = [...models].sort().map(m => `<option value="${m.replace(/"/g,'&quot;')}">`).join("");
+}
+
 async function onEvalEquipmentTypeChange() {
   const type = document.getElementById("evalEquipmentType").value;
   EVAL_ANSWERS = {};
+  renderEvalEquipmentModelList(type);
   if (!type) {
     ["evalCriteriaPanel","evalBlock2Panel","evalBlock3Panel","evalScorePanel"].forEach(id => {
       document.getElementById(id).style.display = "none";
