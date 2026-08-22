@@ -120,6 +120,7 @@ td { padding:8px; border-bottom:1px solid var(--border); }
 
     <!-- ══ ВАХТА ══ -->
     <div id="screenShift" class="screen active">
+      <div id="shiftStats" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px"></div>
       <div id="shiftFormation"></div>
     </div>
 
@@ -442,12 +443,47 @@ function shiftStatusColor(status) {
   return "var(--green)";
 }
 
-// ══ ВАХТА — только просмотр: кто на чём работает, без редактирования
-// (изменение состава смен остаётся в полной панели, чтобы два приложения
-// не правили одни и те же записи одновременно) ══
+// ══ ОПЕРАТИВНЫЙ СТАТУС СЛОТА (workStatus) ══
+// Заменяет бумажный наряд «Вид работы» — список сверен с реальным файлом,
+// который мастера заполняли вручную 22.08.2026. Если появятся новые
+// формулировки — просто добавить сюда, ничего больше менять не нужно.
+const WORK_STATUS_OPTIONS = ["В работе","Погрузка горной массы","Работа на карьере","Ремонт","Больничный","Вакансия"];
+function workStatusColor(ws) {
+  if (ws === "Ремонт") return "var(--yellow)";
+  if (ws === "Больничный") return "var(--red)";
+  if (ws === "Вакансия") return "var(--gold)";
+  return "var(--green)"; // В работе / Погрузка горной массы / Работа на карьере
+}
+
+// Сводка по текущей вахте+участку — сколько техники в ремонте, на больничном
+// и т.п., чтобы не пришлось пересчитывать вручную то, что раньше писали
+// отдельной строкой в конце бумажного наряда.
+function renderShiftStats() {
+  const el = document.getElementById("shiftStats");
+  if (!el) return;
+  const assignments = (DATA.shiftAssignments||[]).filter(a =>
+    String(a.vahta) === CURRENT_VAHTA && String(a.site||"").trim() === CURRENT_SITE
+  );
+  const counts = {};
+  WORK_STATUS_OPTIONS.forEach(ws => counts[ws] = 0);
+  assignments.forEach(a => { if (a.workStatus && counts[a.workStatus] !== undefined) counts[a.workStatus]++; });
+  el.innerHTML = WORK_STATUS_OPTIONS.filter(ws => counts[ws] > 0).map(ws => `
+    <div class="stat-card" style="border-left-color:${workStatusColor(ws)}">
+      <div class="stat-val" style="color:${workStatusColor(ws)}">${counts[ws]}</div>
+      <div class="stat-lbl">${ws}</div>
+    </div>`).join("");
+}
+
+// ══ ВАХТА — кто на чём работает по вахте/участку. Комментарий ниже был
+// неточным (редактирование оператора через ✎ уже было и раньше): состав
+// смен (кто на какой технике) можно менять и отсюда, и из полной панели.
+// С 22.08.2026 сюда же добавлен оперативный статус слота (workStatus) и
+// заметка о переброске (reassignNote) — замена бумажного наряда, который
+// мастер заполнял вручную каждую смену. ══
 function renderShift() {
   const container = document.getElementById("shiftFormation");
   if (!container) return;
+  renderShiftStats();
 
   const assignments = (DATA.shiftAssignments||[]).filter(a =>
     String(a.vahta) === CURRENT_VAHTA && String(a.site||"").trim() === CURRENT_SITE
@@ -511,8 +547,10 @@ function renderShift() {
         const rowArg = a && a.__row ? a.__row : "null";
         const curEmpId = a ? (a.empId||"") : "";
         const curEmpName = a ? (a.empName||"") : "";
+        const curWorkStatus = a ? (a.workStatus||"") : "";
+        const curReassignNote = a ? (a.reassignNote||"") : "";
         const editIcon = `<span class="edit-slot-icon" style="cursor:pointer;font-size:12px;margin-left:6px" title="Назначить"
-          onclick="openAssignModal('${String(g.equipmentId).replace(/'/g,"\\'")}', ${sm}, ${rowArg}, '${String(curEmpId).replace(/'/g,"\\'")}', '${String(curEmpName).replace(/'/g,"\\'")}')">✎</span>`;
+          onclick="openAssignModal('${String(g.equipmentId).replace(/'/g,"\\'")}', ${sm}, ${rowArg}, '${String(curEmpId).replace(/'/g,"\\'")}', '${String(curEmpName).replace(/'/g,"\\'")}', '${String(curWorkStatus).replace(/'/g,"\\'")}', '${String(curReassignNote).replace(/'/g,"\\'")}')">✎</span>`;
         if (!a) return `<div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;padding:3px 0;color:var(--gray)">
           <span>${label}</span><span>—${editIcon}</span></div>`;
         const color = shiftStatusColor(a.status);
@@ -522,8 +560,16 @@ function renderShift() {
         const nameHtml = clickable
           ? `<span style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted" onclick="openEmployeeCard('${String(a.empId).replace(/'/g,"\\'")}')">${text}</span>`
           : text;
-        return `<div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;padding:3px 0">
-          <span style="color:var(--gray)">${label}</span><span style="color:${color};font-weight:600">${nameHtml}${editIcon}</span></div>`;
+        const wsHtml = a.workStatus
+          ? `<div style="font-size:11px;font-weight:700;color:${workStatusColor(a.workStatus)};text-align:right">${a.workStatus}</div>` : "";
+        const noteHtml = a.reassignNote
+          ? `<div style="font-size:11px;color:var(--gray);font-style:italic;text-align:right">→ ${a.reassignNote}</div>` : "";
+        return `<div style="padding:3px 0;${(wsHtml||noteHtml) ? "border-bottom:1px dashed var(--border)" : ""}">
+          <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px">
+            <span style="color:var(--gray)">${label}</span><span style="color:${color};font-weight:600">${nameHtml}${editIcon}</span>
+          </div>
+          ${wsHtml}${noteHtml}
+        </div>`;
       }).join("");
       return `<div style="background:#fff;border:1px solid var(--border);border-radius:10px;padding:10px 12px;min-width:200px;flex:1 1 200px;max-width:250px">
         <div style="font-size:13px;font-weight:800;color:var(--navy);margin-bottom:6px">${title}</div>
@@ -753,11 +799,14 @@ function empIdFromInput(text) {
 // row=null означает, что для этого слота (техника+смена+вахта+участок) в
 // базе ещё нет строки вовсе — при сохранении создадим новую (saveShiftAssignment),
 // а не будем обновлять несуществующую.
-function openAssignModal(equipmentId, smena, row, curEmpId, curEmpName) {
+function openAssignModal(equipmentId, smena, row, curEmpId, curEmpName, curWorkStatus, curReassignNote) {
   const eq = (DATA.equipment||[]).find(e => String(e.equipmentId)===String(equipmentId));
   const smLabel = SMENA_LABEL[smena];
   const vahtaLabel = (VAHTA_OPTIONS.find(o=>o.key===CURRENT_VAHTA)||{}).label || CURRENT_VAHTA;
   const prefill = curEmpName ? `${curEmpName} [${curEmpId}]` : "";
+  const wsOptions = ['<option value="">— не указано —</option>']
+    .concat(WORK_STATUS_OPTIONS.map(ws => `<option value="${ws}"${ws===curWorkStatus?" selected":""}>${ws}</option>`))
+    .join("");
 
   document.getElementById("modalBox").innerHTML = `
     <div style="font-size:16px;font-weight:800;margin-bottom:4px">Назначить оператора</div>
@@ -768,6 +817,14 @@ function openAssignModal(equipmentId, smena, row, curEmpId, curEmpName) {
       <label>Сотрудник</label>
       <input type="text" id="assignEmpInput" list="assignEmpList" placeholder="Начните вводить имя..." value="${prefill.replace(/"/g,'&quot;')}">
       <datalist id="assignEmpList"></datalist>
+    </div>
+    <div class="field">
+      <label>Вид работы сейчас</label>
+      <select id="assignWorkStatus">${wsOptions}</select>
+    </div>
+    <div class="field">
+      <label>Привлечение на другие работы (если есть)</label>
+      <input type="text" id="assignReassignNote" placeholder="Например: Пересажен на 212" value="${String(curReassignNote||"").replace(/"/g,'&quot;')}">
     </div>
     <div style="display:flex;gap:8px">
       <button class="btn-gold" style="flex:1" onclick="submitAssign(${row===null?"null":row}, '${String(equipmentId).replace(/'/g,"\\'")}', ${smena})">Сохранить</button>
@@ -786,12 +843,15 @@ async function submitAssign(row, equipmentId, smena) {
   const empId = empIdFromInput(empText);
   const emp = empById(empId);
   if (!emp) { alert("Выберите сотрудника из списка подсказок (начните печатать имя)"); return; }
+  const workStatus = document.getElementById("assignWorkStatus").value;
+  const reassignNote = document.getElementById("assignReassignNote").value.trim();
 
   try {
     let res;
     if (row) {
       res = await fetch(CFG.SHEET_URL, { method:"POST", body: JSON.stringify({
         action: "updateShiftAssignment", row, empId: emp.id, empName: emp.name, status: "",
+        workStatus, reassignNote,
       })});
     } else {
       // Слота ещё нет в базе — создаём новую строку. position берём из любой
@@ -802,6 +862,7 @@ async function submitAssign(row, equipmentId, smena) {
         action: "saveShiftAssignment",
         equipmentId, position: sample ? sample.position : "", smena, vahta: CURRENT_VAHTA,
         empId: emp.id, empName: emp.name, status: "", dismissDate: "", skill: "", site: CURRENT_SITE,
+        workStatus, reassignNote,
       })});
     }
     const val = await res.json();
@@ -819,6 +880,7 @@ async function submitUnassign(row) {
   try {
     const res = await fetch(CFG.SHEET_URL, { method:"POST", body: JSON.stringify({
       action: "updateShiftAssignment", row, empId: "", empName: "", status: "",
+      workStatus: "", reassignNote: "",
     })});
     const val = await res.json();
     if (!val.ok) { alert("Не удалось сохранить: " + (val.error||"")); return; }
