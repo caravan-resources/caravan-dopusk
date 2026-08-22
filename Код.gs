@@ -2981,7 +2981,7 @@ function getEvaluationStats(p) {
     since.setHours(0,0,0,0);
   }
 
-  const byOp = {}; // empName -> { empId, count, sums[3], counts[3], lastDate, evaluations[] }
+  const byOp = {}; // empName -> { empId, count, lastDate, evaluations[] }
   rows.slice(1).forEach(r => {
     if (!r[idx["evalId"]]) return;
     const site = String(r[idx["site"]] || "").trim();
@@ -2996,17 +2996,11 @@ function getEvaluationStats(p) {
     if (!empName) return;
     const empId = r[idx["empId"]] || "";
 
-    if (!byOp[empName]) byOp[empName] = { empId: empId, count: 0, sums: [0,0,0], counts: [0,0,0], lastDate: null, evaluations: [] };
+    if (!byOp[empName]) byOp[empName] = { empId: empId, count: 0, lastDate: null, evaluations: [] };
     const op = byOp[empName];
     op.count++;
     if (empId && !op.empId) op.empId = empId;
     const b1 = r[idx["block1Score"]], b2 = r[idx["block2Score"]], b3 = r[idx["block3Score"]];
-    [b1, b2, b3].forEach((v, bi) => {
-      if (v !== "-" && v !== "" && v !== undefined && v !== null && !isNaN(Number(v))) {
-        op.sums[bi] += Number(v);
-        op.counts[bi]++;
-      }
-    });
     if (!isNaN(d) && (!op.lastDate || d > op.lastDate)) op.lastDate = d;
 
     // Резюме и детали по каждой конкретной оценке (не только агрегат) — для
@@ -3021,10 +3015,31 @@ function getEvaluationStats(p) {
     });
   });
 
+  // Средний балл — с ранговым взвешиванием по давности: оценки сортируются
+  // от старой к новой, вес растёт линейно (1, 2, 3...N), т.е. самая свежая
+  // оценка весит в N раз больше самой первой. Один и тот же вес (по дате
+  // самой оценки) применяется сразу ко всем трём блокам этой оценки — так
+  // три параметра одной проверки не расходятся по весам между собой.
+  // Простое среднее было бы несправедливо к тем, кто улучшился со временем:
+  // одна давняя слабая оценка топила бы рейтинг наравне со свежей хорошей.
+  function weightedAvg(evalsChronological, field) {
+    let sumW = 0, sumWV = 0;
+    evalsChronological.forEach((e, i) => {
+      const v = e[field];
+      if (v === "-" || v === "" || v === undefined || v === null || isNaN(Number(v))) return;
+      const weight = i + 1; // 1..N, старая -> новая
+      sumW += weight;
+      sumWV += weight * Number(v);
+    });
+    return sumW ? Math.round((sumWV / sumW) * 100) / 100 : "-";
+  }
+
   const operators = Object.keys(byOp).map(name => {
     const o = byOp[name];
-    const avg = i => o.counts[i] ? Math.round((o.sums[i]/o.counts[i])*100)/100 : "-";
-    const b1 = avg(0), b2 = avg(1), b3 = avg(2);
+    const chronological = o.evaluations.slice().sort((a,b) => a.__sortDate - b.__sortDate);
+    const b1 = weightedAvg(chronological, "block1Score");
+    const b2 = weightedAvg(chronological, "block2Score");
+    const b3 = weightedAvg(chronological, "block3Score");
     const nums = [b1,b2,b3].filter(v => v !== "-");
     // Средний балл по трём блокам — теперь отдаём его и в ответе API, не
     // только используем для сортировки (раньше намеренно скрывали).
