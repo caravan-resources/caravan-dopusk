@@ -554,6 +554,7 @@ function renderCourseSelect() {
 // не пишем в базу того, в ком не уверены молча.
 // ══════════════════════════════════════════════════════════
 let GROUP_MATCH_ROWS = [];
+let LAST_ROSTER_PHOTO = null; // {base64, mimeType} — фото, загруженное для распознавания; архивируется при зачислении
 
 function normalizeName(s) {
   return String(s||"").trim().toLowerCase().replace(/\s+/g," ").replace(/[.,]/g,"");
@@ -637,6 +638,9 @@ async function uploadRosterPhoto(input) {
   if (statusEl) statusEl.textContent = "⏳ Распознаю фото...";
   try {
     const base64 = await resizeImageForUpload(file, 1400);
+    // Храним фото — при успешном зачислении сохраним его же в архив
+    // документов, привязав к batchId. Второй раз просить не нужно.
+    LAST_ROSTER_PHOTO = { base64, mimeType: "image/jpeg" };
     const res = await fetch(CFG.SHEET_URL, {
       method: "POST",
       body: JSON.stringify({ action: "recognizeRoster", image: base64, mimeType: "image/jpeg" }),
@@ -732,10 +736,30 @@ async function submitGroupEnroll() {
     const res = await fetch(CFG.SHEET_URL, { method:"POST", body: JSON.stringify({ action:"bulkAddTrainingFacts", records }) });
     const val = await res.json();
     if (!val.ok) { alert("Не удалось зачислить: " + (val.error||"")); return; }
+
+    // Зачисление уже прошло успешно — архивирование скана вторично и не
+    // должно выглядеть как провал всего действия, если вдруг не удастся.
+    if (LAST_ROSTER_PHOTO && val.batchId) {
+      try {
+        const docRes = await fetch(CFG.SHEET_URL, { method:"POST", body: JSON.stringify({
+          action: "uploadDocument",
+          image: LAST_ROSTER_PHOTO.base64, mimeType: LAST_ROSTER_PHOTO.mimeType,
+          fileName: `ростер_${course}_${dateRu||""}.jpg`,
+          type: "ростер", title: course, date: dateRu, site: CURRENT_SITE,
+          linkedIds: val.batchId,
+        })});
+        const docVal = await docRes.json();
+        if (!docVal.ok) console.error("Скан не сохранён в архив:", docVal.error);
+      } catch (e) {
+        console.error("Скан не сохранён в архив:", e);
+      }
+    }
+
     alert(`Готово: зачислено ${val.added} чел. на курс «${course}».`);
     document.getElementById("groupRoster").value = "";
     document.getElementById("groupMatchPanel").style.display = "none";
     GROUP_MATCH_ROWS = [];
+    LAST_ROSTER_PHOTO = null;
     await loadAll(["trainingHistory"]);
   } catch (e) {
     alert("Ошибка сети: " + e.message);
@@ -900,15 +924,29 @@ function renderHistory() {
 
   const shown = list.slice(0, 100);
   el.innerHTML = `<div style="overflow-x:auto"><table>
-    <thead><tr><th>Сотрудник</th><th>Курс</th><th>Дата</th><th>Действует до</th></tr></thead>
+    <thead><tr><th>Сотрудник</th><th>Курс</th><th>Дата</th><th>Действует до</th><th></th></tr></thead>
     <tbody>${shown.map(r => `
       <tr>
         <td><b>${r.empName}</b></td>
         <td style="color:var(--gray)">${r.course}</td>
         <td>${formatRu(parseAnyDate(r.date))}</td>
         <td>${r.validUntil ? formatRu(parseAnyDate(r.validUntil)) : "—"}</td>
+        <td>${r.batchId ? `<button class="btn-ghost" style="padding:3px 10px;font-size:11px" onclick="viewScan('${r.batchId}')">📎 Скан</button>` : ""}</td>
       </tr>`).join("")}</tbody>
   </table></div>` + (list.length>100 ? `<div style="text-align:center;color:var(--gray);font-size:12px;padding-top:10px">Показаны последние 100 из ${list.length} — уточните поиск</div>` : "");
+}
+
+// Скан ищем по требованию (по клику), а не заранее для всей истории —
+// незачем гонять лишний запрос на каждую запись при простой прокрутке списка.
+async function viewScan(batchId) {
+  try {
+    const res = await fetch(`${CFG.SHEET_URL}?action=getDocuments&linkedId=${encodeURIComponent(batchId)}`);
+    const docs = await res.json();
+    if (!Array.isArray(docs) || !docs.length) { alert("Скан не найден в архиве"); return; }
+    window.open(docs[0].fileUrl, "_blank");
+  } catch (e) {
+    alert("Ошибка: " + e.message);
+  }
 }
 
 // ══════════════════════════════════════════════════════════
