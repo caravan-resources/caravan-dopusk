@@ -2184,7 +2184,13 @@ function getShiftAssignments(site) {
 function saveShiftAssignment(p) {
   const ss    = SpreadsheetApp.openById(SHEET_ID);
   let sheet = ss.getSheetByName(SHEET_SHIFTS);
-  const headers = ["equipmentId","position","smena","vahta","empId","empName","status","dismissDate","skill","site"];
+  // workStatus/reassignNote — оперативный статус слота на смену (в работе/ремонт/
+  // погрузка г.м./больничный и т.п.) + свободная заметка о временной переброске.
+  // Добавлены 22.08.2026 взамен бумажного наряда, который мастера заполняли вручную
+  // каждую смену. ВАЖНО: если лист «Смены» уже существует (обычный случай), эти два
+  // столбца нужно добавить туда вручную как последние — иначе появятся не в тех
+  // колонках. Если листа ещё нет — appendRow создаст его сразу с этими столбцами.
+  const headers = ["equipmentId","position","smena","vahta","empId","empName","status","dismissDate","skill","site","workStatus","reassignNote"];
   if (!sheet) {
     sheet = ss.insertSheet(SHEET_SHIFTS);
     sheet.appendRow(headers);
@@ -2197,7 +2203,7 @@ function saveShiftAssignment(p) {
 // Изменить существующее назначение по номеру строки. equipmentId тоже можно
 // менять — нужно при переименовании техники, чтобы записи смен не осиротели.
 function updateShiftAssignment(p) {
-  const { row, equipmentId, empId, empName, status, dismissDate, skill } = p || {};
+  const { row, equipmentId, empId, empName, status, dismissDate, skill, workStatus, reassignNote } = p || {};
   if (!row) return json({ ok: false, error: "Нужен row" });
   const ss    = SpreadsheetApp.openById(SHEET_ID);
   const sheet = ss.getSheetByName(SHEET_SHIFTS);
@@ -2210,6 +2216,11 @@ function updateShiftAssignment(p) {
   if (status      !== undefined && col("status")      > 0) sheet.getRange(row, col("status")).setValue(status);
   if (dismissDate !== undefined && col("dismissDate") > 0) sheet.getRange(row, col("dismissDate")).setValue(dismissDate);
   if (skill       !== undefined && col("skill")       > 0) sheet.getRange(row, col("skill")).setValue(skill);
+  // Пишутся, только если такие столбцы реально есть на листе (см. комментарий
+  // в saveShiftAssignment) — на старом листе без них просто ничего не произойдёт,
+  // без ошибки.
+  if (workStatus  !== undefined && col("workStatus")  > 0) sheet.getRange(row, col("workStatus")).setValue(workStatus);
+  if (reassignNote!== undefined && col("reassignNote")> 0) sheet.getRange(row, col("reassignNote")).setValue(reassignNote);
   return json({ ok: true });
 }
 
