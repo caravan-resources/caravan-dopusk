@@ -257,8 +257,13 @@ td { padding:8px; border-bottom:1px solid var(--border); }
         </div>
         <div class="field">
           <label>Вид выполняемых работ *</label>
-          <input type="text" id="evalWorkType" list="evalWorkTypeList" placeholder="напр. Бурение взрывных скважин">
-          <datalist id="evalWorkTypeList"></datalist>
+          <div style="position:relative">
+            <input type="text" id="evalWorkType" placeholder="напр. Бурение взрывных скважин" autocomplete="off"
+              oninput="renderWorkTypeSuggestions()" onfocus="renderWorkTypeSuggestions()" onblur="hideWorkTypeSuggestionsDelayed()">
+            <div id="evalWorkTypeSuggestions" style="display:none;position:absolute;left:0;right:0;z-index:20;
+              background:#fff;border:1px solid var(--border);border-radius:8px;margin-top:4px;max-height:200px;
+              overflow-y:auto;box-shadow:0 4px 14px rgba(0,0,0,.1)"></div>
+          </div>
         </div>
         <div class="field">
           <label>Инструктор (кто проводит оценку)</label>
@@ -1003,8 +1008,40 @@ async function loadEvalWorkTypes() {
     DATA.evaluationWorkTypes = [];
     console.error("evaluationWorkTypes:", e);
   }
-  const el = document.getElementById("evalWorkTypeList");
-  if (el) el.innerHTML = DATA.evaluationWorkTypes.map(t => `<option value="${t.replace(/"/g,'&quot;')}">`).join("");
+}
+
+// Свой выпадающий список подсказок вместо нативного <datalist> — на части
+// браузеров (особенно мобильных) datalist никак не показывает подсказки,
+// хотя формально настроен верно. Обычные HTML-элементы работают одинаково
+// везде, потому что рендерятся и управляются полностью нашим кодом.
+function renderWorkTypeSuggestions() {
+  const box = document.getElementById("evalWorkTypeSuggestions");
+  const input = document.getElementById("evalWorkType");
+  if (!box || !input) return;
+  const q = input.value.trim().toLowerCase();
+  const list = DATA.evaluationWorkTypes || [];
+  const matches = q ? list.filter(t => t.toLowerCase().includes(q)) : list;
+  if (!matches.length) { box.style.display = "none"; return; }
+  box.innerHTML = matches.slice(0, 10).map(t => `
+    <div style="padding:9px 12px;cursor:pointer;font-size:13px"
+      onmouseover="this.style.background='var(--light)'" onmouseout="this.style.background='#fff'"
+      onmousedown="selectWorkTypeSuggestion('${t.replace(/'/g,"\\'")}')">${t}</div>
+  `).join("");
+  box.style.display = "block";
+}
+function selectWorkTypeSuggestion(t) {
+  document.getElementById("evalWorkType").value = t;
+  const box = document.getElementById("evalWorkTypeSuggestions");
+  if (box) box.style.display = "none";
+}
+// onmousedown у подсказки срабатывает раньше onblur поля — поэтому выбор
+// клика успевает пройти до того, как список спрячется. Небольшая задержка
+// здесь — подстраховка для срабатывания уже после этого клика.
+function hideWorkTypeSuggestionsDelayed() {
+  setTimeout(() => {
+    const box = document.getElementById("evalWorkTypeSuggestions");
+    if (box) box.style.display = "none";
+  }, 150);
 }
 function renderEvalEquipmentTypeSelect() {
   const el = document.getElementById("evalEquipmentType");
