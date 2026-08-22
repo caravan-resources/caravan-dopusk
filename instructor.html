@@ -333,34 +333,6 @@ tr:hover td { background:#FAFBFD; }
     <!-- ══ РЕЗУЛЬТАТЫ ТЕСТОВ ══ -->
     <div id="tabTests" class="screen">
       <div class="panel">
-        <div class="filters">
-          <input type="text" id="searchTest" placeholder="🔍 Поиск по имени..."
-            oninput="renderTestsTable()">
-          <select id="filterResult" onchange="renderTestsTable()">
-            <option value="all">Все результаты</option>
-            <option value="pass">Сдали</option>
-            <option value="fail">Не сдали</option>
-          </select>
-          <button class="btn btn-ghost" onclick="exportTestsCSV()">📥 CSV</button>
-        </div>
-        <div class="tbl-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Дата</th><th>Время</th><th>Сотрудник</th><th>Тест</th>
-                <th>Результат</th><th>Балл</th><th>Правильных</th><th>Время (мин)</th>
-              </tr>
-            </thead>
-            <tbody id="testsTableBody"></tbody>
-          </table>
-        </div>
-        <div id="testsEmpty" class="empty" style="display:none">
-          <div class="empty-icon">📋</div>Нет результатов
-        </div>
-        <div style="margin-top:8px;font-size:12px;color:var(--gray)" id="testsCount"></div>
-      </div>
-
-      <div class="panel">
         <div class="panel-title">📎 Прикрепить протокол экзамена</div>
         <div class="hint" style="margin-bottom:12px">
           Скан/фото протокола сохранится на Google Диске и привяжется к выбранному тесту —
@@ -390,6 +362,34 @@ tr:hover td { background:#FAFBFD; }
           <span id="protocolUploadStatus" style="font-size:12px;color:var(--gray)"></span>
         </div>
         <div id="protocolList" style="margin-top:14px"></div>
+      </div>
+
+      <div class="panel">
+        <div class="filters">
+          <input type="text" id="searchTest" placeholder="🔍 Поиск по имени..."
+            oninput="renderTestsTable()">
+          <select id="filterResult" onchange="renderTestsTable()">
+            <option value="all">Все результаты</option>
+            <option value="pass">Сдали</option>
+            <option value="fail">Не сдали</option>
+          </select>
+          <button class="btn btn-ghost" onclick="exportTestsCSV()">📥 CSV</button>
+        </div>
+        <div class="tbl-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Дата</th><th>Время</th><th>Сотрудник</th><th>Тест</th>
+                <th>Результат</th><th>Балл</th><th>Правильных</th><th>Время (мин)</th>
+              </tr>
+            </thead>
+            <tbody id="testsTableBody"></tbody>
+          </table>
+        </div>
+        <div id="testsEmpty" class="empty" style="display:none">
+          <div class="empty-icon">📋</div>Нет результатов
+        </div>
+        <div style="margin-top:8px;font-size:12px;color:var(--gray)" id="testsCount"></div>
       </div>
 
       <div class="panel">
