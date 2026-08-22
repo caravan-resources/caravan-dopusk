@@ -59,6 +59,9 @@ function doGet(e) {
   else if (action === "getEvaluationCriteria") result = getEvaluationCriteria(e.parameter.equipmentType);
   else if (action === "getEvaluationEquipmentTypes") result = getEvaluationEquipmentTypes();
   else if (action === "getEvaluationWorkTypes") result = getEvaluationWorkTypes();
+  else if (action === "getEvaluationEquipmentModels") result = getEvaluationEquipmentModels(e.parameter);
+  else if (action === "getEvaluationInstructors") result = getEvaluationInstructors();
+  else if (action === "getEvaluationSupervisors") result = getEvaluationSupervisors();
   else if (action === "getOperatorEvaluations") result = getOperatorEvaluations(e.parameter.empId);
   else if (action === "getEvaluationDetail") result = getEvaluationDetail(e.parameter.evalId);
   else if (action === "getEvaluationAlerts") result = getEvaluationAlerts();
@@ -2459,6 +2462,59 @@ function getEvaluationWorkTypes() {
     if (v) values.add(v);
   });
   return json(Array.from(values).sort());
+}
+
+// Подсказки для поля «Модель техники» — тоже свободный текст, из уже
+// сохранённых оценок. equipmentType (необязательно) сужает список: для
+// буровой установки предлагаем модели буровых, а не самосвалов.
+function getEvaluationEquipmentModels(p) {
+  const typeFilter = (p && p.equipmentType) ? String(p.equipmentType).trim() : "";
+  const ss    = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName(SHEET_EVALUATIONS);
+  if (!sheet) return json([]);
+  const rows = sheet.getDataRange().getValues();
+  if (rows.length < 2) return json([]);
+  const headers = rows[0];
+  const modelCol = headers.indexOf("equipmentModel");
+  const typeCol = headers.indexOf("equipmentType");
+  if (modelCol < 0) return json([]);
+
+  const values = new Set();
+  rows.slice(1).forEach(r => {
+    if (typeFilter && typeCol >= 0 && String(r[typeCol] || "").trim() !== typeFilter) return;
+    const v = String(r[modelCol] || "").trim();
+    if (v) values.add(v);
+  });
+  return json(Array.from(values).sort());
+}
+
+// Общий помощник: уникальные непустые значения одной колонки листа
+// «ОценкиОператоров» — используется и для инструктора, и для супервайзера,
+// чтобы не дублировать одну и ту же логику дважды.
+function getEvaluationDistinctColumn(columnName) {
+  const ss    = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName(SHEET_EVALUATIONS);
+  if (!sheet) return json([]);
+  const rows = sheet.getDataRange().getValues();
+  if (rows.length < 2) return json([]);
+  const headers = rows[0];
+  const col = headers.indexOf(columnName);
+  if (col < 0) return json([]);
+
+  const values = new Set();
+  rows.slice(1).forEach(r => {
+    const v = String(r[col] || "").trim();
+    if (v) values.add(v);
+  });
+  return json(Array.from(values).sort());
+}
+
+function getEvaluationInstructors() {
+  return getEvaluationDistinctColumn("instructorName");
+}
+
+function getEvaluationSupervisors() {
+  return getEvaluationDistinctColumn("supervisorName");
 }
 
 // Заменяет весь набор пунктов конкретного типа техники разом (как
