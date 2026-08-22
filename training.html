@@ -253,7 +253,13 @@ td { padding:8px; border-bottom:1px solid var(--border); }
         </div>
         <div class="field">
           <label>Модель техники</label>
-          <input type="text" id="evalEquipmentModel" placeholder="напр. Sandvik DX800">
+          <div style="position:relative">
+            <input type="text" id="evalEquipmentModel" placeholder="напр. Sandvik DX800" autocomplete="off"
+              oninput="renderEquipmentModelSuggestions()" onfocus="renderEquipmentModelSuggestions()" onblur="hideEquipmentModelSuggestionsDelayed()">
+            <div id="evalEquipmentModelSuggestions" style="display:none;position:absolute;left:0;right:0;z-index:20;
+              background:#fff;border:1px solid var(--border);border-radius:8px;margin-top:4px;max-height:200px;
+              overflow-y:auto;box-shadow:0 4px 14px rgba(0,0,0,.1)"></div>
+          </div>
         </div>
         <div class="field">
           <label>Вид выполняемых работ *</label>
@@ -267,11 +273,23 @@ td { padding:8px; border-bottom:1px solid var(--border); }
         </div>
         <div class="field">
           <label>Инструктор (кто проводит оценку)</label>
-          <input type="text" id="evalInstructor" placeholder="ФИО инструктора">
+          <div style="position:relative">
+            <input type="text" id="evalInstructor" placeholder="ФИО инструктора" autocomplete="off"
+              oninput="renderSuggestions('evalInstructor','evaluationInstructors')" onfocus="renderSuggestions('evalInstructor','evaluationInstructors')" onblur="hideSuggestionsDelayed('evalInstructor')">
+            <div id="evalInstructorSuggestions" style="display:none;position:absolute;left:0;right:0;z-index:20;
+              background:#fff;border:1px solid var(--border);border-radius:8px;margin-top:4px;max-height:200px;
+              overflow-y:auto;box-shadow:0 4px 14px rgba(0,0,0,.1)"></div>
+          </div>
         </div>
         <div class="field">
           <label>Супервайзер (необязательно)</label>
-          <input type="text" id="evalSupervisor" placeholder="ФИО супервайзера">
+          <div style="position:relative">
+            <input type="text" id="evalSupervisor" placeholder="ФИО супервайзера" autocomplete="off"
+              oninput="renderSuggestions('evalSupervisor','evaluationSupervisors')" onfocus="renderSuggestions('evalSupervisor','evaluationSupervisors')" onblur="hideSuggestionsDelayed('evalSupervisor')">
+            <div id="evalSupervisorSuggestions" style="display:none;position:absolute;left:0;right:0;z-index:20;
+              background:#fff;border:1px solid var(--border);border-radius:8px;margin-top:4px;max-height:200px;
+              overflow-y:auto;box-shadow:0 4px 14px rgba(0,0,0,.1)"></div>
+          </div>
         </div>
       </div>
 
@@ -375,6 +393,9 @@ function checkPin() {
     loadAll();
     loadEvalEquipmentTypes();
     loadEvalWorkTypes();
+    loadEvalEquipmentModels();
+    loadEvaluationInstructors();
+    loadEvaluationSupervisors();
   } else {
     document.getElementById("loginErr").style.display = "block";
     document.getElementById("pinInput").value = "";
@@ -1010,6 +1031,21 @@ async function loadEvalWorkTypes() {
   }
 }
 
+// Модели грузим отдельно от типов работ: список зависит от выбранного типа
+// техники (typeFilter), поэтому перезапрашивается при каждой смене типа,
+// а не один раз при входе, как вид работ.
+async function loadEvalEquipmentModels(typeFilter) {
+  try {
+    const url = `${CFG.SHEET_URL}?action=getEvaluationEquipmentModels` +
+      (typeFilter ? `&equipmentType=${encodeURIComponent(typeFilter)}` : "");
+    const val = await fetchWithRetry(url, 30000, 3);
+    DATA.evaluationEquipmentModels = Array.isArray(val) ? val : [];
+  } catch (e) {
+    DATA.evaluationEquipmentModels = [];
+    console.error("evaluationEquipmentModels:", e);
+  }
+}
+
 // Свой выпадающий список подсказок вместо нативного <datalist> — на части
 // браузеров (особенно мобильных) datalist никак не показывает подсказки,
 // хотя формально настроен верно. Обычные HTML-элементы работают одинаково
@@ -1043,6 +1079,83 @@ function hideWorkTypeSuggestionsDelayed() {
     if (box) box.style.display = "none";
   }, 150);
 }
+
+// Тот же паттерн для поля «Модель техники».
+function renderEquipmentModelSuggestions() {
+  const box = document.getElementById("evalEquipmentModelSuggestions");
+  const input = document.getElementById("evalEquipmentModel");
+  if (!box || !input) return;
+  const q = input.value.trim().toLowerCase();
+  const list = DATA.evaluationEquipmentModels || [];
+  const matches = q ? list.filter(t => t.toLowerCase().includes(q)) : list;
+  if (!matches.length) { box.style.display = "none"; return; }
+  box.innerHTML = matches.slice(0, 10).map(t => `
+    <div style="padding:9px 12px;cursor:pointer;font-size:13px"
+      onmouseover="this.style.background='var(--light)'" onmouseout="this.style.background='#fff'"
+      onmousedown="selectEquipmentModelSuggestion('${t.replace(/'/g,"\\'")}')">${t}</div>
+  `).join("");
+  box.style.display = "block";
+}
+function selectEquipmentModelSuggestion(t) {
+  document.getElementById("evalEquipmentModel").value = t;
+  const box = document.getElementById("evalEquipmentModelSuggestions");
+  if (box) box.style.display = "none";
+}
+function hideEquipmentModelSuggestionsDelayed() {
+  setTimeout(() => {
+    const box = document.getElementById("evalEquipmentModelSuggestions");
+    if (box) box.style.display = "none";
+  }, 150);
+}
+
+// Универсальная версия того же паттерна — для инструктора и супервайзера,
+// чтобы не копировать одну и ту же логику ещё дважды. dataKey — ключ в
+// DATA с массивом строк-подсказок.
+function renderSuggestions(inputId, dataKey) {
+  const box = document.getElementById(inputId + "Suggestions");
+  const input = document.getElementById(inputId);
+  if (!box || !input) return;
+  const q = input.value.trim().toLowerCase();
+  const list = DATA[dataKey] || [];
+  const matches = q ? list.filter(t => t.toLowerCase().includes(q)) : list;
+  if (!matches.length) { box.style.display = "none"; return; }
+  box.innerHTML = matches.slice(0, 10).map(t => `
+    <div style="padding:9px 12px;cursor:pointer;font-size:13px"
+      onmouseover="this.style.background='var(--light)'" onmouseout="this.style.background='#fff'"
+      onmousedown="selectSuggestion('${inputId}','${t.replace(/'/g,"\\'")}')">${t}</div>
+  `).join("");
+  box.style.display = "block";
+}
+function selectSuggestion(inputId, t) {
+  document.getElementById(inputId).value = t;
+  const box = document.getElementById(inputId + "Suggestions");
+  if (box) box.style.display = "none";
+}
+function hideSuggestionsDelayed(inputId) {
+  setTimeout(() => {
+    const box = document.getElementById(inputId + "Suggestions");
+    if (box) box.style.display = "none";
+  }, 150);
+}
+
+async function loadEvaluationInstructors() {
+  try {
+    const val = await fetchWithRetry(`${CFG.SHEET_URL}?action=getEvaluationInstructors`, 30000, 3);
+    DATA.evaluationInstructors = Array.isArray(val) ? val : [];
+  } catch (e) {
+    DATA.evaluationInstructors = [];
+    console.error("evaluationInstructors:", e);
+  }
+}
+async function loadEvaluationSupervisors() {
+  try {
+    const val = await fetchWithRetry(`${CFG.SHEET_URL}?action=getEvaluationSupervisors`, 30000, 3);
+    DATA.evaluationSupervisors = Array.isArray(val) ? val : [];
+  } catch (e) {
+    DATA.evaluationSupervisors = [];
+    console.error("evaluationSupervisors:", e);
+  }
+}
 function renderEvalEquipmentTypeSelect() {
   const el = document.getElementById("evalEquipmentType");
   if (!el) return;
@@ -1069,6 +1182,7 @@ function onEvalEmpChange() {
 async function onEvalEquipmentTypeChange() {
   const type = document.getElementById("evalEquipmentType").value;
   EVAL_ANSWERS = {};
+  loadEvalEquipmentModels(type); // подсказки модели сужаются под выбранный тип техники
   if (!type) {
     ["evalCriteriaPanel","evalBlock2Panel","evalBlock3Panel","evalScorePanel"].forEach(id => {
       document.getElementById(id).style.display = "none";
@@ -1276,6 +1390,8 @@ async function submitEvaluation() {
     renderEvalCriteriaBlocks();
     loadEvalHistoryFor(emp.id);
     loadEvalWorkTypes(); // новый вид работ (если был введён впервые) сразу попадёт в подсказки
+    loadEvaluationInstructors();
+    loadEvaluationSupervisors();
   } catch (e) {
     alert("Ошибка сети: " + e.message);
   }
