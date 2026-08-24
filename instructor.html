@@ -6200,8 +6200,16 @@ function computeConsumptionRate(equipmentId, start, end) {
   function delta(readings) {
     const upToEnd = readings.filter(r => r.date <= end);
     if (upToEnd.length < 2) return null;
-    const first = upToEnd[0], last = upToEnd[upToEnd.length-1];
+    const last = upToEnd[upToEnd.length-1];
     if (last.date <= start) return null; // все показания старше периода — сравнивать не с чем
+    // База — последнее показание ДО начала периода (а не самое первое за всю
+    // историю техники — иначе расход размазывается на весь срок эксплуатации).
+    // Если показаний до start ещё не было (техника новая / первые замеры
+    // попали внутрь периода) — берём самое раннее показание внутри периода:
+    // расход выйдет неполным за первый цикл, но не растянутым на всю историю.
+    const beforeStart = upToEnd.filter(r => r.date <= start);
+    const first = beforeStart.length ? beforeStart[beforeStart.length-1] : upToEnd[0];
+    if (first === last) return null;
     const d = last.value - first.value;
     return d > 0 ? d : null;
   }
