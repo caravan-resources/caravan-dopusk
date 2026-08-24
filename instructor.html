@@ -2892,6 +2892,31 @@ function renderPrintPreview() {
       <span style="color:#CBD5E1;font-size:11px">пусто</span>
     </div>`)
   ].join("");
+  fitCardNames(sheet);
+}
+
+// Автоподбор кегля ФИО на карточках допуска/удостоверений. Верстка рассчитана
+// на ~3 строки исходного кегля (14pt/13pt); если Фамилия/Имя/Отчество не
+// влезают по ширине (длинное отчество переносится лишней строкой), раньше
+// лишняя строка просто обрезалась через overflow:hidden. Теперь вместо этого
+// уменьшаем font-size блока, пока весь текст не поместится в свой бюджет высоты.
+function fitCardNames(root) {
+  const scope = root || document;
+  scope.querySelectorAll(".card-name-fit").forEach(el => {
+    if (!el.dataset.baseSize) {
+      const base = parseFloat(getComputedStyle(el).fontSize); // px — кегль из вёрстки
+      el.dataset.baseSize = base;
+      el.style.maxHeight = (base * 1.05 * 3) + "px"; // бюджет: 3 строки исходного кегля
+      el.style.overflow = "hidden";
+    }
+    let size = parseFloat(el.dataset.baseSize);
+    const minSize = size * 0.6; // не даём ужаться больше чем наполовину — иначе нечитаемо
+    el.style.fontSize = size + "px";
+    while (el.scrollHeight > el.clientHeight + 1 && size > minSize) {
+      size -= 0.5;
+      el.style.fontSize = size + "px";
+    }
+  });
 }
 
 function cardHTML(emp) {
@@ -2948,7 +2973,7 @@ function cardHTML(emp) {
 
         <!-- Имя -->
         <div>
-          <div style="font-size:14pt;font-weight:700;color:#0B1A35;
+          <div class="card-name-fit" style="font-size:14pt;font-weight:700;color:#0B1A35;
             text-transform:uppercase;line-height:1.05;letter-spacing:.01em;
             word-break:break-word">
             ${(emp.name||"— — —")}
@@ -3004,9 +3029,14 @@ async function printCards() {
   if (area) area.remove();
   area = document.createElement("div");
   area.id = "printArea";
-  area.style.cssText = "display:none";
+  // Временно офф-скрин (НЕ display:none) — иначе scrollHeight/clientHeight
+  // всегда 0 и fitCardNames() не сможет подобрать кегль. После подгонки
+  // возвращаем display:none; на печати вид задаёт @media print (display:grid).
+  area.style.cssText = "position:fixed;left:-9999px;top:0;background:#fff";
   area.innerHTML = selected.map(e=>cardHTML(e)).join("");
   document.body.appendChild(area);
+  fitCardNames(area);
+  area.style.cssText = "display:none";
 
   // Без этой паузы Chrome иногда успевает открыть диалог печати раньше,
   // чем реально отрисует карточки и догрузит фото с Google Drive —
@@ -3119,6 +3149,7 @@ function renderDrivingPrintPreview() {
       <span style="color:#CBD5E1;font-size:11px">пусто</span>
     </div>`)
   ].join("");
+  fitCardNames(sheet);
 }
 
 async function printDrivingCards() {
@@ -3130,9 +3161,11 @@ async function printDrivingCards() {
   if (area) area.remove();
   area = document.createElement("div");
   area.id = "printArea";
-  area.style.cssText = "display:none";
+  area.style.cssText = "position:fixed;left:-9999px;top:0;background:#fff";
   area.innerHTML = selected.map(t => certCardHTML(t)).join("");
   document.body.appendChild(area);
+  fitCardNames(area);
+  area.style.cssText = "display:none";
 
   const images = Array.from(area.querySelectorAll("img"));
   await Promise.all(images.map(img => {
@@ -3252,6 +3285,7 @@ function renderCertPrintPreview(kind) {
       <span style="color:#CBD5E1;font-size:11px">пусто</span>
     </div>`)
   ].join("");
+  fitCardNames(sheet);
 }
 
 // Карточка удостоверения — тот же формат/размер, что и допуск.
@@ -3315,7 +3349,7 @@ function certCardHTML(t) {
 
           <!-- Имя -->
           <div>
-            <div style="font-size:13pt;font-weight:700;color:#0B1A35;
+            <div class="card-name-fit" style="font-size:13pt;font-weight:700;color:#0B1A35;
               text-transform:uppercase;line-height:1.05;letter-spacing:.01em;
               word-break:break-word">
               ${(t.empName||"— — —")}
@@ -3406,7 +3440,7 @@ function certCardHTML(t) {
 
         <!-- Имя -->
         <div>
-          <div style="font-size:13pt;font-weight:700;color:#0B1A35;
+          <div class="card-name-fit" style="font-size:13pt;font-weight:700;color:#0B1A35;
             text-transform:uppercase;line-height:1.05;letter-spacing:.01em;
             word-break:break-word">
             ${(t.empName||"— — —")}
@@ -3459,9 +3493,11 @@ async function printCertCards(kind) {
   if (area) area.remove();
   area = document.createElement("div");
   area.id = "printArea";
-  area.style.cssText = "display:none";
+  area.style.cssText = "position:fixed;left:-9999px;top:0;background:#fff";
   area.innerHTML = selected.map(t => certCardHTML(t)).join("");
   document.body.appendChild(area);
+  fitCardNames(area);
+  area.style.cssText = "display:none";
 
   const images = Array.from(area.querySelectorAll("img"));
   await Promise.all(images.map(img => {
