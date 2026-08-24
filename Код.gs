@@ -11,6 +11,7 @@ const SHEET_TRAINING = "Обучение";
 const SHEET_TRAINING_PLAN = "ПланОбучения";
 const SHEET_COURSE_CATALOG = "КаталогКурсов";
 const SHEET_REQUIREMENTS = "Требования";
+const SHEET_DOCUMENTS = "Документы";
 const SHEET_PERSONNEL_EVENTS = "Личное дело";
 const PHOTO_FOLDER_ID = "1rX0jetKQqm_Lsym8JX6YE8d4Js-Ye4y_";
 
@@ -45,6 +46,7 @@ function doGet(e) {
   else if (action === "getResults") result = getResults();
   else if (action === "getTraining") result = getTraining();
   else if (action === "getRequirements") result = getRequirements();
+  else if (action === "getDocuments") result = getDocuments(e.parameter.linkedId);
   else if (action === "getTrainingPlan") result = getTrainingPlan(e.parameter.site);
   else if (action === "getCourseCatalog") result = getCourseCatalog();
   else if (action === "getPersonnelEvents") result = getPersonnelEvents();
@@ -91,6 +93,7 @@ function doPost(e) {
     if (d.action === "addTrainingPlan") return addTrainingPlan(d.empId, d.empName, d.course, d.dueDate, d.site);
     if (d.action === "bulkAddTrainingFacts") return bulkAddTrainingFacts(d.records);
     if (d.action === "recognizeRoster") return recognizeRoster(d.image, d.mimeType);
+    if (d.action === "uploadDocument") return uploadDocument(d);
     if (d.action === "completeTrainingPlan") return completeTrainingPlan(d);
     if (d.action === "deleteTrainingPlan") return deleteTrainingPlan(d);
     if (d.action === "addCourseCatalog") return addCourseCatalog(d.course);
@@ -530,8 +533,8 @@ function bulkAddTrainingFacts(records) {
 
   if (!sheet) {
     sheet = ss.insertSheet(SHEET_TRAINING);
-    sheet.appendRow(["empId","empName","course","date","validUntil"]);
-    sheet.getRange(1,1,1,5)
+    sheet.appendRow(["empId","empName","course","date","validUntil","batchId"]);
+    sheet.getRange(1,1,1,6)
       .setBackground("#0D1B3E").setFontColor("#F4A52A").setFontWeight("bold");
     sheet.setFrozenRows(1);
     sheet.setColumnWidth(1, 80);
@@ -539,23 +542,32 @@ function bulkAddTrainingFacts(records) {
     sheet.setColumnWidth(3, 300);
     sheet.setColumnWidth(4, 120);
     sheet.setColumnWidth(5, 120);
+    sheet.setColumnWidth(6, 160);
   } else {
-    const headerRow = sheet.getRange(1,1,1,Math.max(5, sheet.getLastColumn())).getValues()[0];
+    const headerRow = sheet.getRange(1,1,1,Math.max(6, sheet.getLastColumn())).getValues()[0];
     if (headerRow[4] !== "validUntil") {
       sheet.getRange(1,5).setValue("validUntil");
       sheet.getRange(1,5).setBackground("#0D1B3E").setFontColor("#F4A52A").setFontWeight("bold");
       sheet.setColumnWidth(5, 120);
     }
+    // batchId — общий идентификатор группового зачисления, по нему потом
+    // находим прикреплённый скан ростера (см. uploadDocument/getDocuments).
+    if (headerRow[5] !== "batchId") {
+      sheet.getRange(1,6).setValue("batchId");
+      sheet.getRange(1,6).setBackground("#0D1B3E").setFontColor("#F4A52A").setFontWeight("bold");
+      sheet.setColumnWidth(6, 160);
+    }
   }
 
   const defaultDateStr = Utilities.formatDate(new Date(), "Asia/Almaty", "dd.MM.yyyy");
+  const batchId = "batch" + Date.now();
   const rows = records.map(r => [
-    r.empId||"", r.empName||"", r.course||"", r.date||defaultDateStr, r.validUntil||"",
+    r.empId||"", r.empName||"", r.course||"", r.date||defaultDateStr, r.validUntil||"", batchId,
   ]);
 
   ensureCapacity(sheet, rows.length);
-  sheet.getRange(sheet.getLastRow()+1, 1, rows.length, 5).setValues(rows);
-  return json({ ok: true, added: rows.length });
+  sheet.getRange(sheet.getLastRow()+1, 1, rows.length, 6).setValues(rows);
+  return json({ ok: true, added: rows.length, batchId });
 }
 
 // ══════════════════════════════════════════════════════════
@@ -616,6 +628,81 @@ function recognizeRoster(imageBase64, mimeType) {
   } catch (e) {
     return json({ ok: false, error: e.message });
   }
+}
+
+// ══════════════════════════════════════════════════════════
+// АРХИВ ДОКУМЕНТОВ — сканы/фото ростеров, протоколов экзаменов и т.д.
+// Файлы лежат на Google Диске (в папке рядом с самой таблицей), метаданные —
+// в листе «Документы». type и linkedIds намеренно свободные строки, а не
+// жёсткий enum/схема — чтобы новые виды документов добавлялись без правок
+// бэкенда. linkedIds — то, что связывает скан с конкретной записью
+// (batchId группового зачисления, id теста и т.п.), сравнение по вхождению
+// в запятую-разделённый список, т.к. один скан может относиться к
+// нескольким записям сразу.
+// ══════════════════════════════════════════════════════════
+function getOrCreateDocsFolder() {
+  const file = DriveApp.getFileById(SHEET_ID);
+  const parents = file.getParents();
+  const parentFolder = parents.hasNext() ? parents.next() : DriveApp.getRootFolder();
+  const existing = parentFolder.getFoldersByName("Документы — Caravan Resources");
+  if (existing.hasNext()) return existing.next();
+  return parentFolder.createFolder("Документы — Caravan Resources");
+}
+
+function uploadDocument(p) {
+  const { image, mimeType, fileName, type, title, date, site, linkedIds, note } = p || {};
+  if (!image) return json({ ok: false, error: "Нет файла" });
+  if (!type) return json({ ok: false, error: "Нужен тип документа" });
+
+  try {
+    const folder = getOrCreateDocsFolder();
+    const bytes = Utilities.base64Decode(image);
+    const blob = Utilities.newBlob(bytes, mimeType || "image/jpeg", fileName || ("doc_" + Date.now()));
+    const file = folder.createFile(blob);
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    const fileUrl = file.getUrl();
+
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    let sheet = ss.getSheetByName(SHEET_DOCUMENTS);
+    if (!sheet) {
+      sheet = ss.insertSheet(SHEET_DOCUMENTS);
+      sheet.appendRow(["docId","type","title","date","site","linkedIds","fileUrl","fileName","uploadedDate","note"]);
+      sheet.getRange(1,1,1,10)
+        .setBackground("#0D1B3E").setFontColor("#F4A52A").setFontWeight("bold");
+      sheet.setFrozenRows(1);
+      sheet.setColumnWidth(2, 130);
+      sheet.setColumnWidth(3, 220);
+      sheet.setColumnWidth(6, 160);
+      sheet.setColumnWidth(7, 260);
+    }
+
+    const docId = "doc" + Date.now();
+    const uploadedDate = Utilities.formatDate(new Date(), "Asia/Almaty", "dd.MM.yyyy HH:mm");
+    ensureCapacity(sheet, 1);
+    sheet.appendRow([docId, type, title||"", date||"", site||"", linkedIds||"", fileUrl, fileName||"", uploadedDate, note||""]);
+
+    return json({ ok: true, docId, fileUrl });
+  } catch (e) {
+    return json({ ok: false, error: e.message });
+  }
+}
+
+// linkedId необязателен — без него отдаёт весь архив (для будущего общего просмотра).
+function getDocuments(linkedId) {
+  const ss    = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName(SHEET_DOCUMENTS);
+  if (!sheet) return json([]);
+  const rows = sheet.getDataRange().getValues();
+  if (rows.length < 2) return json([]);
+  const headers = rows[0];
+  const data = rows.slice(1).filter(r => r[0]).map(r => {
+    const o = {}; headers.forEach((h,i) => { o[h] = r[i]; }); return o;
+  });
+  if (!linkedId) return json(data);
+  const filtered = data.filter(d =>
+    String(d.linkedIds||"").split(",").map(s=>s.trim()).includes(String(linkedId).trim())
+  );
+  return json(filtered);
 }
 
 // ── Получить все записи об обучении ─────────────────────────
