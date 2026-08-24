@@ -5524,12 +5524,25 @@ async function renderWeeklyAward() {
   }).join("");
 }
 
+// Множество ключей "empId|period", по которым сейчас идёт сохранение —
+// защита от гонки на медленной связи: кнопка визуально не блокируется до
+// ответа сервера (перерисовка происходит только ПОСЛЕ него), поэтому без
+// этой проверки повторный клик, пока первый запрос ещё в пути, создавал
+// вторую идентичную запись в личном деле. Устанавливается синхронно сразу
+// после подтверждения — раньше, чем успевает уйти сетевой запрос.
+const AWARD_IN_FLIGHT = new Set();
+
 async function awardExcellent(empId, empName, place, defects, comments, osmotrs, equipmentLabel) {
   if (!isAwardPeriodClosed()) {
     alert("Период ещё не завершён — итоги могут измениться. Награждать можно после его окончания.");
     return;
   }
   const period = weekPeriodLabel();
+  const awardKey = `${empId||empName}|${period}`;
+  if (AWARD_IN_FLIGHT.has(awardKey)) {
+    alert("Уже отправляется — подождите, пока сохранится первая попытка.");
+    return;
+  }
   const placeText = place === 1 ? "1 место" : place === 2 ? "2 место" : "3 место";
   const description =
     `Отличник ДГР — лучший по эксплуатации техники (${placeText}), период ${period}. ` +
@@ -5538,6 +5551,7 @@ async function awardExcellent(empId, empName, place, defects, comments, osmotrs,
 
   if (!confirm(`Внести награду в личное дело?\n\n${empName}\n${description}`)) return;
 
+  AWARD_IN_FLIGHT.add(awardKey);
   try {
     const res = await fetch(CFG.SHEET_URL, { method:"POST", body: JSON.stringify({
       action: "savePersonnelEvent",
@@ -5567,6 +5581,8 @@ async function awardExcellent(empId, empName, place, defects, comments, osmotrs,
     }
   } catch(e) {
     alert("Не удалось подтвердить сохранение (" + e.message + "). Проверьте личное дело сотрудника — возможно, запись всё же прошла.");
+  } finally {
+    AWARD_IN_FLIGHT.delete(awardKey);
   }
 }
 
