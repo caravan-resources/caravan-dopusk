@@ -70,6 +70,13 @@ table { width:100%; border-collapse:collapse; font-size:13px; }
 th { text-align:left; padding:8px; color:var(--gray); font-size:11px; text-transform:uppercase;
   border-bottom:2px solid var(--border); }
 td { padding:8px; border-bottom:1px solid var(--border); }
+
+/* Печать наряда — прячем всё, кроме печатной формы внутри модалки (openNaryadModal) */
+@media print {
+  body * { visibility: hidden; }
+  #naryadPrintArea, #naryadPrintArea * { visibility: visible; }
+  #naryadPrintArea { position: absolute; top: 0; left: 0; width: 100%; }
+}
 </style>
 </head>
 <body>
@@ -116,6 +123,7 @@ td { padding:8px; border-bottom:1px solid var(--border); }
       <span style="font-size:13px;color:var(--gray);font-weight:600;margin-left:16px">Вахта:</span>
       <div id="vahtaSwitch" style="display:flex;gap:8px"></div>
       <div id="swapDayNightWrap"></div>
+      <button class="btn-ghost" style="margin-left:8px" onclick="openNaryadModal()">📋 Наряд</button>
     </div>
 
     <!-- ══ ВАХТА ══ -->
@@ -480,11 +488,12 @@ function renderShiftStats() {
 // С 22.08.2026 сюда же добавлен оперативный статус слота (workStatus) и
 // заметка о переброске (reassignNote) — замена бумажного наряда, который
 // мастер заполнял вручную каждую смену. ══
-function renderShift() {
-  const container = document.getElementById("shiftFormation");
-  if (!container) return;
-  renderShiftStats();
-
+// Общая группировка техники по типу + слотам (день/ночь) для текущей
+// вахты+участка — используется и карточками «Вахты» (renderShift), и
+// печатной формой наряда (buildNaryadRows). Раньше эта логика была только
+// внутри renderShift — вынесена 22.08.2026, чтобы не дублировать при
+// добавлении наряда.
+function getShiftGroups() {
   const assignments = (DATA.shiftAssignments||[]).filter(a =>
     String(a.vahta) === CURRENT_VAHTA && String(a.site||"").trim() === CURRENT_SITE
   );
@@ -521,6 +530,16 @@ function renderShift() {
     const ia = order.indexOf(a), ib = order.indexOf(b);
     return (ia<0?999:ia) - (ib<0?999:ib);
   });
+
+  return { usedTypes, rows };
+}
+
+function renderShift() {
+  const container = document.getElementById("shiftFormation");
+  if (!container) return;
+  renderShiftStats();
+
+  const { usedTypes, rows } = getShiftGroups();
 
   if (!usedTypes.length) {
     if (!DATA.equipment.length) {
@@ -888,6 +907,100 @@ async function submitUnassign(row) {
     await loadAll(["shiftAssignments"]);
   } catch (e) {
     alert("Ошибка сети: " + e.message);
+  }
+}
+
+// ══ НАРЯД — замена старого Excel-файла для тех, кто пока получает его по
+// старинке (печать/WhatsApp). Строится из уже загруженных DATA.shiftAssignments
+// на клиенте, без новых запросов к серверу — та же группировка, что и на
+// карточках «Вахты» (getShiftGroups), но построчно: одна строка на человека
+// на смену. Это снимок ТЕКУЩЕГО состояния на момент нажатия кнопки, не архив
+// по датам (см. открытый вопрос №3 в оперативной базе — посуточная история
+// отдельная нерешённая задача). Добавлено 22.08.2026.
+function buildNaryadRows() {
+  const { usedTypes, rows } = getShiftGroups();
+  const out = [];
+  usedTypes.forEach(type => {
+    const groups = rows[type].sort((a,b) => String(a.equipmentId||a.position).localeCompare(String(b.equipmentId||b.position)));
+    groups.forEach(g => {
+      const eq = g.equipmentId ? (DATA.equipment||[]).find(e => String(e.equipmentId)===String(g.equipmentId)) : null;
+      const bySmena = {};
+      g.items.forEach(a => { bySmena[Number(a.smena)] = a; });
+      [1,2].forEach(sm => {
+        const a = bySmena[sm];
+        if (!a && !g.equipmentId) return; // пустых строк для "Управление участком" без записи не показываем
+        const empName = a
+          ? (a.empName || (a.status==="вакансия" ? "вакансия" : a.status==="оптимизация" ? "не требуется" : "—"))
+          : "—";
+        out.push({
+          equipmentId: g.equipmentId || g.position,
+          model: eq ? eq.model : "",
+          smena: SMENA_LABEL[sm],
+          empName,
+          workStatus: a ? (a.workStatus||"") : "",
+          reassignNote: a ? (a.reassignNote||"") : "",
+        });
+      });
+    });
+  });
+  return out;
+}
+
+function naryadDateLabel() {
+  return new Date().toLocaleDateString("ru-RU", { day:"2-digit", month:"2-digit", year:"numeric" });
+}
+
+function openNaryadModal() {
+  const rowsData = buildNaryadRows();
+  const vahtaLabel = (VAHTA_OPTIONS.find(o=>o.key===CURRENT_VAHTA)||{}).label || CURRENT_VAHTA;
+  const header = `Наряд — ${CURRENT_SITE} · ${vahtaLabel} · ${naryadDateLabel()}`;
+
+  const tableRows = rowsData.map(r => `
+    <tr>
+      <td>${r.equipmentId}${r.model ? ` <span style="color:var(--gray);font-size:11px">${r.model}</span>` : ""}</td>
+      <td>${r.smena}</td>
+      <td>${r.empName}</td>
+      <td style="${r.workStatus ? `color:${workStatusColor(r.workStatus)};font-weight:700` : ""}">${r.workStatus || "—"}</td>
+      <td>${r.reassignNote || "—"}</td>
+    </tr>`).join("");
+
+  document.getElementById("modalBox").innerHTML = `
+    <div id="naryadPrintArea">
+      <div style="font-size:16px;font-weight:800;margin-bottom:2px">Наряд — ${CURRENT_SITE}</div>
+      <div style="font-size:13px;color:var(--gray);margin-bottom:14px">${vahtaLabel} · ${naryadDateLabel()}</div>
+      <table>
+        <thead><tr><th>Техника</th><th>Смена</th><th>Ф.И.О.</th><th>Вид работы</th><th>Привлечение</th></tr></thead>
+        <tbody>${tableRows || `<tr><td colspan="5" style="text-align:center;color:var(--gray)">Нет данных по этой вахте</td></tr>`}</tbody>
+      </table>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:16px">
+      <button class="btn-gold" style="flex:1" onclick="window.print()">🖨 Печать</button>
+      <button class="btn-ghost" style="flex:1" onclick="copyNaryadText()">📋 Скопировать текстом</button>
+      <button class="btn-ghost" onclick="closeModal()">Закрыть</button>
+    </div>
+  `;
+  window.__naryadRows = rowsData;
+  window.__naryadHeader = header;
+  document.getElementById("modalOverlay").style.display = "flex";
+}
+
+function copyNaryadText() {
+  const rowsData = window.__naryadRows || [];
+  const lines = [window.__naryadHeader || "Наряд", ""];
+  rowsData.forEach(r => {
+    let line = `${r.equipmentId} (${r.smena}) — ${r.empName}`;
+    if (r.workStatus) line += ` — ${r.workStatus}`;
+    if (r.reassignNote) line += ` (${r.reassignNote})`;
+    lines.push(line);
+  });
+  const text = lines.join("\n");
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(
+      () => alert("Скопировано — можно вставить в WhatsApp"),
+      () => alert("Не удалось скопировать — браузер заблокировал доступ к буферу обмена")
+    );
+  } else {
+    alert("Буфер обмена недоступен в этом браузере — скопируй текст вручную из таблицы");
   }
 }
 
