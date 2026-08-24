@@ -58,6 +58,7 @@ function doGet(e) {
   else if (action === "getChecklistStats") result = getChecklistStats(e.parameter);
   else if (action === "getFuelRecords") result = getFuelRecords(e.parameter.site, e.parameter.days);
   else if (action === "getShiftAssignments") result = getShiftAssignments(e.parameter.site);
+  else if (action === "getActiveVahtas") result = getActiveVahtas();
   else if (action === "getEvaluationCriteria") result = getEvaluationCriteria(e.parameter.equipmentType);
   else if (action === "getEvaluationEquipmentTypes") result = getEvaluationEquipmentTypes();
   else if (action === "getEvaluationWorkTypes") result = getEvaluationWorkTypes();
@@ -120,6 +121,7 @@ function doPost(e) {
     if (d.action === "updateShiftAssignment") return updateShiftAssignment(d);
     if (d.action === "deleteShiftAssignmentRow") return deleteShiftAssignmentRow(d);
     if (d.action === "swapDayNight") return swapDayNight(d);
+    if (d.action === "setActiveVahta") return setActiveVahta(d);
     if (d.action === "clearShiftAssignments") return clearShiftAssignments();
     if (d.action === "saveEvaluation") return saveEvaluation(d);
     if (d.action === "updateEvaluation") return updateEvaluation(d);
@@ -2246,6 +2248,74 @@ function getFuelRecords(site, days) {
 // СМЕНЫ — привязка операторов к технике по вахте/смене
 // ══════════════════════════════════════════════════════
 const SHEET_SHIFTS = "Смены";
+
+// ══════════════════════════════════════════════════════
+// АКТИВНАЯ ВАХТА ПО УЧАСТКУ
+// Переключатель "Вахта-1 / Вахта-2" в master.html раньше был чисто
+// локальным состоянием экрана — сбрасывался при перезагрузке страницы и
+// нигде не хранился. Теперь горный мастер переключает его на сервере,
+// чтобы другие панели (instructor.html — дисциплина по чек-листам и
+// топливу) знали, кто реально сейчас физически на площадке, а не путали
+// с ростером вахты, которая в этот момент отдыхает. Хранится в отдельном
+// листе "Настройки": участок → активная вахта. Добавлено 24.08.2026.
+// ══════════════════════════════════════════════════════
+const SHEET_SETTINGS = "Настройки";
+
+function getActiveVahtas() {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName(SHEET_SETTINGS);
+  const out = {};
+  if (sheet) {
+    const rows = sheet.getDataRange().getValues();
+    if (rows.length > 1) {
+      const headers = rows[0];
+      const iSite = headers.indexOf("site"), iVahta = headers.indexOf("activeVahta");
+      rows.slice(1).forEach(r => {
+        const site = String(r[iSite]||"").trim();
+        if (site) out[site] = String(r[iVahta]||"").trim();
+      });
+    }
+  }
+  return json(out);
+}
+
+function setActiveVahta(p) {
+  const { site, vahta } = p || {};
+  if (!site || !vahta) return json({ ok:false, error:"Нужны site и vahta" });
+
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  let sheet = ss.getSheetByName(SHEET_SETTINGS);
+  const HEADER = ["site","activeVahta","updatedAt"];
+  if (!sheet) {
+    sheet = ss.insertSheet(SHEET_SETTINGS);
+    sheet.appendRow(HEADER);
+    sheet.getRange(1,1,1,HEADER.length)
+      .setBackground("#0D1B3E").setFontColor("#F4A52A").setFontWeight("bold");
+    sheet.setFrozenRows(1);
+  }
+
+  const rows = sheet.getDataRange().getValues();
+  const headers = rows[0];
+  const iSite = headers.indexOf("site"), iVahta = headers.indexOf("activeVahta"), iUpd = headers.indexOf("updatedAt");
+  const nowStr = Utilities.formatDate(new Date(), "Asia/Almaty", "dd.MM.yyyy HH:mm");
+
+  let rowIdx = -1;
+  for (let i = 1; i < rows.length; i++) {
+    if (String(rows[i][iSite]||"").trim() === String(site).trim()) { rowIdx = i + 1; break; }
+  }
+
+  if (rowIdx > 0) {
+    sheet.getRange(rowIdx, iVahta+1).setNumberFormat("@").setValue(vahta);
+    sheet.getRange(rowIdx, iUpd+1).setNumberFormat("@").setValue(nowStr);
+  } else {
+    ensureCapacity(sheet, 1);
+    sheet.appendRow([site, vahta, nowStr]);
+    const newRow = sheet.getLastRow();
+    sheet.getRange(newRow, 2, 1, 2).setNumberFormat("@");
+  }
+
+  return json({ ok:true, site, vahta });
+}
 
 function getShiftAssignments(site) {
   const ss    = SpreadsheetApp.openById(SHEET_ID);
