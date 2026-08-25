@@ -114,6 +114,7 @@ td { padding:8px; border-bottom:1px solid var(--border); }
     <button id="navHistory" onclick="showScreen('history')">✅ История</button>
     <button id="navCatalog" onclick="showScreen('catalog')">📚 Каталог курсов</button>
     <button id="navEval" onclick="showScreen('eval')">🎯 Оценка</button>
+    <button id="navTiming" onclick="showScreen('timing')">⏱ Хронометраж</button>
   </div>
 
   <div class="wrap">
@@ -365,6 +366,108 @@ td { padding:8px; border-bottom:1px solid var(--border); }
         <div id="evalHistoryList"></div>
       </div>
     </div>
+
+    <!-- ══ ХРОНОМЕТРАЖ ПОГРУЗКИ АВТОТРАНСПОРТА ══ -->
+    <div id="screenTiming" class="screen">
+      <div class="panel">
+        <div class="panel-title">⏱ Новый замер хронометража</div>
+        <div class="hint" style="margin-bottom:12px">
+          Для машинистов экскаватора. Замеряется отдельно (по видео/скриншотам) —
+          сюда вносятся уже готовые числа. Цикл одного ковша — время между выгрузкой
+          1-го и 2-го ковша.
+        </div>
+        <div class="field">
+          <label>Сотрудник (машинист экскаватора)</label>
+          <input type="text" id="timingEmpInput" list="timingEmpList" placeholder="Начните вводить имя..." oninput="onTimingEmpChange()">
+          <datalist id="timingEmpList"></datalist>
+        </div>
+        <div class="field">
+          <label>Должность</label>
+          <input type="text" id="timingPosition" readonly style="background:var(--light)">
+        </div>
+        <div class="field">
+          <label>Дата замера</label>
+          <input type="date" id="timingDate">
+        </div>
+        <div class="field">
+          <label>Тип техники</label>
+          <select id="timingEquipmentType"><option value="">— выберите тип —</option></select>
+        </div>
+        <div class="field">
+          <label>Модель экскаватора</label>
+          <div style="position:relative">
+            <input type="text" id="timingEquipmentModel" placeholder="напр. Sandvik DX800" autocomplete="off"
+              oninput="renderSuggestions('timingEquipmentModel','evaluationEquipmentModels')" onfocus="renderSuggestions('timingEquipmentModel','evaluationEquipmentModels')" onblur="hideSuggestionsDelayed('timingEquipmentModel')">
+            <div id="timingEquipmentModelSuggestions" style="display:none;position:absolute;left:0;right:0;z-index:20;
+              background:#fff;border:1px solid var(--border);border-radius:8px;margin-top:4px;max-height:200px;
+              overflow-y:auto;box-shadow:0 4px 14px rgba(0,0,0,.1)"></div>
+          </div>
+        </div>
+        <div class="field">
+          <label>Модель самосвала</label>
+          <div style="position:relative">
+            <input type="text" id="timingTruckModel" placeholder="напр. TONLY DTH145" autocomplete="off"
+              oninput="renderSuggestions('timingTruckModel','timingTruckModels')" onfocus="renderSuggestions('timingTruckModel','timingTruckModels')" onblur="hideSuggestionsDelayed('timingTruckModel')">
+            <div id="timingTruckModelSuggestions" style="display:none;position:absolute;left:0;right:0;z-index:20;
+              background:#fff;border:1px solid var(--border);border-radius:8px;margin-top:4px;max-height:200px;
+              overflow-y:auto;box-shadow:0 4px 14px rgba(0,0,0,.1)"></div>
+          </div>
+        </div>
+        <div class="field">
+          <label>Время погрузки самосвала (сек) *</label>
+          <input type="number" id="timingTotalTime" min="1" placeholder="напр. 180">
+        </div>
+        <div class="field">
+          <label>Количество ковшей *</label>
+          <input type="number" id="timingBucketCount" min="1" placeholder="напр. 5">
+        </div>
+        <div class="field">
+          <label>Наполнение ковшей (%) *</label>
+          <input type="number" id="timingBucketFill" min="1" max="150" placeholder="напр. 95">
+        </div>
+        <div class="field">
+          <label>Средний цикл ковша, сек *</label>
+          <input type="number" id="timingCycleTime" min="1" placeholder="напр. 28">
+        </div>
+        <div class="field">
+          <label>Правильное наполнение кузова (соблюдение паспорта загрузки) *</label>
+          <div style="display:flex;gap:6px" id="timingProperLoadingBtns">
+            <button type="button" class="eval-opt-btn" data-val="да" onclick="setProperLoading('да')">Да</button>
+            <button type="button" class="eval-opt-btn" data-val="нет" onclick="setProperLoading('нет')">Нет</button>
+          </div>
+          <input type="hidden" id="timingProperLoading" value="">
+        </div>
+        <div class="field">
+          <label>Инструктор</label>
+          <div style="position:relative">
+            <input type="text" id="timingInstructor" placeholder="ФИО инструктора" autocomplete="off"
+              oninput="renderSuggestions('timingInstructor','evaluationInstructors')" onfocus="renderSuggestions('timingInstructor','evaluationInstructors')" onblur="hideSuggestionsDelayed('timingInstructor')">
+            <div id="timingInstructorSuggestions" style="display:none;position:absolute;left:0;right:0;z-index:20;
+              background:#fff;border:1px solid var(--border);border-radius:8px;margin-top:4px;max-height:200px;
+              overflow-y:auto;box-shadow:0 4px 14px rgba(0,0,0,.1)"></div>
+          </div>
+        </div>
+        <div class="field">
+          <label>Примечание (необязательно)</label>
+          <textarea id="timingSummary" rows="3" placeholder="Любые заметки по замеру..."></textarea>
+        </div>
+        <div id="timingEditingBanner" style="display:none;background:#EEF2FF;color:#4338CA;font-size:12px;
+          font-weight:700;padding:8px 12px;border-radius:8px;margin-bottom:12px;justify-content:space-between;
+          align-items:center;gap:8px">
+          <span>✏️ Редактирование ранее сохранённого замера</span>
+          <button type="button" class="btn-ghost" style="padding:3px 10px;font-size:12px" onclick="cancelTimingEdit()">Отменить</button>
+        </div>
+        <button class="btn-gold" id="timingSubmitBtn" onclick="submitTiming()">💾 Сохранить замер</button>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">📋 История замеров сотрудника</div>
+        <div style="font-size:12px;color:var(--gray);margin-bottom:10px" id="timingHistoryHint">
+          Выберите сотрудника выше, чтобы увидеть его прошлые замеры.
+        </div>
+        <div id="timingHistoryList"></div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -390,12 +493,15 @@ function checkPin() {
     document.getElementById("app").style.display = "block";
     const evalDateEl = document.getElementById("evalDate");
     if (evalDateEl && !evalDateEl.value) evalDateEl.value = new Date().toISOString().slice(0,10);
+    const timingDateEl = document.getElementById("timingDate");
+    if (timingDateEl && !timingDateEl.value) timingDateEl.value = new Date().toISOString().slice(0,10);
     loadAll();
     loadEvalEquipmentTypes();
     loadEvalWorkTypes();
     loadEvalEquipmentModels();
     loadEvaluationInstructors();
     loadEvaluationSupervisors();
+    loadTimingTruckModels();
   } else {
     document.getElementById("loginErr").style.display = "block";
     document.getElementById("pinInput").value = "";
@@ -409,7 +515,7 @@ function logout() {
 }
 
 function showScreen(name) {
-  ["plan","history","catalog","group","eval"].forEach(s => {
+  ["plan","history","catalog","group","eval","timing"].forEach(s => {
     document.getElementById("screen"+s.charAt(0).toUpperCase()+s.slice(1)).classList.remove("active");
     document.getElementById("nav"+s.charAt(0).toUpperCase()+s.slice(1)).classList.remove("active");
   });
@@ -484,6 +590,7 @@ function renderAll() {
   renderSiteSwitch();
   renderEmpDatalist();
   renderEvalEmpDatalist();
+  renderTimingEmpDatalist();
   renderCourseSelect();
   renderPlanList();
   renderHistory();
@@ -582,6 +689,7 @@ function renderCourseSelect() {
 // не пишем в базу того, в ком не уверены молча.
 // ══════════════════════════════════════════════════════════
 let GROUP_MATCH_ROWS = [];
+let LAST_ROSTER_PHOTO = null; // {base64, mimeType} — фото, загруженное для распознавания; архивируется при зачислении
 
 function normalizeName(s) {
   return String(s||"").trim().toLowerCase().replace(/\s+/g," ").replace(/[.,]/g,"");
@@ -665,6 +773,9 @@ async function uploadRosterPhoto(input) {
   if (statusEl) statusEl.textContent = "⏳ Распознаю фото...";
   try {
     const base64 = await resizeImageForUpload(file, 1400);
+    // Храним фото — при успешном зачислении сохраним его же в архив
+    // документов, привязав к batchId. Второй раз просить не нужно.
+    LAST_ROSTER_PHOTO = { base64, mimeType: "image/jpeg" };
     const res = await fetch(CFG.SHEET_URL, {
       method: "POST",
       body: JSON.stringify({ action: "recognizeRoster", image: base64, mimeType: "image/jpeg" }),
@@ -760,10 +871,30 @@ async function submitGroupEnroll() {
     const res = await fetch(CFG.SHEET_URL, { method:"POST", body: JSON.stringify({ action:"bulkAddTrainingFacts", records }) });
     const val = await res.json();
     if (!val.ok) { alert("Не удалось зачислить: " + (val.error||"")); return; }
+
+    // Зачисление уже прошло успешно — архивирование скана вторично и не
+    // должно выглядеть как провал всего действия, если вдруг не удастся.
+    if (LAST_ROSTER_PHOTO && val.batchId) {
+      try {
+        const docRes = await fetch(CFG.SHEET_URL, { method:"POST", body: JSON.stringify({
+          action: "uploadDocument",
+          image: LAST_ROSTER_PHOTO.base64, mimeType: LAST_ROSTER_PHOTO.mimeType,
+          fileName: `ростер_${course}_${dateRu||""}.jpg`,
+          type: "ростер", title: course, date: dateRu, site: CURRENT_SITE,
+          linkedIds: val.batchId,
+        })});
+        const docVal = await docRes.json();
+        if (!docVal.ok) console.error("Скан не сохранён в архив:", docVal.error);
+      } catch (e) {
+        console.error("Скан не сохранён в архив:", e);
+      }
+    }
+
     alert(`Готово: зачислено ${val.added} чел. на курс «${course}».`);
     document.getElementById("groupRoster").value = "";
     document.getElementById("groupMatchPanel").style.display = "none";
     GROUP_MATCH_ROWS = [];
+    LAST_ROSTER_PHOTO = null;
     await loadAll(["trainingHistory"]);
   } catch (e) {
     alert("Ошибка сети: " + e.message);
@@ -928,15 +1059,29 @@ function renderHistory() {
 
   const shown = list.slice(0, 100);
   el.innerHTML = `<div style="overflow-x:auto"><table>
-    <thead><tr><th>Сотрудник</th><th>Курс</th><th>Дата</th><th>Действует до</th></tr></thead>
+    <thead><tr><th>Сотрудник</th><th>Курс</th><th>Дата</th><th>Действует до</th><th></th></tr></thead>
     <tbody>${shown.map(r => `
       <tr>
         <td><b>${r.empName}</b></td>
         <td style="color:var(--gray)">${r.course}</td>
         <td>${formatRu(parseAnyDate(r.date))}</td>
         <td>${r.validUntil ? formatRu(parseAnyDate(r.validUntil)) : "—"}</td>
+        <td>${r.batchId ? `<button class="btn-ghost" style="padding:3px 10px;font-size:11px" onclick="viewScan('${r.batchId}')">📎 Скан</button>` : ""}</td>
       </tr>`).join("")}</tbody>
   </table></div>` + (list.length>100 ? `<div style="text-align:center;color:var(--gray);font-size:12px;padding-top:10px">Показаны последние 100 из ${list.length} — уточните поиск</div>` : "");
+}
+
+// Скан ищем по требованию (по клику), а не заранее для всей истории —
+// незачем гонять лишний запрос на каждую запись при простой прокрутке списка.
+async function viewScan(batchId) {
+  try {
+    const res = await fetch(`${CFG.SHEET_URL}?action=getDocuments&linkedId=${encodeURIComponent(batchId)}`);
+    const docs = await res.json();
+    if (!Array.isArray(docs) || !docs.length) { alert("Скан не найден в архиве"); return; }
+    window.open(docs[0].fileUrl, "_blank");
+  } catch (e) {
+    alert("Ошибка: " + e.message);
+  }
 }
 
 // ══════════════════════════════════════════════════════════
@@ -1005,6 +1150,14 @@ function renderEvalEmpDatalist() {
     .map(e => `<option value="${e.name.replace(/"/g,'&quot;')} [${e.id}]">`).join("");
 }
 
+function renderTimingEmpDatalist() {
+  const el = document.getElementById("timingEmpList");
+  if (!el) return;
+  el.innerHTML = (DATA.employees||[])
+    .slice().sort((a,b)=>a.name.localeCompare(b.name))
+    .map(e => `<option value="${e.name.replace(/"/g,'&quot;')} [${e.id}]">`).join("");
+}
+
 async function loadEvalEquipmentTypes() {
   try {
     const val = await fetchWithRetry(`${CFG.SHEET_URL}?action=getEvaluationEquipmentTypes`, 30000, 3);
@@ -1014,6 +1167,7 @@ async function loadEvalEquipmentTypes() {
     console.error("evaluationEquipmentTypes:", e);
   }
   renderEvalEquipmentTypeSelect();
+  renderTimingEquipmentTypeSelect();
   // Селект редактора критериев тоже нужно обновить: если панель "⚙️ Критерии"
   // открыли раньше, чем пришли эти данные (вполне реально на слабой связи),
   // её список типов иначе так и останется пустым до перезагрузки страницы —
@@ -1654,6 +1808,201 @@ async function saveCriteriaEdits() {
   } catch (e) {
     alert("Ошибка сети: " + e.message);
   }
+}
+
+// ══════════════════════════════════════════════════════════
+// ХРОНОМЕТРАЖ ПОГРУЗКИ АВТОТРАНСПОРТА
+// Архитектура — зеркало «Оценка» (тот же принцип датлиста сотрудника,
+// подсказок, режима редактирования), но поля и бэкенд-действия свои:
+// не баллы, а прямые замеры времени в секундах.
+// ══════════════════════════════════════════════════════════
+let TIMING_EDITING_ID = null;
+let TIMING_HISTORY_CACHE = {};
+
+function renderTimingEquipmentTypeSelect() {
+  const el = document.getElementById("timingEquipmentType");
+  if (!el) return;
+  const cur = el.value;
+  el.innerHTML = `<option value="">— выберите тип —</option>` +
+    (DATA.evaluationEquipmentTypes||[]).map(t => `<option value="${t.replace(/"/g,'&quot;')}">${t}</option>`).join("");
+  if ((DATA.evaluationEquipmentTypes||[]).includes(cur)) el.value = cur;
+}
+
+async function loadTimingTruckModels() {
+  try {
+    const val = await fetchWithRetry(`${CFG.SHEET_URL}?action=getTimingTruckModels`, 30000, 3);
+    DATA.timingTruckModels = Array.isArray(val) ? val : [];
+  } catch (e) {
+    DATA.timingTruckModels = [];
+    console.error("timingTruckModels:", e);
+  }
+}
+
+function onTimingEmpChange() {
+  const empId = empIdFromInput(document.getElementById("timingEmpInput").value);
+  const emp = empById(empId);
+  document.getElementById("timingPosition").value = emp ? (emp.position||"") : "";
+  const hint = document.getElementById("timingHistoryHint");
+  if (emp) {
+    if (hint) hint.style.display = "none";
+    loadTimingHistoryFor(emp.id);
+  } else {
+    if (hint) hint.style.display = "block";
+    document.getElementById("timingHistoryList").innerHTML = "";
+  }
+}
+
+// При смене типа техники подгружаем те же подсказки модели, что и в
+// «Оценке» — один и тот же физический экскаватор, один источник данных.
+document.addEventListener("DOMContentLoaded", () => {
+  const sel = document.getElementById("timingEquipmentType");
+  if (sel) sel.addEventListener("change", () => loadEvalEquipmentModels(sel.value));
+});
+
+async function submitTiming() {
+  const empId = empIdFromInput(document.getElementById("timingEmpInput").value);
+  const emp = empById(empId);
+  if (!emp) { alert("Выберите сотрудника из списка подсказок (начните печатать имя)"); return; }
+
+  const totalTime = document.getElementById("timingTotalTime").value;
+  const bucketCount = document.getElementById("timingBucketCount").value;
+  const bucketFill = document.getElementById("timingBucketFill").value;
+  const cycleTime = document.getElementById("timingCycleTime").value;
+  const properLoading = document.getElementById("timingProperLoading").value;
+  if (!totalTime || !bucketCount || !bucketFill || !cycleTime || !properLoading) {
+    alert("Заполните все обязательные поля: время погрузки, количество ковшей, наполнение ковшей, средний цикл и паспорт загрузки");
+    return;
+  }
+
+  const dateIso = document.getElementById("timingDate").value;
+  const isEditing = !!TIMING_EDITING_ID;
+  const payload = {
+    action: isEditing ? "updateTimingRecord" : "saveTimingRecord",
+    empId: emp.id, empName: emp.name, position: emp.position || "",
+    date: dateIso ? isoToRu(dateIso) : "",
+    equipmentType: document.getElementById("timingEquipmentType").value,
+    equipmentModel: document.getElementById("timingEquipmentModel").value.trim(),
+    truckModel: document.getElementById("timingTruckModel").value.trim(),
+    totalLoadTimeSec: totalTime, bucketCount: bucketCount, bucketFillPercent: bucketFill,
+    cycleTimeSec: cycleTime, properLoading: properLoading,
+    site: CURRENT_SITE,
+    instructorName: document.getElementById("timingInstructor").value.trim(),
+    summary: document.getElementById("timingSummary").value.trim(),
+  };
+  if (isEditing) payload.recordId = TIMING_EDITING_ID;
+
+  try {
+    const res = await fetch(CFG.SHEET_URL, { method: "POST", body: JSON.stringify(payload) });
+    const val = await res.json();
+    if (!val.ok) { alert("Не удалось сохранить: " + (val.error||"")); return; }
+    alert(isEditing ? "Замер обновлён." : "Замер сохранён.");
+    TIMING_EDITING_ID = null;
+    document.getElementById("timingEditingBanner").style.display = "none";
+    document.getElementById("timingSubmitBtn").textContent = "💾 Сохранить замер";
+    document.getElementById("timingTotalTime").value = "";
+    document.getElementById("timingBucketCount").value = "";
+    document.getElementById("timingBucketFill").value = "";
+    document.getElementById("timingCycleTime").value = "";
+    document.getElementById("timingTruckModel").value = "";
+    document.getElementById("timingSummary").value = "";
+    setProperLoading("");
+    document.querySelectorAll("#timingProperLoadingBtns .eval-opt-btn").forEach(b => b.classList.remove("active","high","low"));
+    loadTimingHistoryFor(emp.id);
+    loadTimingTruckModels(); // новая модель самосвала (если впервые) сразу попадёт в подсказки
+  } catch (e) {
+    alert("Ошибка сети: " + e.message);
+  }
+}
+
+async function loadTimingHistoryFor(empId) {
+  const el = document.getElementById("timingHistoryList");
+  if (!el) return;
+  el.innerHTML = `<div class="empty"><div class="empty-icon">⏳</div>Загружаю...</div>`;
+  try {
+    const val = await fetchWithRetry(`${CFG.SHEET_URL}?action=getOperatorTimingRecords&empId=${encodeURIComponent(empId)}`, 30000, 3);
+    const list = Array.isArray(val) ? val : [];
+    TIMING_HISTORY_CACHE = {};
+    list.forEach(r => { TIMING_HISTORY_CACHE[r.recordId] = r; });
+    if (!list.length) { el.innerHTML = `<div class="empty"><div class="empty-icon">⏱</div>Замеров пока нет</div>`; return; }
+    el.innerHTML = list.map(r => {
+      const avgLoadPerBucket = r.bucketCount > 0 ? Math.round((r.totalLoadTimeSec / r.bucketCount) * 10) / 10 : "-";
+      return `
+      <div style="border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:12px;background:#fff">
+        <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:12px">
+          <div>
+            <div style="font-size:12px;color:var(--gray)">${r.date} · ${r.equipmentType||""}${r.equipmentModel?" ("+r.equipmentModel+")":""}${r.truckModel?" → "+r.truckModel:""}</div>
+          </div>
+          <div style="display:flex;align-items:flex-start;gap:8px">
+            <span style="font-size:12px;color:var(--gray)">${r.instructorName||""}</span>
+            <button type="button" class="btn-ghost" style="padding:3px 10px;font-size:12px"
+              onclick="editTimingRecord('${String(r.recordId).replace(/'/g,"\\'")}')">✏️ Редактировать</button>
+          </div>
+        </div>
+        <div style="display:flex;gap:20px;flex-wrap:wrap">
+          <div><div style="font-size:18px;font-weight:800;color:var(--navy)">${r.totalLoadTimeSec} с</div><div style="font-size:10px;color:var(--gray)">время погрузки</div></div>
+          <div><div style="font-size:18px;font-weight:800;color:var(--navy)">${r.bucketCount}</div><div style="font-size:10px;color:var(--gray)">ковшей</div></div>
+          <div><div style="font-size:18px;font-weight:800;color:${r.bucketFillPercent && Number(r.bucketFillPercent)<85?'var(--yellow)':'var(--navy)'}">${r.bucketFillPercent||"-"}%</div><div style="font-size:10px;color:var(--gray)">наполнение ковша</div></div>
+          <div><div style="font-size:18px;font-weight:800;color:var(--navy)">${r.cycleTimeSec} с</div><div style="font-size:10px;color:var(--gray)">средний цикл</div></div>
+          <div><div style="font-size:18px;font-weight:800;color:var(--gray)">${avgLoadPerBucket} с</div><div style="font-size:10px;color:var(--gray)">в среднем/ковш*</div></div>
+          <div><div style="font-size:18px;font-weight:800;color:${r.properLoading==='да'?'var(--green)':'var(--red)'}">${r.properLoading==='да'?'✓ Да':(r.properLoading==='нет'?'✕ Нет':'-')}</div><div style="font-size:10px;color:var(--gray)">паспорт загрузки</div></div>
+        </div>
+        ${r.summary ? `<div style="font-size:13px;color:var(--navy);margin-top:12px;line-height:1.5">${r.summary}</div>` : ""}
+      </div>
+    `;}).join("") + `<div style="font-size:11px;color:var(--gray);margin-top:4px">* время погрузки / число ковшей — справочно, не то же самое, что цикл одного ковша</div>`;
+  } catch (err) {
+    el.innerHTML = `<div class="empty">Не удалось загрузить: ${err.message}</div>`;
+  }
+}
+
+async function editTimingRecord(recordId) {
+  const r = TIMING_HISTORY_CACHE[recordId];
+  if (!r) { alert("Не удалось найти этот замер — обновите список истории."); return; }
+
+  TIMING_EDITING_ID = recordId;
+  document.getElementById("timingEditingBanner").style.display = "flex";
+  document.getElementById("timingSubmitBtn").textContent = "💾 Сохранить изменения";
+
+  document.getElementById("timingEmpInput").value = `${r.empName} [${r.empId}]`;
+  document.getElementById("timingPosition").value = r.position || "";
+  const d = parseAnyDate(r.date);
+  document.getElementById("timingDate").value = d ? `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}` : "";
+  document.getElementById("timingEquipmentType").value = r.equipmentType || "";
+  document.getElementById("timingEquipmentModel").value = r.equipmentModel || "";
+  document.getElementById("timingTruckModel").value = r.truckModel || "";
+  document.getElementById("timingTotalTime").value = r.totalLoadTimeSec || "";
+  document.getElementById("timingBucketCount").value = r.bucketCount || "";
+  document.getElementById("timingBucketFill").value = r.bucketFillPercent || "";
+  document.getElementById("timingCycleTime").value = r.cycleTimeSec || "";
+  document.getElementById("timingInstructor").value = r.instructorName || "";
+  document.getElementById("timingSummary").value = r.summary || "";
+  setProperLoading(r.properLoading || "");
+
+  if (r.equipmentType) await loadEvalEquipmentModels(r.equipmentType);
+
+  document.getElementById("screenTiming").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function setProperLoading(val) {
+  document.getElementById("timingProperLoading").value = val;
+  document.querySelectorAll("#timingProperLoadingBtns .eval-opt-btn").forEach(btn => {
+    const isActive = btn.dataset.val === val;
+    btn.classList.toggle("active", isActive);
+    btn.classList.toggle("high", isActive && val === "да");
+    btn.classList.toggle("low", isActive && val === "нет");
+  });
+}
+
+function cancelTimingEdit() {
+  TIMING_EDITING_ID = null;
+  document.getElementById("timingEditingBanner").style.display = "none";
+  document.getElementById("timingSubmitBtn").textContent = "💾 Сохранить замер";
+  document.getElementById("timingTotalTime").value = "";
+  document.getElementById("timingBucketCount").value = "";
+  document.getElementById("timingBucketFill").value = "";
+  document.getElementById("timingCycleTime").value = "";
+  document.getElementById("timingTruckModel").value = "";
+  document.getElementById("timingSummary").value = "";
+  setProperLoading("");
 }
 </script>
 </body>
