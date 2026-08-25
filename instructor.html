@@ -726,6 +726,8 @@ tr:hover td { background:#FAFBFD; }
         <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
           <label style="font-size:13px;color:var(--gray)">Фильтр по машине (необязательно):</label>
           <select id="reportTrendEquipmentAlmaty" style="max-width:280px"><option value="">— весь участок —</option></select>
+          <label style="font-size:13px;color:var(--gray);margin-left:10px">Дата (необязательно, по умолчанию — сегодня):</label>
+          <input type="date" id="reportAnchorDateAlmaty" style="padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px">
         </div>
         <button class="btn btn-gold" style="width:auto;padding:10px 20px" onclick="generateReport('Алмалы')">📄 Сформировать отчёт</button>
       </div>
@@ -769,6 +771,8 @@ tr:hover td { background:#FAFBFD; }
         <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
           <label style="font-size:13px;color:var(--gray)">Фильтр по машине (необязательно):</label>
           <select id="reportTrendEquipmentAshyktas" style="max-width:280px"><option value="">— весь участок —</option></select>
+          <label style="font-size:13px;color:var(--gray);margin-left:10px">Дата (необязательно, по умолчанию — сегодня):</label>
+          <input type="date" id="reportAnchorDateAshyktas" style="padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px">
         </div>
         <button class="btn btn-gold" style="width:auto;padding:10px 20px" onclick="generateReport('Ашыктас')">📄 Сформировать отчёт</button>
       </div>
@@ -5139,9 +5143,24 @@ function exportChecklistCSV(site) {
 // ══════════════════════════════════════════════════════
 let REPORT_PERIOD = { "Алмалы": "week", "Ашыктас": "week" }; // "day" | "week"
 
-function reportRange(period, offsetPeriods) {
+// yyyy-MM-dd -> Date на локальную полночь, без сдвига часовым поясом
+// (new Date("2026-08-20") парсится как UTC-полночь и может съехать на
+// соседний день при выводе в местном времени — здесь строим руками).
+function parseAnchorDate(val) {
+  if (!val) return null;
+  const parts = String(val).split("-").map(Number);
+  if (parts.length !== 3 || parts.some(isNaN)) return null;
+  const [y, m, d] = parts;
+  const dt = new Date(y, m - 1, d);
+  dt.setHours(0, 0, 0, 0);
+  return dt;
+}
+
+function reportRange(period, offsetPeriods, anchorDate) {
   // offsetPeriods=0 — текущий период, -1 — предыдущий такой же (для сравнения)
-  const now = new Date();
+  // anchorDate — «как будто сегодня — это дата X» (для отчёта за прошедшую
+  // дату); без неё — реальное «сегодня», поведение не меняется.
+  const now = anchorDate || new Date();
   if (period === "day") {
     const start = new Date(now); start.setHours(0,0,0,0); start.setDate(start.getDate() + offsetPeriods);
     const end = new Date(start); end.setDate(end.getDate() + 1);
@@ -6534,8 +6553,8 @@ function allTimeTopDefective(limit, site) {
 }
 
 // ── Тренд по конкретной машине: неисправности по неделям за последние N недель ──
-function equipmentTrend(equipmentId, weeks) {
-  const now = new Date();
+function equipmentTrend(equipmentId, weeks, anchorDate) {
+  const now = anchorDate || new Date();
   const buckets = [];
   for (let i = weeks-1; i >= 0; i--) {
     const end = new Date(now); end.setHours(0,0,0,0); end.setDate(end.getDate() - i*7);
@@ -6589,8 +6608,9 @@ async function generateReport(site) {
   const suffix = site === "Ашыктас" ? "Ashyktas" : "Almaty";
   const period = REPORT_PERIOD[site];
   const periodLabel = period === "day" ? "сутки" : "неделю";
-  const [start, end] = reportRange(period, 0);
-  const [prevStart, prevEnd] = reportRange(period, -1);
+  const anchorDate = parseAnchorDate((document.getElementById("reportAnchorDate"+suffix)||{}).value);
+  const [start, end] = reportRange(period, 0, anchorDate);
+  const [prevStart, prevEnd] = reportRange(period, -1, anchorDate);
 
   const fmtShort = d => `${String(d.getDate()).padStart(2,"0")}.${String(d.getMonth()+1).padStart(2,"0")}`;
   const rangeLabel = `${fmtShort(start)}–${fmtShort(new Date(end - 1))}`;
@@ -6710,7 +6730,7 @@ async function generateReport(site) {
   // 📈 Тренд по выбранной машине — по неделям
   if (trendEqId) {
     lines.push(reportSectionTitle("📈",`Тренд по машине ${eqLabel(trendEqId)} — по неделям`));
-    const trend = equipmentTrend(trendEqId, 6);
+    const trend = equipmentTrend(trendEqId, 6, anchorDate);
     const withData = trend.filter(b => b.osmotrs > 0);
     lines.push(reportTable(
       ["Неделя от","Осмотров","Неисправностей"],
