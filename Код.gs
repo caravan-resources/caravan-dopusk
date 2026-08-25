@@ -66,6 +66,8 @@ function doGet(e) {
   else if (action === "getEvaluationEquipmentModels") result = getEvaluationEquipmentModels(e.parameter);
   else if (action === "getEvaluationInstructors") result = getEvaluationInstructors();
   else if (action === "getEvaluationSupervisors") result = getEvaluationSupervisors();
+  else if (action === "getOperatorTimingRecords") result = getOperatorTimingRecords(e.parameter.empId);
+  else if (action === "getTimingTruckModels") result = getTimingTruckModels();
   else if (action === "getOperatorEvaluations") result = getOperatorEvaluations(e.parameter.empId);
   else if (action === "getEvaluationDetail") result = getEvaluationDetail(e.parameter.evalId);
   else if (action === "getEvaluationAlerts") result = getEvaluationAlerts();
@@ -126,6 +128,9 @@ function doPost(e) {
     if (d.action === "clearShiftAssignments") return clearShiftAssignments();
     if (d.action === "saveEvaluation") return saveEvaluation(d);
     if (d.action === "updateEvaluation") return updateEvaluation(d);
+    if (d.action === "saveTimingRecord") return saveTimingRecord(d);
+    if (d.action === "updateTimingRecord") return updateTimingRecord(d);
+    if (d.action === "deleteTimingRecord") return deleteTimingRecord(d);
     if (d.action === "deleteEvaluation") return deleteEvaluation(d);
     if (d.action === "generateEvaluationSummary") return generateEvaluationSummary(d);
     if (d.action === "importEvaluationCriteria") return importEvaluationCriteria(d);
@@ -3363,9 +3368,180 @@ function generateEvaluationSummary(p) {
   }
 }
 
-// ── Разовая заготовка каталога: блок 1 (общий) + пункты блоков 2-3 по
-// шести типам техники (буровая установка, погрузчик, самосвал, оба
-// экскаватора, бульдозер) ──
+// ══════════════════════════════════════════════════════════
+// ХРОНОМЕТРАЖ ПОГРУЗКИ АВТОТРАНСПОРТА — для машинистов экскаватора.
+// Отдельная сущность от «Оценка работы»: не баллы 1-5, а прямые замеры
+// времени (в секундах) — общее время погрузки одного самосвала, число
+// ковшей, и цикл одного ковша (время между выгрузкой 1-го и 2-го ковша).
+// Замеряется внешне (по видео/скриншотам с таймкодами), в систему заносятся
+// уже готовые числа. Архитектура и стиль функций — зеркало «Оценка работы»
+// (saveEvaluation/updateEvaluation/getOperatorEvaluations), чтобы не
+// изобретать второй паттерн для того же по сути класса задач.
+// ══════════════════════════════════════════════════════════
+const SHEET_TIMING = "Хронометраж";
+
+function saveTimingRecord(p) {
+  const { empId, empName, position, date, equipmentType, equipmentModel, truckModel,
+          totalLoadTimeSec, bucketCount, bucketFillPercent, cycleTimeSec, properLoading,
+          site, instructorName, summary } = p || {};
+
+  if (!empName || !totalLoadTimeSec || !bucketCount || !cycleTimeSec) {
+    return json({ ok: false, error: "Нужны как минимум empName, totalLoadTimeSec, bucketCount и cycleTimeSec" });
+  }
+
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  let sheet = ss.getSheetByName(SHEET_TIMING);
+  const HEADER = ["recordId","empId","empName","position","date","equipmentType","equipmentModel",
+                  "truckModel","totalLoadTimeSec","bucketCount","bucketFillPercent","cycleTimeSec",
+                  "properLoading","site","instructorName","summary","createdAt"];
+  if (!sheet) {
+    sheet = ss.insertSheet(SHEET_TIMING);
+    sheet.appendRow(HEADER);
+    sheet.getRange(1,1,1,HEADER.length)
+      .setBackground("#0D1B3E").setFontColor("#F4A52A").setFontWeight("bold");
+    sheet.setFrozenRows(1);
+    sheet.setColumnWidth(3, 200);
+    sheet.setColumnWidth(16, 400);
+  }
+
+  const recordId = "timing" + Date.now();
+  const dateStr = date || Utilities.formatDate(new Date(), "Asia/Almaty", "dd.MM.yyyy");
+  const createdAt = Utilities.formatDate(new Date(), "Asia/Almaty", "dd.MM.yyyy HH:mm");
+
+  ensureCapacity(sheet, 1);
+  sheet.appendRow([
+    recordId, empId || "", empName, position || "", dateStr, equipmentType || "", equipmentModel || "",
+    truckModel || "", totalLoadTimeSec, bucketCount, bucketFillPercent || "", cycleTimeSec,
+    properLoading || "", site || "", instructorName || "", summary || "", createdAt,
+  ]);
+
+  return json({ ok: true, recordId });
+}
+
+function updateTimingRecord(p) {
+  const { recordId, empId, empName, position, date, equipmentType, equipmentModel, truckModel,
+          totalLoadTimeSec, bucketCount, bucketFillPercent, cycleTimeSec, properLoading,
+          site, instructorName, summary } = p || {};
+
+  if (!recordId) return json({ ok: false, error: "Нужен recordId" });
+  if (!empName || !totalLoadTimeSec || !bucketCount || !cycleTimeSec) {
+    return json({ ok: false, error: "Нужны как минимум empName, totalLoadTimeSec, bucketCount и cycleTimeSec" });
+  }
+
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName(SHEET_TIMING);
+  if (!sheet) return json({ ok: false, error: "Лист «Хронометраж» не найден" });
+
+  const rows = sheet.getDataRange().getValues();
+  const headers = rows[0];
+  const idCol = headers.indexOf("recordId");
+  if (idCol < 0) return json({ ok: false, error: "Не найдена колонка recordId" });
+
+  let rowNum = -1;
+  for (let i = 1; i < rows.length; i++) {
+    if (String(rows[i][idCol]).trim() === String(recordId).trim()) { rowNum = i + 1; break; }
+  }
+  if (rowNum < 0) return json({ ok: false, error: "Запись с таким recordId не найдена — возможно, была удалена. Обновите список." });
+
+  const dateStr = date || Utilities.formatDate(new Date(), "Asia/Almaty", "dd.MM.yyyy");
+  const col = h => headers.indexOf(h) + 1;
+  sheet.getRange(rowNum, col("empId")).setValue(empId || "");
+  sheet.getRange(rowNum, col("empName")).setValue(empName);
+  sheet.getRange(rowNum, col("position")).setValue(position || "");
+  sheet.getRange(rowNum, col("date")).setValue(dateStr);
+  sheet.getRange(rowNum, col("equipmentType")).setValue(equipmentType || "");
+  sheet.getRange(rowNum, col("equipmentModel")).setValue(equipmentModel || "");
+  sheet.getRange(rowNum, col("truckModel")).setValue(truckModel || "");
+  sheet.getRange(rowNum, col("totalLoadTimeSec")).setValue(totalLoadTimeSec);
+  sheet.getRange(rowNum, col("bucketCount")).setValue(bucketCount);
+  sheet.getRange(rowNum, col("bucketFillPercent")).setValue(bucketFillPercent || "");
+  sheet.getRange(rowNum, col("cycleTimeSec")).setValue(cycleTimeSec);
+  sheet.getRange(rowNum, col("properLoading")).setValue(properLoading || "");
+  sheet.getRange(rowNum, col("site")).setValue(site || "");
+  sheet.getRange(rowNum, col("instructorName")).setValue(instructorName || "");
+  sheet.getRange(rowNum, col("summary")).setValue(summary || "");
+
+  return json({ ok: true, recordId });
+}
+
+function deleteTimingRecord(p) {
+  const { row, recordId } = p || {};
+  if (!row) return json({ ok: false, error: "Нужен номер строки (row)" });
+
+  const ss    = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName(SHEET_TIMING);
+  if (!sheet) return json({ ok: false, error: "Лист «Хронометраж» не найден" });
+
+  const rowNum = Number(row);
+  if (!rowNum || rowNum < 2 || rowNum > sheet.getLastRow()) {
+    return json({ ok: false, error: "Строка не найдена — список успел измениться, обновите страницу." });
+  }
+
+  if (recordId) {
+    const headers = sheet.getRange(1,1,1,sheet.getLastColumn()).getValues()[0];
+    const idCol = headers.indexOf("recordId");
+    const actualId = idCol >= 0 ? String(sheet.getRange(rowNum, idCol + 1).getValue()).trim() : "";
+    if (actualId !== String(recordId).trim()) {
+      return json({ ok: false, error: "Строка сдвинулась (список изменился параллельно). Обновите страницу и повторите." });
+    }
+  }
+
+  sheet.deleteRow(rowNum);
+  return json({ ok: true, deleted: rowNum });
+}
+
+function getOperatorTimingRecords(empId) {
+  if (!empId) return json([]);
+  const ss    = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName(SHEET_TIMING);
+  if (!sheet) return json([]);
+  const rows = sheet.getDataRange().getValues();
+  if (rows.length < 2) return json([]);
+  const headers = rows[0];
+  const idCol = headers.indexOf("empId");
+  const dateCol = headers.indexOf("date");
+
+  const data = [];
+  rows.slice(1).forEach((r, i) => {
+    if (!r[0]) return;
+    if (idCol >= 0 && String(r[idCol]).trim() !== String(empId).trim()) return;
+    const o = { __sortDate: r[dateCol] };
+    headers.forEach((h,j) => {
+      const val = r[j];
+      o[h] = (h === "date" && val instanceof Date) ? Utilities.formatDate(val, "Asia/Almaty", "dd.MM.yyyy") : val;
+    });
+    o.__row = i + 2;
+    data.push(o);
+  });
+  data.sort((a,b) => {
+    const av = a.__sortDate, bv = b.__sortDate;
+    if (av instanceof Date && bv instanceof Date) return bv - av;
+    return String(bv).localeCompare(String(av));
+  });
+  data.forEach(o => delete o.__sortDate);
+  return json(data);
+}
+
+// Подсказки для полей «Модель самосвала» — тоже свободный текст, из уже
+// внесённых записей хронометража.
+function getTimingTruckModels() {
+  const ss    = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName(SHEET_TIMING);
+  if (!sheet) return json([]);
+  const rows = sheet.getDataRange().getValues();
+  if (rows.length < 2) return json([]);
+  const headers = rows[0];
+  const col = headers.indexOf("truckModel");
+  if (col < 0) return json([]);
+  const values = new Set();
+  rows.slice(1).forEach(r => {
+    const v = String(r[col] || "").trim();
+    if (v) values.add(v);
+  });
+  return json(Array.from(values).sort());
+}
+
+
 // Запустить ОДИН раз вручную из редактора Apps Script (выбрать функцию
 // seedEvaluationCriteria → Run), чтобы наполнить/обновить каталог. Повторный
 // запуск безопасен — importEvaluationCriteria полностью заменяет набор
