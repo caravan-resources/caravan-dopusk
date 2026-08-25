@@ -2018,7 +2018,7 @@ function getChecklistStats(p) {
       dd.defects += recDefects;
       dd.eq[rec.equipmentId] = 1;
 
-      if (recDefects && a.recentDefects.length < 400) {
+      if (recDefects) {
         a.recentDefects.push({
           equipmentId: rec.equipmentId, empName: rec.empName,
           date: rec.date.toISOString(),
@@ -2028,13 +2028,11 @@ function getChecklistStats(p) {
       rec.items.forEach(it => {
         if (!String(it.comment || "").trim()) return;
         if (!a.commentsList) a.commentsList = [];
-        if (a.commentsList.length < 200) {
-          a.commentsList.push({
-            equipmentId: rec.equipmentId, empName: rec.empName,
-            date: rec.date.toISOString(), itemText: it.itemText,
-            status: it.status, comment: it.comment,
-          });
-        }
+        a.commentsList.push({
+          equipmentId: rec.equipmentId, empName: rec.empName,
+          date: rec.date.toISOString(), itemText: it.itemText,
+          status: it.status, comment: it.comment,
+        });
       });
     });
   });
