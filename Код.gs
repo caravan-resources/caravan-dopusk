@@ -57,6 +57,7 @@ function doGet(e) {
   else if (action === "getChecklistRecords") result = getChecklistRecords(e.parameter.days);
   else if (action === "getChecklistStats") result = getChecklistStats(e.parameter);
   else if (action === "getFuelRecords") result = getFuelRecords(e.parameter.site, e.parameter.days);
+  else if (action === "getEquipmentDayDetail") result = getEquipmentDayDetail(e.parameter);
   else if (action === "getShiftAssignments") result = getShiftAssignments(e.parameter.site);
   else if (action === "getActiveVahtas") result = getActiveVahtas();
   else if (action === "getEvaluationCriteria") result = getEvaluationCriteria(e.parameter.equipmentType);
@@ -2099,6 +2100,80 @@ function getChecklistStats(p) {
     else out.sites[k] = pack(acc[k]);
   });
   return json(out);
+}
+
+// Полная (несжатая — все пункты чек-листа, а не только неисправности/
+// комментарии) выгрузка по одной единице техники за один календарный день.
+// В отличие от getChecklistRecords/getChecklistStats тут нет ни отсечек
+// по количеству, ни свёртки «ok»-пунктов — объём всегда маленький
+// (техника + день), поэтому отдаём всё как есть. Используется из карточки
+// техники на вкладках «Вахта» — «вытащить чек-лист и топливо на любую дату».
+function getEquipmentDayDetail(p) {
+  const equipmentId = String((p && p.equipmentId) || "").trim();
+  const dateStr = String((p && p.date) || "").trim(); // yyyy-MM-dd, по Asia/Almaty
+  if (!equipmentId || !dateStr) {
+    return json({ ok: false, error: "Нужны equipmentId и date (yyyy-MM-dd)" });
+  }
+
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+
+  // ── Чек-листы ──
+  const chkSheet = ss.getSheetByName(SHEET_CHECKLIST_RECORDS);
+  const checklists = [];
+  if (chkSheet) {
+    const lastRow = chkSheet.getLastRow();
+    const rows = lastRow > 1 ? chkSheet.getRange(1, 1, lastRow, 10).getValues() : [];
+    const recMap = {};
+    const order = [];
+    for (let ri = 1; ri < rows.length; ri++) {
+      const r = rows[ri];
+      const recordId = String(r[0] || "").trim();
+      if (!recordId) continue;
+      if (String(r[1] || "").trim() !== equipmentId) continue;
+      const d = r[5] instanceof Date ? r[5] : new Date(r[5]);
+      if (isNaN(d.getTime())) continue;
+      if (Utilities.formatDate(d, "Asia/Almaty", "yyyy-MM-dd") !== dateStr) continue;
+
+      if (!recMap[recordId]) {
+        recMap[recordId] = {
+          recordId: recordId, equipmentId: equipmentId,
+          empId: r[3], empName: String(r[4] || ""), date: d.toISOString(),
+          items: [],
+        };
+        order.push(recordId);
+      }
+      recMap[recordId].items.push({
+        section: String(r[6] || ""), itemText: String(r[7] || ""),
+        status: r[8], comment: String(r[9] || ""),
+      });
+    }
+    order.forEach(id => checklists.push(recMap[id]));
+    checklists.sort((a, b) => a.date.localeCompare(b.date));
+  }
+
+  // ── Заправки ──
+  const fuelSheet = ss.getSheetByName(SHEET_FUEL_RECORDS);
+  const fuel = [];
+  if (fuelSheet) {
+    const rows = fuelSheet.getDataRange().getValues();
+    if (rows.length > 1) {
+      const headers = rows[0];
+      const iEq = headers.indexOf("equipmentId"), iDate = headers.indexOf("date");
+      rows.slice(1).forEach(r => {
+        if (String(r[iEq] || "").trim() !== equipmentId) return;
+        const raw = r[iDate];
+        const d = raw instanceof Date ? raw : new Date(raw);
+        if (isNaN(d.getTime())) return;
+        if (Utilities.formatDate(d, "Asia/Almaty", "yyyy-MM-dd") !== dateStr) return;
+        const o = {}; headers.forEach((h, i) => { o[h] = r[i]; });
+        o.date = d.toISOString();
+        fuel.push(o);
+      });
+      fuel.sort((a, b) => a.date.localeCompare(b.date));
+    }
+  }
+
+  return json({ ok: true, equipmentId: equipmentId, date: dateStr, checklists: checklists, fuel: fuel });
 }
 
 function getChecklistRecords(days) {
