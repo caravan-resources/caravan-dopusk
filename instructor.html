@@ -6180,9 +6180,102 @@ function showEquipmentQuickView(equipmentId) {
     ${crewHtml}
     <div style="font-weight:700;font-size:13px;color:var(--navy);margin:14px 0 6px;border-top:1px solid var(--border);padding-top:10px">Топливо и осмотры</div>
     ${equipmentFuelChecklistLines(equipmentId).replace('margin-top:6px;padding-top:6px;border-top:1px dashed var(--border);','')}
+
+    <div style="font-weight:700;font-size:13px;color:var(--navy);margin:14px 0 6px;border-top:1px solid var(--border);padding-top:10px">Полная история за дату</div>
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px">
+      <input type="date" id="dayDetailDate" value="${todayDateStr()}"
+        style="flex:1;padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px">
+      <button class="btn btn-gold" style="width:auto;padding:8px 14px;font-size:12px"
+        onclick="loadEquipmentDayDetail('${String(equipmentId).replace(/'/g,"\\'")}')">Показать</button>
+    </div>
+    <div id="dayDetailResult"></div>
+
     <button class="btn btn-gold" style="margin-top:16px" onclick="closeModal();showEquipmentQR('${String(equipmentId).replace(/'/g,"\\'")}')">🔗 Показать QR чек-листа</button>
     <button class="btn btn-ghost" style="margin-top:8px" onclick="closeModal()">Закрыть</button>
   `);
+}
+
+// yyyy-MM-dd на сегодня, для значения по умолчанию в date-picker'е
+function todayDateStr() {
+  const d = new Date();
+  const mm = String(d.getMonth()+1).padStart(2,"0");
+  const dd = String(d.getDate()).padStart(2,"0");
+  return `${d.getFullYear()}-${mm}-${dd}`;
+}
+
+// Полная (несжатая) выгрузка чек-листов и заправок по технике за одну
+// дату — из карточки техники на вкладках «Вахта». В отличие от коротких
+// строк «последний осмотр/последняя заправка» тут все пункты чек-листа
+// и все заправки за выбранный день целиком.
+async function loadEquipmentDayDetail(equipmentId) {
+  const dateInput = document.getElementById("dayDetailDate");
+  const resultEl  = document.getElementById("dayDetailResult");
+  if (!dateInput || !resultEl) return;
+  const date = dateInput.value;
+  if (!date) { resultEl.innerHTML = `<div style="color:var(--red);font-size:12px">Выберите дату</div>`; return; }
+
+  resultEl.innerHTML = `<div style="font-size:12px;color:var(--gray);padding:8px 0">⏳ Загрузка...</div>`;
+  try {
+    const url = `${CFG.SHEET_URL}?action=getEquipmentDayDetail&equipmentId=${encodeURIComponent(equipmentId)}&date=${encodeURIComponent(date)}`;
+    const data = await jsonpFetchRetry(url, "cb_day_detail", 30000, 3);
+    if (!data || !data.ok) {
+      resultEl.innerHTML = `<div style="color:var(--red);font-size:12px">Ошибка: ${(data && data.error) || "не удалось загрузить"}</div>`;
+      return;
+    }
+    resultEl.innerHTML = renderEquipmentDayDetail(data);
+  } catch (e) {
+    resultEl.innerHTML = `<div style="color:var(--red);font-size:12px">Ошибка загрузки: ${e.message||e}</div>`;
+  }
+}
+
+function renderEquipmentDayDetail(data) {
+  const chk  = data.checklists || [];
+  const fuel = data.fuel || [];
+
+  if (!chk.length && !fuel.length) {
+    return `<div class="empty" style="padding:14px"><div class="empty-icon">📭</div>За эту дату записей нет</div>`;
+  }
+
+  let html = "";
+
+  if (fuel.length) {
+    html += `<div style="font-weight:700;font-size:12px;color:var(--navy);margin-bottom:4px">⛽ Заправки (${fuel.length})</div>`;
+    html += fuel.map(f => `
+      <div style="font-size:12px;padding:5px 0;border-bottom:1px solid var(--border)">
+        ${fmtRecordDateTime(f.date)} · <b>${f.amountLiters}л</b> · ${f.empName||"—"}
+      </div>`).join("");
+  }
+
+  if (chk.length) {
+    html += `<div style="font-weight:700;font-size:12px;color:var(--navy);margin:10px 0 4px">📋 Осмотры (${chk.length})</div>`;
+    html += chk.map(rec => {
+      const defects = (rec.items||[]).filter(it => it.status === "defect");
+      const itemsHtml = (rec.items||[]).map(it => {
+        const isDefect = it.status === "defect";
+        const isOk = it.status === "ok";
+        const mark  = isDefect ? "✗" : (isOk ? "✓" : "•");
+        const color = isDefect ? "var(--red)" : "var(--gray)";
+        // Числовые поля (топливо/моточасы/пробег) хранят значение в status,
+        // а не "ok"/"defect" — показываем его как значение, а не статус.
+        const tail = (isOk || isDefect)
+          ? (it.comment ? ` — ${it.comment}` : "")
+          : ` — ${it.status}`;
+        return `<div style="font-size:11px;padding:2px 0;color:${color}">${mark} [${it.section}] ${it.itemText}${tail}</div>`;
+      }).join("");
+      return `<div style="border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:8px">
+        <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
+          <b>${fmtRecordDateTime(rec.date)}</b>
+          <span style="color:var(--gray)">${rec.empName||"—"}</span>
+        </div>
+        ${defects.length
+          ? `<div style="color:var(--red);font-size:11px;font-weight:700;margin-bottom:4px">⚠ Неисправностей: ${defects.length}</div>`
+          : `<div style="color:var(--green,#2E7D32);font-size:11px;font-weight:700;margin-bottom:4px">✓ Без замечаний</div>`}
+        <details><summary style="font-size:11px;color:var(--gray);cursor:pointer">Все пункты (${(rec.items||[]).length})</summary>${itemsHtml}</details>
+      </div>`;
+    }).join("");
+  }
+
+  return html;
 }
 
 // ══════════════════════════════════════════════════════
