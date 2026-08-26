@@ -42,6 +42,7 @@ input:focus, select:focus, textarea:focus { border-color:var(--gold); }
 }
 .btn-gold { background:var(--gold); color:var(--navy); }
 .btn-ghost { background:var(--light); color:var(--navy); }
+.btn-red { background:var(--redbg); color:var(--red); border:1.5px solid var(--red); }
 .btn:disabled { opacity:.5; cursor:not-allowed; }
 
 .emp-item {
@@ -100,8 +101,8 @@ input:focus, select:focus, textarea:focus { border-color:var(--gold); }
 .error-title { font-size:16px; font-weight:800; color:var(--red); margin-bottom:8px; }
 .error-sub { font-size:13px; color:var(--gray); line-height:1.6; }
 
-#screenLoading, #screenSearch, #screenForm, #screenSuccess, #screenError, #screenHub, #screenFuelForm { display:none; }
-#screenLoading.active, #screenSearch.active, #screenForm.active, #screenSuccess.active, #screenError.active, #screenHub.active, #screenFuelForm.active { display:block; }
+#screenLoading, #screenSearch, #screenForm, #screenSuccess, #screenError, #screenHub, #screenFuelForm, #screenStatusResult { display:none; }
+#screenLoading.active, #screenSearch.active, #screenForm.active, #screenSuccess.active, #screenError.active, #screenHub.active, #screenFuelForm.active, #screenStatusResult.active { display:block; }
 </style>
 </head>
 <body>
@@ -129,8 +130,19 @@ input:focus, select:focus, textarea:focus { border-color:var(--gold); }
     <div class="card" style="text-align:center">
       <div class="card-title" id="hubEquipmentTitle" style="margin-bottom:16px"></div>
       <button class="btn btn-gold" style="margin-bottom:10px" onclick="startFlow('inspection')">📋 Провести осмотр</button>
-      <button class="btn btn-ghost" onclick="startFlow('fuel')">⛽ Записать заправку</button>
+      <button class="btn btn-ghost" style="margin-bottom:10px" onclick="startFlow('fuel')">⛽ Записать заправку</button>
+      <button class="btn btn-red" onclick="markRepair(this)">🔧 Отправить в ремонт</button>
     </div>
+  </div>
+
+  <!-- ЭКРАН: подтверждение статуса (используется и для ремонта, и как общий успех для статуса техники) -->
+  <div id="screenStatusResult">
+    <div class="card success-box" id="statusResultBox">
+      <div class="success-icon" id="statusResultIcon">✅</div>
+      <div class="success-title" id="statusResultTitle">Готово</div>
+      <div class="success-sub" id="statusResultSub"></div>
+    </div>
+    <button class="btn btn-ghost" onclick="showScreen('Hub')">← К технике</button>
   </div>
 
   <!-- ЭКРАН: форма заправки (короткая) -->
@@ -221,7 +233,7 @@ let selected = null;
 let itemStates = {}; // itemKey -> {status: "ok"|"defect", comment: ""}
 
 function showScreen(name) {
-  ["Loading","Error","Search","Form","Success","Hub","FuelForm"].forEach(s => {
+  ["Loading","Error","Search","Form","Success","Hub","FuelForm","StatusResult"].forEach(s => {
     document.getElementById("screen"+s).classList.remove("active");
   });
   document.getElementById("screen"+name).classList.add("active");
@@ -291,6 +303,45 @@ function startFlow(mode) {
   }
   document.getElementById("searchTitle").textContent = mode === "fuel" ? "Кто заправляет?" : "Кто проводит осмотр?";
   showScreen("Search");
+}
+
+// Статус ТЕХНИКИ (В работе / Ремонт) — отдельно от статуса работника
+// (workStatus, ставит мастер в master.html). Один серверный вызов сам решает
+// участок/вахту/смену — тут ничего этого знать не нужно. Добавлено 26.08.2026.
+async function setEquipmentStatusCall(status) {
+  const res = await fetch(CFG.SHEET_URL, {
+    method: "POST",
+    body: JSON.stringify({ action: "setEquipmentStatus", equipmentId: equipment.equipmentId, status }),
+  });
+  return res.json();
+}
+
+async function markRepair(btn) {
+  if (!confirm(`Отметить ${equipment.equipmentId} как «В ремонте»?`)) return;
+  btn.disabled = true;
+  try {
+    const data = await setEquipmentStatusCall("Ремонт");
+    if (data.ok) {
+      document.getElementById("statusResultIcon").textContent = "🔧";
+      document.getElementById("statusResultTitle").textContent = "Отмечено: в ремонте";
+      document.getElementById("statusResultSub").textContent = `${equipment.equipmentId} — статус обновлён.`;
+    } else if (data.unavailable) {
+      document.getElementById("statusResultIcon").textContent = "⚠";
+      document.getElementById("statusResultTitle").textContent = "Пока недоступно";
+      document.getElementById("statusResultSub").textContent = "Для этого участка ещё не настроена активная вахта. Сообщите мастеру напрямую.";
+    } else {
+      document.getElementById("statusResultIcon").textContent = "⚠";
+      document.getElementById("statusResultTitle").textContent = "Не получилось";
+      document.getElementById("statusResultSub").textContent = data.error || "Неизвестная ошибка.";
+    }
+  } catch (e) {
+    document.getElementById("statusResultIcon").textContent = "⚠";
+    document.getElementById("statusResultTitle").textContent = "Ошибка сети";
+    document.getElementById("statusResultSub").textContent = "Проверьте интернет и попробуйте ещё раз.";
+  } finally {
+    btn.disabled = false;
+    showScreen("StatusResult");
+  }
 }
 
 function renderEmpList(query) {
@@ -522,6 +573,10 @@ async function submitChecklist() {
       document.getElementById("successTitle").textContent = "Чек-лист отправлен";
       document.getElementById("successSub").textContent = "Спасибо! Осмотр зафиксирован.";
       showScreen("Success");
+      // Статус техники "В работе" — фоном, не блокируя экран успеха. Если
+      // активная вахта участка не задана (unavailable) или запрос не дошёл —
+      // молча пропускаем, это вторичное действие, не должно мешать основному.
+      setEquipmentStatusCall("В работе").catch(() => {});
     } else {
       hint.style.color = "var(--red)";
       hint.textContent = "Ошибка: " + (data.error||"неизвестная");
