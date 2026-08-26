@@ -2517,7 +2517,7 @@ function getShiftAssignments(site) {
 // добавления (24.08.2026) — восстановить историю за уже прошедшие дни
 // нельзя, для них данных просто не существует.
 const SHEET_SHIFT_LOG = "ИсторияСмен";
-const SHIFT_LOG_HEADERS = ["timestamp","equipmentId","position","smena","vahta","site","empId","empName","status","dismissDate","skill","workStatus","reassignNote","action"];
+const SHIFT_LOG_HEADERS = ["timestamp","equipmentId","position","smena","vahta","site","empId","empName","status","dismissDate","skill","workStatus","reassignNote","action","equipmentStatus"];
 
 // Баг 26.08.2026: при быстрых последовательных вызовах первый запрос
 // создавал лист (insertSheet), но заголовок ("appendRow" сразу следом)
@@ -2530,6 +2530,13 @@ const SHIFT_LOG_HEADERS = ["timestamp","equipmentId","position","smena","vahta",
 // 2) LockService сериализует конкурентные вызовы — без него getLastRow()+1
 // для двух одновременных запросов может вернуть одно и то же число, и один
 // перезапишет другого.
+//
+// equipmentStatus добавлен в SHIFT_LOG_HEADERS 26.08.2026 — ПОСЛЕ того, как
+// журнал уже начал копить реальные строки. Специально дописан В КОНЕЦ (после
+// "action"), а не куда-то в середину — если бы вставил перед "action", у уже
+// записанных строк "action" съехал бы не в ту колонку. При каждом вызове
+// сверяем реальную шапку листа с SHIFT_LOG_HEADERS и дописываем недостающие
+// столбцы справа — так это переживёт и любые будущие добавления полей.
 function logShiftEvents(entries) {
   if (!entries || !entries.length) return;
   const lock = LockService.getScriptLock();
@@ -2543,14 +2550,24 @@ function logShiftEvents(entries) {
       sheet.getRange(1, 1, 1, SHIFT_LOG_HEADERS.length)
         .setBackground("#0D1B3E").setFontColor("#F4A52A").setFontWeight("bold");
       sheet.setFrozenRows(1);
+    } else {
+      const existingHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+      const missing = SHIFT_LOG_HEADERS.filter(h => existingHeaders.indexOf(h) < 0);
+      if (missing.length) {
+        sheet.getRange(1, existingHeaders.length + 1, 1, missing.length).setValues([missing])
+          .setBackground("#0D1B3E").setFontColor("#F4A52A").setFontWeight("bold");
+      }
     }
+    // Пишем по РЕАЛЬНОЙ шапке листа, не по константе — работает независимо
+    // от фактического порядка столбцов (включая мигрированные старые листы).
+    const currentHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
     const now = new Date();
-    const rows = entries.map(e => SHIFT_LOG_HEADERS.map(h => {
+    const rows = entries.map(e => currentHeaders.map(h => {
       if (h === "timestamp") return e.timestamp || now;
       return (e[h] !== undefined && e[h] !== null) ? e[h] : "";
     }));
     ensureCapacity(sheet, rows.length);
-    sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, SHIFT_LOG_HEADERS.length).setValues(rows);
+    sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, currentHeaders.length).setValues(rows);
   } finally {
     lock.releaseLock();
   }
