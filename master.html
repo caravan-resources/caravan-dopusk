@@ -508,12 +508,24 @@ function shiftStatusColor(status) {
 // Заменяет бумажный наряд «Вид работы» — список сверен с реальным файлом,
 // который мастера заполняли вручную 22.08.2026. Если появятся новые
 // формулировки — просто добавить сюда, ничего больше менять не нужно.
-const WORK_STATUS_OPTIONS = ["В работе","Погрузка горной массы","Работа на карьере","Ремонт","Больничный","Вакансия"];
+// Статус РАБОТНИКА — ставит мастер (не путать с equipmentStatus, статусом
+// ТЕХНИКИ, который ставит сам работник через QR в checklist.html). Список
+// разделён и обновлён 26.08.2026 — раньше "В работе"/"Ремонт" были в одном
+// списке с этими, но они про технику, а не про человека.
+const WORK_STATUS_OPTIONS = ["Больничный","Работа в карьере","Погрузка горной массы","Перевозка горной массы","Вакансия","Командировка","Хозработы","Работа на водоотливе"];
 function workStatusColor(ws) {
-  if (ws === "Ремонт") return "var(--yellow)";
   if (ws === "Больничный") return "var(--red)";
   if (ws === "Вакансия") return "var(--gold)";
-  return "var(--green)"; // В работе / Погрузка горной массы / Работа на карьере
+  if (ws === "Командировка" || ws === "Хозработы") return "var(--gray)";
+  return "var(--green)"; // Работа в карьере / Погрузка горной массы / Перевозка горной массы / Работа на водоотливе
+}
+
+// Статус ТЕХНИКИ (равнозначно workStatusColor, но для другого поля — см.
+// комментарий у WORK_STATUS_OPTIONS про разделение статусов 26.08.2026).
+function equipmentStatusColor(es) {
+  if (es === "Ремонт") return "var(--yellow)";
+  if (es === "В работе") return "var(--green)";
+  return "var(--gray)";
 }
 
 // Сводка по текущей вахте+участку — сколько техники в ремонте, на больничном
@@ -634,13 +646,18 @@ function renderShift() {
           : text;
         const wsHtml = a.workStatus
           ? `<div style="font-size:11px;font-weight:700;color:${workStatusColor(a.workStatus)};text-align:right">${a.workStatus}</div>` : "";
+        // Статус техники — ставит сам работник через QR (checklist.html), не мастер.
+        // Показываем как маленький значок 🔧, чтобы визуально отличать от статуса
+        // работника (wsHtml выше). Добавлено 26.08.2026.
+        const esHtml = a.equipmentStatus
+          ? `<div style="font-size:11px;font-weight:700;color:${equipmentStatusColor(a.equipmentStatus)};text-align:right">🔧 ${a.equipmentStatus}</div>` : "";
         const noteHtml = a.reassignNote
           ? `<div style="font-size:11px;color:var(--gray);font-style:italic;text-align:right">→ ${a.reassignNote}</div>` : "";
-        return `<div style="padding:3px 0;${(wsHtml||noteHtml) ? "border-bottom:1px dashed var(--border)" : ""}">
+        return `<div style="padding:3px 0;${(wsHtml||esHtml||noteHtml) ? "border-bottom:1px dashed var(--border)" : ""}">
           <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px">
             <span style="color:var(--gray)">${label}</span><span style="color:${color};font-weight:600">${nameHtml}${editIcon}</span>
           </div>
-          ${wsHtml}${noteHtml}
+          ${esHtml}${wsHtml}${noteHtml}
         </div>`;
       }).join("");
       return `<div style="background:#fff;border:1px solid var(--border);border-radius:10px;padding:10px 12px;min-width:200px;flex:1 1 200px;max-width:250px">
