@@ -72,6 +72,7 @@ function doGet(e) {
   else if (action === "getEvaluationDetail") result = getEvaluationDetail(e.parameter.evalId);
   else if (action === "getEvaluationAlerts") result = getEvaluationAlerts();
   else if (action === "getEvaluationStats") result = getEvaluationStats(e.parameter);
+  else if (action === "getEvaluationsList") result = getEvaluationsList(e.parameter);
   else result = json({ ok: false, error: "unknown action" });
 
   if (callback) {
@@ -3503,6 +3504,108 @@ function getEvaluationStats(p) {
   operators.forEach(o => delete o.__sort);
 
   return json({ ok: true, operators });
+}
+
+// ── Журнал отдельных оценок (не агрегат по оператору) ────────
+// В отличие от getEvaluationStats (усредняет по оператору за период),
+// здесь каждая оценка — отдельная запись, для группировки на фронтенде по
+// типу техники → участку → дате. Для машинистов экскаватора к оценке
+// присоединяются записи хронометража того же оператора за ту же дату (один
+// проход по листу «Хронометраж», а не отдельный запрос на каждую оценку —
+// иначе при большом числе оценок это было бы N+1 обращений).
+const EVAL_EXCAVATOR_TYPES = ["Экскаватор с обратной лопатой", "Экскаватор с прямой лопатой"];
+
+function getEvaluationsList(p) {
+  const siteFilter = (p && p.site && p.site !== "all") ? String(p.site).trim() : "";
+  const days = Number((p && p.days) || 0);
+  const fromParam = p && p.from ? new Date(p.from) : null;
+  const toParam   = p && p.to   ? new Date(p.to)   : null;
+
+  const ss    = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName(SHEET_EVALUATIONS);
+  if (!sheet) return json({ ok: true, evaluations: [] });
+  const rows = sheet.getDataRange().getValues();
+  if (rows.length < 2) return json({ ok: true, evaluations: [] });
+  const headers = rows[0];
+  const idx = {};
+  headers.forEach((h,i) => idx[h] = i);
+
+  let since = null, until = null;
+  if (fromParam && !isNaN(fromParam.getTime())) {
+    since = fromParam;
+    until = (toParam && !isNaN(toParam.getTime())) ? toParam : new Date();
+  } else if (days > 0) {
+    since = new Date();
+    since.setDate(since.getDate() - days);
+    since.setHours(0,0,0,0);
+  }
+
+  // Хронометраж — один проход, группируем по "empId|дата" для присоединения.
+  const timingByKey = {};
+  const timingSheet = ss.getSheetByName(SHEET_TIMING);
+  if (timingSheet) {
+    const tRows = timingSheet.getDataRange().getValues();
+    if (tRows.length > 1) {
+      const tHeaders = tRows[0];
+      const tIdx = {};
+      tHeaders.forEach((h,i) => tIdx[h] = i);
+      tRows.slice(1).forEach(r => {
+        if (!r[tIdx["recordId"]]) return;
+        const empId = String(r[tIdx["empId"]] || "").trim();
+        const rawDate = r[tIdx["date"]];
+        const dateStr = rawDate instanceof Date ? Utilities.formatDate(rawDate, "Asia/Almaty", "dd.MM.yyyy") : String(rawDate||"");
+        const key = empId + "|" + dateStr;
+        if (!timingByKey[key]) timingByKey[key] = [];
+        const o = {};
+        tHeaders.forEach((h,j) => {
+          const v = r[j];
+          o[h] = (h === "date" && v instanceof Date) ? dateStr : v;
+        });
+        timingByKey[key].push(o);
+      });
+    }
+  }
+
+  const evaluations = [];
+  rows.slice(1).forEach(r => {
+    if (!r[idx["evalId"]]) return;
+    const site = String(r[idx["site"]] || "").trim();
+    if (siteFilter && site !== siteFilter) return;
+
+    const rawDate = r[idx["date"]];
+    const d = rawDate instanceof Date ? rawDate : new Date(rawDate);
+    if (since && (isNaN(d) || d < since)) return;
+    if (until && !isNaN(d) && d >= until) return;
+
+    const dateStr = !isNaN(d) ? Utilities.formatDate(d, "Asia/Almaty", "dd.MM.yyyy") : String(rawDate || "");
+    const b1 = r[idx["block1Score"]], b2 = r[idx["block2Score"]], b3 = r[idx["block3Score"]];
+    const nums = [b1,b2,b3].filter(v => v !== "-" && v !== "" && v !== undefined && v !== null && !isNaN(Number(v))).map(Number);
+    const overallAvg = nums.length ? Math.round((nums.reduce((a,b)=>a+b,0)/nums.length)*100)/100 : "-";
+
+    const equipmentType = r[idx["equipmentType"]] || "";
+    const empId = String(r[idx["empId"]] || "").trim();
+    let timing = null;
+    if (EVAL_EXCAVATOR_TYPES.indexOf(equipmentType) >= 0) {
+      const key = empId + "|" + dateStr;
+      if (timingByKey[key]) timing = timingByKey[key];
+    }
+
+    evaluations.push({
+      evalId: r[idx["evalId"]], empId: r[idx["empId"]], empName: r[idx["empName"]],
+      position: r[idx["position"]], date: dateStr, __sortDate: !isNaN(d) ? d.getTime() : 0,
+      equipmentType: equipmentType, equipmentModel: r[idx["equipmentModel"]] || "",
+      workType: r[idx["workType"]] || "", site: site,
+      instructorName: r[idx["instructorName"]] || "",
+      block1Score: b1, block2Score: b2, block3Score: b3, overallAvg: overallAvg,
+      summary: r[idx["summary"]] || "",
+      timing: timing,
+    });
+  });
+
+  evaluations.sort((a,b) => b.__sortDate - a.__sortDate);
+  evaluations.forEach(e => delete e.__sortDate);
+
+  return json({ ok: true, evaluations: evaluations });
 }
 
 // ── Резюме оценки через Claude API ────────────────────────────
