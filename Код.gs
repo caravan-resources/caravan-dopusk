@@ -125,6 +125,7 @@ function doPost(e) {
     if (d.action === "deleteShiftAssignmentRow") return deleteShiftAssignmentRow(d);
     if (d.action === "swapDayNight") return swapDayNight(d);
     if (d.action === "setActiveVahta") return setActiveVahta(d);
+    if (d.action === "setEquipmentStatus") return setEquipmentStatus(d);
     if (d.action === "clearShiftAssignments") return clearShiftAssignments();
     if (d.action === "saveEvaluation") return saveEvaluation(d);
     if (d.action === "updateEvaluation") return updateEvaluation(d);
@@ -2395,6 +2396,94 @@ function setActiveVahta(p) {
   return json({ ok:true, site, vahta });
 }
 
+// ══════════════════════════════════════════════════════
+// СТАТУС ТЕХНИКИ ЧЕРЕЗ QR — работник в checklist.html сам ставит "В работе"/
+// "Ремонт" (автоматически при сдаче чек-листа, или вручную третьей плашкой
+// для ремонта). В отличие от workStatus (статус РАБОТНИКА, ставит мастер в
+// master.html), это статус ТЕХНИКИ — они разделены (26.08.2026), потому что
+// характеризуют разные вещи и должны меняться независимо.
+//
+// Один серверный вызов делает всё сам: находит участок техники (по листу
+// "Техника"), активную вахту участка (по листу "Настройки"), смену — по
+// текущему времени Алматы (07:00–19:00 = день). Если для участка активная
+// вахта не задана (пока это Ашыктас) — возвращает unavailable:true, а не
+// ошибку; checklist.html должен на это не ругаться, а тихо промолчать.
+// Если подходящей строки в "Смены" ещё нет — создаёт минимальную (только
+// слот + статус, без сотрудника — назначением сотрудников занимается мастер
+// отдельно через master.html, тут его сфера не расширяем).
+// ══════════════════════════════════════════════════════
+function setEquipmentStatus(p) {
+  const { equipmentId, status } = p || {};
+  if (!equipmentId || !status) return json({ ok: false, error: "Нужны equipmentId и status" });
+
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+
+  const eqSheet = ss.getSheetByName(SHEET_EQUIPMENT);
+  if (!eqSheet) return json({ ok: false, error: "Лист «Техника» не найден" });
+  const eqRows = eqSheet.getDataRange().getValues();
+  const eqHeaders = eqRows[0];
+  const eqIdCol = eqHeaders.indexOf("equipmentId"), eqSiteCol = eqHeaders.indexOf("site");
+  let site = "";
+  for (let i = 1; i < eqRows.length; i++) {
+    if (String(eqRows[i][eqIdCol]||"").trim() === String(equipmentId).trim()) {
+      site = String(eqRows[i][eqSiteCol]||"").trim();
+      break;
+    }
+  }
+  if (!site) return json({ ok: false, error: "Техника не найдена" });
+
+  const settingsSheet = ss.getSheetByName(SHEET_SETTINGS);
+  let activeVahta = "";
+  if (settingsSheet) {
+    const rows = settingsSheet.getDataRange().getValues();
+    if (rows.length > 1) {
+      const headers = rows[0];
+      const iSite = headers.indexOf("site"), iVahta = headers.indexOf("activeVahta");
+      for (let i = 1; i < rows.length; i++) {
+        if (String(rows[i][iSite]||"").trim() === site) { activeVahta = String(rows[i][iVahta]||"").trim(); break; }
+      }
+    }
+  }
+  if (!activeVahta) return json({ ok: false, unavailable: true, error: "Активная вахта для участка «"+site+"» не задана" });
+
+  const hour = Number(Utilities.formatDate(new Date(), "Asia/Almaty", "H"));
+  const smena = (hour >= 7 && hour < 19) ? 1 : 2;
+
+  const shiftSheet = ss.getSheetByName(SHEET_SHIFTS);
+  if (!shiftSheet) return json({ ok: false, error: "Лист «Смены» не найден" });
+  const shiftRows = shiftSheet.getDataRange().getValues();
+  const shiftHeaders = shiftRows[0];
+  const col = h => shiftHeaders.indexOf(h);
+  const cEq = col("equipmentId"), cSm = col("smena"), cVah = col("vahta"), cSite = col("site"), cEqStatus = col("equipmentStatus");
+  if (cEqStatus < 0) return json({ ok: false, error: "Столбец equipmentStatus не найден на листе «Смены» — добавь его вручную как в saveShiftAssignment" });
+
+  let rowIdx = -1;
+  for (let i = 1; i < shiftRows.length; i++) {
+    if (String(shiftRows[i][cEq]||"").trim() === String(equipmentId).trim()
+        && Number(shiftRows[i][cSm]) === smena
+        && String(shiftRows[i][cVah]||"").trim() === activeVahta
+        && String(shiftRows[i][cSite]||"").trim() === site) { rowIdx = i + 1; break; }
+  }
+
+  if (rowIdx > 0) {
+    shiftSheet.getRange(rowIdx, cEqStatus + 1).setValue(status);
+    const afterRow = shiftSheet.getRange(rowIdx, 1, 1, shiftHeaders.length).getValues()[0];
+    const snapshot = {};
+    shiftHeaders.forEach((h, i) => { snapshot[h] = afterRow[i]; });
+    logShiftEvents([{ ...snapshot, action: "updated" }]);
+  } else {
+    ensureCapacity(shiftSheet, 1);
+    const newRow = new Array(shiftHeaders.length).fill("");
+    newRow[cEq] = equipmentId; newRow[cSm] = smena; newRow[cVah] = activeVahta; newRow[cSite] = site; newRow[cEqStatus] = status;
+    shiftSheet.appendRow(newRow);
+    const snapshot = {};
+    shiftHeaders.forEach((h, i) => { snapshot[h] = newRow[i]; });
+    logShiftEvents([{ ...snapshot, action: "created" }]);
+  }
+
+  return json({ ok: true, site, vahta: activeVahta, smena, status });
+}
+
 function getShiftAssignments(site) {
   const ss    = SpreadsheetApp.openById(SHEET_ID);
   const sheet = ss.getSheetByName(SHEET_SHIFTS);
@@ -2470,13 +2559,17 @@ function logShiftEvents(entries) {
 function saveShiftAssignment(p) {
   const ss    = SpreadsheetApp.openById(SHEET_ID);
   let sheet = ss.getSheetByName(SHEET_SHIFTS);
-  // workStatus/reassignNote — оперативный статус слота на смену (в работе/ремонт/
-  // погрузка г.м./больничный и т.п.) + свободная заметка о временной переброске.
+  // workStatus/reassignNote — оперативный статус РАБОТНИКА на смену (вакансия/
+  // командировка/хозработы и т.п.) + свободная заметка о временной переброске.
   // Добавлены 22.08.2026 взамен бумажного наряда, который мастера заполняли вручную
-  // каждую смену. ВАЖНО: если лист «Смены» уже существует (обычный случай), эти два
-  // столбца нужно добавить туда вручную как последние — иначе появятся не в тех
-  // колонках. Если листа ещё нет — appendRow создаст его сразу с этими столбцами.
-  const headers = ["equipmentId","position","smena","vahta","empId","empName","status","dismissDate","skill","site","workStatus","reassignNote"];
+  // каждую смену. equipmentStatus — статус ТЕХНИКИ (в работе/ремонт), отдельное
+  // поле от workStatus: ставит сам работник через QR в checklist.html, а не мастер.
+  // Разделены 26.08.2026 — раньше были одним общим списком, но "в работе"/"ремонт"
+  // характеризуют машину, а не человека, который на ней сейчас числится.
+  // ВАЖНО: если лист «Смены» уже существует (обычный случай), новые столбцы нужно
+  // добавить туда вручную как последние — иначе появятся не в тех колонках. Если
+  // листа ещё нет — appendRow создаст его сразу со всеми этими столбцами.
+  const headers = ["equipmentId","position","smena","vahta","empId","empName","status","dismissDate","skill","site","workStatus","reassignNote","equipmentStatus"];
   if (!sheet) {
     sheet = ss.insertSheet(SHEET_SHIFTS);
     sheet.appendRow(headers);
@@ -2490,7 +2583,7 @@ function saveShiftAssignment(p) {
 // Изменить существующее назначение по номеру строки. equipmentId тоже можно
 // менять — нужно при переименовании техники, чтобы записи смен не осиротели.
 function updateShiftAssignment(p) {
-  const { row, equipmentId, empId, empName, status, dismissDate, skill, workStatus, reassignNote } = p || {};
+  const { row, equipmentId, empId, empName, status, dismissDate, skill, workStatus, reassignNote, equipmentStatus } = p || {};
   if (!row) return json({ ok: false, error: "Нужен row" });
   const ss    = SpreadsheetApp.openById(SHEET_ID);
   const sheet = ss.getSheetByName(SHEET_SHIFTS);
@@ -2508,6 +2601,7 @@ function updateShiftAssignment(p) {
   // без ошибки.
   if (workStatus  !== undefined && col("workStatus")  > 0) sheet.getRange(row, col("workStatus")).setValue(workStatus);
   if (reassignNote!== undefined && col("reassignNote")> 0) sheet.getRange(row, col("reassignNote")).setValue(reassignNote);
+  if (equipmentStatus !== undefined && col("equipmentStatus") > 0) sheet.getRange(row, col("equipmentStatus")).setValue(equipmentStatus);
 
   // Полный снимок строки ПОСЛЕ изменения — не только то, что поменялось в
   // этом вызове, иначе журнал будет неполным (например, при правке только
