@@ -2416,6 +2416,40 @@ function getShiftAssignments(site) {
   return json(data);
 }
 
+// ══════════════════════════════════════════════════════
+// ЖУРНАЛ ИЗМЕНЕНИЙ СМЕН — история назначений по слотам (техника+смена+вахта+
+// участок) для восстановления "наряда на дату X" за прошедшие дни. Раньше
+// назначения были только живым состоянием (см. открытый вопрос №3 в
+// оперативной базе) — при каждом изменении старое значение просто исчезало.
+// Теперь на каждую мутацию листа "Смены" (создание/правка/своп день-ночь/
+// удаление) пишется ОТДЕЛЬНАЯ строка-снимок нового состояния слота сюда.
+// Реконструкция дня X = для каждого слота взять последнюю запись журнала
+// с timestamp <= конец дня X. Важно: работает только ВПЕРЁД с момента
+// добавления (24.08.2026) — восстановить историю за уже прошедшие дни
+// нельзя, для них данных просто не существует.
+const SHEET_SHIFT_LOG = "ИсторияСмен";
+const SHIFT_LOG_HEADERS = ["timestamp","equipmentId","position","smena","vahta","site","empId","empName","status","dismissDate","skill","workStatus","reassignNote","action"];
+
+function logShiftEvents(entries) {
+  if (!entries || !entries.length) return;
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  let sheet = ss.getSheetByName(SHEET_SHIFT_LOG);
+  if (!sheet) {
+    sheet = ss.insertSheet(SHEET_SHIFT_LOG);
+    sheet.appendRow(SHIFT_LOG_HEADERS);
+    sheet.getRange(1, 1, 1, SHIFT_LOG_HEADERS.length)
+      .setBackground("#0D1B3E").setFontColor("#F4A52A").setFontWeight("bold");
+    sheet.setFrozenRows(1);
+  }
+  const now = new Date();
+  const rows = entries.map(e => SHIFT_LOG_HEADERS.map(h => {
+    if (h === "timestamp") return e.timestamp || now;
+    return (e[h] !== undefined && e[h] !== null) ? e[h] : "";
+  }));
+  ensureCapacity(sheet, rows.length);
+  sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, SHIFT_LOG_HEADERS.length).setValues(rows);
+}
+
 function saveShiftAssignment(p) {
   const ss    = SpreadsheetApp.openById(SHEET_ID);
   let sheet = ss.getSheetByName(SHEET_SHIFTS);
@@ -2432,6 +2466,7 @@ function saveShiftAssignment(p) {
   }
   ensureCapacity(sheet, 1);
   sheet.appendRow(headers.map(h => (p[h] !== undefined && p[h] !== null) ? p[h] : ""));
+  logShiftEvents([{ ...Object.fromEntries(headers.map(h => [h, p[h] !== undefined && p[h] !== null ? p[h] : ""])), action: "created" }]);
   return json({ ok: true });
 }
 
@@ -2456,6 +2491,15 @@ function updateShiftAssignment(p) {
   // без ошибки.
   if (workStatus  !== undefined && col("workStatus")  > 0) sheet.getRange(row, col("workStatus")).setValue(workStatus);
   if (reassignNote!== undefined && col("reassignNote")> 0) sheet.getRange(row, col("reassignNote")).setValue(reassignNote);
+
+  // Полный снимок строки ПОСЛЕ изменения — не только то, что поменялось в
+  // этом вызове, иначе журнал будет неполным (например, при правке только
+  // workStatus в записи журнала выпадет empName, хотя он не менялся).
+  const afterRow = sheet.getRange(row, 1, 1, headers.length).getValues()[0];
+  const snapshot = {};
+  headers.forEach((h, i) => { snapshot[h] = afterRow[i]; });
+  logShiftEvents([{ ...snapshot, action: "updated" }]);
+
   return json({ ok: true });
 }
 
@@ -2466,7 +2510,15 @@ function deleteShiftAssignmentRow(p) {
   const ss    = SpreadsheetApp.openById(SHEET_ID);
   const sheet = ss.getSheetByName(SHEET_SHIFTS);
   if (!sheet) return json({ ok: false, error: "Лист «Смены» не найден" });
+
+  // Снимок ДО удаления — иначе журнал не будет знать, какой слот пропал.
+  const headers = sheet.getDataRange().getValues()[0];
+  const beforeRow = sheet.getRange(row, 1, 1, headers.length).getValues()[0];
+  const snapshot = {};
+  headers.forEach((h, i) => { snapshot[h] = beforeRow[i]; });
+
   sheet.deleteRow(row);
+  logShiftEvents([{ ...snapshot, action: "deleted" }]);
   return json({ ok: true });
 }
 
@@ -2497,6 +2549,15 @@ function swapDayNight(p) {
   const cEq=col("equipmentId"), cPos=col("position"), cSm=col("smena"), cVah=col("vahta"),
         cEmpId=col("empId"), cEmpName=col("empName"), cStatus=col("status"),
         cDismiss=col("dismissDate"), cSkill=col("skill"), cSite=col("site");
+
+  // Снимок строки для журнала — по индексам колонок листа, а не по порядку в
+  // SHIFT_LOG_HEADERS, чтобы не разъехаться, если когда-нибудь поменяется
+  // порядок столбцов на листе.
+  function rowToLogEntry(rowArr, action) {
+    const e = { action };
+    headers.forEach((h, i) => { e[h] = rowArr[i]; });
+    return e;
+  }
 
   // Группируем строки нужного участка+вахты по технике: день/ночь -> индекс в rows
   const groups = {};
@@ -2530,6 +2591,7 @@ function swapDayNight(p) {
 
   const newRows = [];
   let swapped = 0;
+  const logEntries = [];
 
   Object.entries(groups).forEach(([eq, g]) => {
     if (g.day === undefined && g.night === undefined) return;
@@ -2541,13 +2603,21 @@ function swapDayNight(p) {
     if (g.day !== undefined) {
       applyPerson(g.day, nightPerson);
     } else if (nightPerson.empId || nightPerson.empName) {
-      newRows.push(buildRow(eq, rows[g.night][cPos], 1, nightPerson));
+      const nr = buildRow(eq, rows[g.night][cPos], 1, nightPerson);
+      newRows.push(nr);
+      logEntries.push(rowToLogEntry(nr, "created"));
     }
     if (g.night !== undefined) {
       applyPerson(g.night, dayPerson);
     } else if (dayPerson.empId || dayPerson.empName) {
-      newRows.push(buildRow(eq, rows[g.day][cPos], 2, dayPerson));
+      const nr = buildRow(eq, rows[g.day][cPos], 2, dayPerson);
+      newRows.push(nr);
+      logEntries.push(rowToLogEntry(nr, "created"));
     }
+    // Существующие строки логируем ПОСЛЕ applyPerson выше — rows[idx] уже
+    // содержит новое (переставленное) состояние на этот момент.
+    if (g.day !== undefined) logEntries.push(rowToLogEntry(rows[g.day], "swapped"));
+    if (g.night !== undefined) logEntries.push(rowToLogEntry(rows[g.night], "swapped"));
     swapped++;
   });
 
@@ -2557,6 +2627,7 @@ function swapDayNight(p) {
     ensureCapacity(sheet, newRows.length);
     sheet.getRange(sheet.getLastRow()+1, 1, newRows.length, headers.length).setValues(newRows);
   }
+  logShiftEvents(logEntries);
 
   return json({ ok: true, swapped, created: newRows.length });
 }
