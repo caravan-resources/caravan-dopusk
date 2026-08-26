@@ -179,6 +179,14 @@ input:focus, select:focus, textarea:focus { border-color:var(--gold); }
       <input type="number" id="odometer" min="0" step="1" placeholder="Например: 128340">
     </div>
 
+    <label class="card" id="noIssuesCard" for="noIssuesToggle" style="display:flex;align-items:center;gap:10px;cursor:pointer">
+      <input type="checkbox" id="noIssuesToggle" onchange="toggleNoIssues(this.checked)" style="width:22px;height:22px;flex-shrink:0">
+      <div>
+        <div style="font-weight:800">✓ Без замечаний</div>
+        <div class="hint" style="margin:2px 0 0">Отметит все пункты ниже как исправные — по одному ставить не нужно</div>
+      </div>
+    </label>
+
     <div class="card" id="itemsCard"></div>
 
     <div class="card">
@@ -407,7 +415,9 @@ function showForm() {
   document.getElementById("odometer").value = "";
 
   itemStates = {};
+  document.getElementById("noIssuesToggle").checked = false; // сброс при каждом новом открытии формы
   const itemsCard = document.getElementById("itemsCard");
+  itemsCard.style.display = "";
   let html = "";
   Object.keys(template.sections).forEach(sectionName => {
     html += `<div class="section-title">${sectionName}</div>`;
@@ -438,6 +448,28 @@ function setItemStatus(key, status) {
   document.querySelector(`.item-btn.${status}[data-key="${key}"]`).classList.add("active");
   const commentEl = document.getElementById("comment_"+key);
   commentEl.classList.toggle("show", status === "defect");
+}
+
+// «Без замечаний» — один тап вместо отметки каждого пункта по отдельности.
+// Поле "Общие замечания" ниже (generalComment) — отдельное и всегда видимое,
+// этот переключатель на него не влияет вообще. Добавлено 26.08.2026.
+function toggleNoIssues(checked) {
+  const itemsCard = document.getElementById("itemsCard");
+  if (checked) {
+    Object.keys(itemStates).forEach(key => {
+      itemStates[key].status = "ok";
+      itemStates[key].comment = "";
+    });
+    itemsCard.style.display = "none";
+  } else {
+    Object.keys(itemStates).forEach(key => {
+      itemStates[key].status = "";
+      itemStates[key].comment = "";
+    });
+    itemsCard.style.display = "";
+    document.querySelectorAll(".item-btn").forEach(btn => btn.classList.remove("active"));
+    document.querySelectorAll(".item-comment").forEach(el => { el.value = ""; el.classList.remove("show"); });
+  }
 }
 
 async function submitChecklist() {
