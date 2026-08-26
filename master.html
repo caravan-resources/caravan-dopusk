@@ -182,19 +182,55 @@ td { padding:8px; border-bottom:1px solid var(--border); }
 
 <script>
 const CFG = {
-  PIN: "2508",
+  PIN: "1234",
   SHEET_URL: "https://script.google.com/macros/s/AKfycbwhdMV20k8US2BXUz1Xk2XCXE9MEwpHpQaadTF9xEfzbU1--dHL-Zuj06K2qXW-rFtKGw/exec",
 };
 
 let DATA = { equipment: [], employees: [], shiftAssignments: [], fuel: [], checklistStats: null, personnelEvents: [] };
 let CURRENT_SITE = "Алмалы";
 let CURRENT_VAHTA = "Вахта-1";
+// Какая вахта реально сейчас на площадке — по участку. Раньше выбор
+// Вахта-1/Вахта-2 был чисто локальным и сбрасывался на дефолт при каждой
+// перезагрузке; теперь сохраняется на сервере (setActiveVahta/getActiveVahtas
+// в Код.gs, добавлено 24.08.2026) — чтобы instructor.html тоже знал, кого
+// проверять на дисциплину. Один участок (Ашыктас, на 24.08.2026) ещё не
+// использует эту схему по факту — тогда сохранённое значение просто
+// остаётся стартовым состоянием переключателя, ни на что не влияя, пока
+// мастер сам его не поставит.
+let ACTIVE_VAHTAS = {};
 
-function checkPin() {
+async function loadActiveVahtas() {
+  try {
+    const res = await fetch(`${CFG.SHEET_URL}?action=getActiveVahtas`, { cache: "no-store" });
+    const val = await res.json();
+    if (val && typeof val === "object" && !Array.isArray(val)) ACTIVE_VAHTAS = val;
+  } catch (e) {
+    console.error("не удалось загрузить активные вахты:", e);
+  }
+}
+
+async function saveActiveVahta(site, vahta) {
+  try {
+    const res = await fetch(CFG.SHEET_URL, {
+      method: "POST",
+      body: JSON.stringify({ action: "setActiveVahta", site, vahta }),
+    });
+    await res.text(); // Apps Script отдаёт редирект на POST — тело тут не всегда валидный JSON,
+                       // это фоновое сохранение, не должно мешать основной работе со сменами
+  } catch (e) {
+    console.error("не удалось сохранить активную вахту:", e);
+  }
+}
+
+async function checkPin() {
   const val = document.getElementById("pinInput").value;
   if (val === CFG.PIN) {
     document.getElementById("loginScreen").style.display = "none";
     document.getElementById("app").style.display = "block";
+    await loadActiveVahtas();
+    if (ACTIVE_VAHTAS[CURRENT_SITE] === "Вахта-1" || ACTIVE_VAHTAS[CURRENT_SITE] === "Вахта-2") {
+      CURRENT_VAHTA = ACTIVE_VAHTAS[CURRENT_SITE];
+    }
     loadAll();
   } else {
     document.getElementById("loginErr").style.display = "block";
@@ -370,7 +406,12 @@ function setSite(site) {
   if (site === CURRENT_SITE) return;
   CURRENT_SITE = site;
   FUEL_PERIOD = 1; FUEL_LOADED_DAYS = 1; // новый участок — снова качаем заправки по минимуму
+  if (ACTIVE_VAHTAS[CURRENT_SITE] === "Вахта-1" || ACTIVE_VAHTAS[CURRENT_SITE] === "Вахта-2") {
+    CURRENT_VAHTA = ACTIVE_VAHTAS[CURRENT_SITE]; // у каждого участка своя активная вахта
+  }
   renderSiteSwitch(); // подсветить активную кнопку сразу, не дожидаясь сети
+  renderVahtaSwitch();
+  renderSwapDayNightButton();
   loadAll(); // данные теперь серверно отфильтрованы по участку — грузим заново
 }
 
@@ -386,7 +427,14 @@ function renderVahtaSwitch() {
     <button class="${CURRENT_VAHTA===o.key?'btn-gold':'btn-ghost'}" onclick="setVahta('${o.key}')">${o.label}</button>
   `).join("");
 }
-function setVahta(v) { CURRENT_VAHTA = v; renderVahtaSwitch(); renderSwapDayNightButton(); renderShift(); renderPersonnelList(); }
+function setVahta(v) {
+  CURRENT_VAHTA = v;
+  renderVahtaSwitch(); renderSwapDayNightButton(); renderShift(); renderPersonnelList();
+  if (v === "Вахта-1" || v === "Вахта-2") {
+    ACTIVE_VAHTAS[CURRENT_SITE] = v; // локально сразу, не дожидаясь ответа сервера
+    saveActiveVahta(CURRENT_SITE, v);
+  }
+}
 
 // «Неназначенные» — не настоящая вахта в базе (там просто нет таких строк),
 // для неё кнопка не имеет смысла и не показывается.
@@ -569,7 +617,7 @@ function renderShift() {
         const curWorkStatus = a ? (a.workStatus||"") : "";
         const curReassignNote = a ? (a.reassignNote||"") : "";
         const editIcon = `<span class="edit-slot-icon" style="cursor:pointer;font-size:12px;margin-left:6px" title="Назначить"
-          onclick="openAssignModal('${String(g.equipmentId).replace(/'/g,"\\'")}', ${sm}, ${rowArg}, '${String(curEmpId).replace(/'/g,"\\'")}', '${String(curEmpName).replace(/'/g,"\\'")}', '${String(curWorkStatus).replace(/'/g,"\\'")}', '${String(curReassignNote).replace(/'/g,"\\'")}')">✎</span>`;
+          onclick="openAssignModal('${String(g.equipmentId).replace(/'/g,"\\'")}', ${sm}, ${rowArg}, '${String(curEmpId).replace(/'/g,"\\'")}', '${String(curEmpName).replace(/'/g,"\\'")}', '${String(curWorkStatus).replace(/'/g,"\\'")}', '${String(curReassignNote).replace(/'/g,"\\'")}', '${String(g.position||"").replace(/'/g,"\\'")}')">✎</span>`;
         if (!a) return `<div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;padding:3px 0;color:var(--gray)">
           <span>${label}</span><span>—${editIcon}</span></div>`;
         const color = shiftStatusColor(a.status);
@@ -818,7 +866,7 @@ function empIdFromInput(text) {
 // row=null означает, что для этого слота (техника+смена+вахта+участок) в
 // базе ещё нет строки вовсе — при сохранении создадим новую (saveShiftAssignment),
 // а не будем обновлять несуществующую.
-function openAssignModal(equipmentId, smena, row, curEmpId, curEmpName, curWorkStatus, curReassignNote) {
+function openAssignModal(equipmentId, smena, row, curEmpId, curEmpName, curWorkStatus, curReassignNote, position) {
   const eq = (DATA.equipment||[]).find(e => String(e.equipmentId)===String(equipmentId));
   const smLabel = SMENA_LABEL[smena];
   const vahtaLabel = (VAHTA_OPTIONS.find(o=>o.key===CURRENT_VAHTA)||{}).label || CURRENT_VAHTA;
@@ -830,7 +878,7 @@ function openAssignModal(equipmentId, smena, row, curEmpId, curEmpName, curWorkS
   document.getElementById("modalBox").innerHTML = `
     <div style="font-size:16px;font-weight:800;margin-bottom:4px">Назначить оператора</div>
     <div style="font-size:13px;color:var(--gray);margin-bottom:16px">
-      ${equipmentId}${eq ? " — "+eq.model : ""} · ${smLabel} · ${vahtaLabel}
+      ${equipmentId ? equipmentId + (eq ? " — "+eq.model : "") : position} · ${smLabel} · ${vahtaLabel}
     </div>
     <div class="field">
       <label>Сотрудник</label>
@@ -846,7 +894,7 @@ function openAssignModal(equipmentId, smena, row, curEmpId, curEmpName, curWorkS
       <input type="text" id="assignReassignNote" placeholder="Например: Пересажен на 212" value="${String(curReassignNote||"").replace(/"/g,'&quot;')}">
     </div>
     <div style="display:flex;gap:8px">
-      <button class="btn-gold" style="flex:1" onclick="submitAssign(${row===null?"null":row}, '${String(equipmentId).replace(/'/g,"\\'")}', ${smena})">Сохранить</button>
+      <button class="btn-gold" style="flex:1" onclick="submitAssign(${row===null?"null":row}, '${String(equipmentId).replace(/'/g,"\\'")}', ${smena}, '${String(position||"").replace(/'/g,"\\'")}')">Сохранить</button>
       ${curEmpId ? `<button class="btn-red" onclick="submitUnassign(${row})">Снять</button>` : ""}
       <button class="btn-ghost" onclick="closeModal()">Отмена</button>
     </div>
@@ -857,30 +905,39 @@ function openAssignModal(equipmentId, smena, row, curEmpId, curEmpName, curWorkS
   document.getElementById("modalOverlay").style.display = "flex";
 }
 
-async function submitAssign(row, equipmentId, smena) {
-  const empText = document.getElementById("assignEmpInput").value;
-  const empId = empIdFromInput(empText);
-  const emp = empById(empId);
-  if (!emp) { alert("Выберите сотрудника из списка подсказок (начните печатать имя)"); return; }
+// submitAssign: поле "Сотрудник" можно намеренно оставить пустым — например,
+// чтобы проставить "Вид работы"/заметку на уже вакантном слоте, не назначая
+// никого. Блокируем сохранение только если человек что-то напечатал, но не
+// выбрал вариант из подсказок (это опечатка, а не осознанная вакансия). Баг
+// 24.08.2026: при создании НОВОЙ строки для слота "Управление участком"
+// (equipmentId пустой — Бригадир/Горный мастер/...) старый код искал
+// "любую строку с таким же equipmentId" — а у ВСЕХ таких позиций equipmentId
+// одинаково пустой, так что .find() подставлял position от первой попавшейся
+// позиции в массиве, а не от той, что реально редактировали. Теперь position
+// передаётся явно из карточки слота, а не угадывается по сэмплу.
+async function submitAssign(row, equipmentId, smena, position) {
+  const empText = document.getElementById("assignEmpInput").value.trim();
+  const empId = empText ? empIdFromInput(empText) : "";
+  const emp = empId ? empById(empId) : null;
+  if (empText && !emp) { alert("Выберите сотрудника из списка подсказок (начните печатать имя)"); return; }
   const workStatus = document.getElementById("assignWorkStatus").value;
   const reassignNote = document.getElementById("assignReassignNote").value.trim();
 
   try {
     let res;
     if (row) {
-      res = await fetch(CFG.SHEET_URL, { method:"POST", body: JSON.stringify({
-        action: "updateShiftAssignment", row, empId: emp.id, empName: emp.name, status: "",
-        workStatus, reassignNote,
-      })});
+      const payload = { action: "updateShiftAssignment", row, workStatus, reassignNote };
+      // Сотрудника трогаем только если реально выбрали из подсказок — пустое
+      // поле не должно тихо снимать существующее назначение, для явного
+      // снятия есть отдельная кнопка "Снять".
+      if (emp) { payload.empId = emp.id; payload.empName = emp.name; payload.status = ""; }
+      res = await fetch(CFG.SHEET_URL, { method:"POST", body: JSON.stringify(payload) });
     } else {
-      // Слота ещё нет в базе — создаём новую строку. position берём из любой
-      // существующей записи этой же техники (если есть), чтобы не терять
-      // описание должности; если техника вообще без записей — оставляем пустым.
-      const sample = (DATA.shiftAssignments||[]).find(a => String(a.equipmentId)===String(equipmentId));
       res = await fetch(CFG.SHEET_URL, { method:"POST", body: JSON.stringify({
         action: "saveShiftAssignment",
-        equipmentId, position: sample ? sample.position : "", smena, vahta: CURRENT_VAHTA,
-        empId: emp.id, empName: emp.name, status: "", dismissDate: "", skill: "", site: CURRENT_SITE,
+        equipmentId, position: position || "", smena, vahta: CURRENT_VAHTA,
+        empId: emp ? emp.id : "", empName: emp ? emp.name : "",
+        status: emp ? "" : "вакансия", dismissDate: "", skill: "", site: CURRENT_SITE,
         workStatus, reassignNote,
       })});
     }
