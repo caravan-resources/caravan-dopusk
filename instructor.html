@@ -869,14 +869,12 @@ tr:hover td { background:#FAFBFD; }
       </div>
 
       <div class="panel" style="border-top:3px solid #4338CA">
-        <div class="panel-title">🎯 Рейтинг по оценкам работы</div>
+        <div class="panel-title">🎯 Оценки работы</div>
         <div class="hint" style="margin-bottom:10px">
-          Независимый рейтинг — по итогам формальных оценок работы, а не осмотров техники.
-          Только для информации инструктора/руководства, ни на что автоматически не влияет.
-          Балл — среднее по всем оценкам оператора за период/участок (фильтры выше), но с
-          весом по свежести: последняя оценка весит больше самой первой, чтобы недавний
-          прогресс или ухудшение отражались быстрее, чем при простом усреднении.
-          Сюда попадают только сотрудники, которых уже оценивали.
+          Журнал формальных оценок работы, а не осмотров техники — только для информации
+          инструктора/руководства, ни на что автоматически не влияет. Сгруппировано: тип
+          техники → участок → дата (фильтры выше сужают период/участок). У машинистов
+          экскаватора к оценке присоединён хронометраж погрузки, если он делался в тот же день.
         </div>
         <div id="evalRatingList"></div>
       </div>
@@ -2115,9 +2113,6 @@ function renderTrainingBySite() {
 // основной рейтинг по осмотрам, но данные и сортировка полностью отдельные —
 // см. getEvaluationStats в Код.gs.
 // ══════════════════════════════════════════════════════
-// Кэш последнего ответа — нужен, чтобы раскрывать детали строки по клику,
-// не делая повторный запрос за теми же данными.
-let EVAL_RATING_DATA = [];
 
 async function loadEvaluationRatingSection() {
   const el = document.getElementById("evalRatingList");
@@ -2128,64 +2123,131 @@ async function loadEvaluationRatingSection() {
   const pv = document.getElementById("ratingPeriod")?.value || "30";
   const days = pv === "all" ? 0 : Number(pv);
 
-  const params = new URLSearchParams({ action: "getEvaluationStats" });
+  const params = new URLSearchParams({ action: "getEvaluationsList" });
   if (site !== "all") params.set("site", site);
   if (days) params.set("days", days);
 
   try {
-    const val = await jsonpFetchRetry(`${CFG.SHEET_URL}?${params.toString()}`, "cb_evaluation_stats", 30000, 3);
-    const operators = (val && val.ok && Array.isArray(val.operators)) ? val.operators : [];
-    EVAL_RATING_DATA = operators;
-    if (!operators.length) {
+    const val = await jsonpFetchRetry(`${CFG.SHEET_URL}?${params.toString()}`, "cb_evaluations_list", 30000, 3);
+    const evaluations = (val && val.ok && Array.isArray(val.evaluations)) ? val.evaluations : [];
+    if (!evaluations.length) {
       el.innerHTML = `<div class="empty"><div class="empty-icon">🎯</div>Оценок работы за выбранный период нет</div>`;
       return;
     }
-    const medal = i => ["🥇","🥈","🥉"][i] || `${i+1}.`;
-    const clickable = (o, inner) => o.empId
-      ? `<span style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted"
-           onclick="event.stopPropagation();goToEmployeeProfile('${String(o.empId).replace(/'/g,"\\'")}')">${inner}</span>`
-      : inner;
-    const scoreColor = v => (v === "-" || v === undefined) ? "var(--gray)" : (Number(v) <= 2 ? "var(--red)" : (Number(v) >= 4 ? "var(--green)" : "var(--yellow)"));
-    const scoreCell = v => `<b style="color:${scoreColor(v)}">${v}</b>`;
 
-    el.innerHTML = `<div class="tbl-wrap"><table style="font-size:13px">
-      <thead><tr>
-        <th>#</th><th>Оператор</th><th>Обязанности</th><th>Техническое состояние</th>
-        <th>Эксплуатация</th><th>Средний балл</th><th>Оценок</th><th>Последняя</th>
-      </tr></thead>
-      <tbody>${operators.map((o,i) => `
-        <tr style="cursor:pointer" onclick="toggleEvalRatingDetail(${i})">
-          <td>${medal(i)}</td>
-          <td><b>${clickable(o, o.empName)}</b></td>
-          <td>${scoreCell(o.block1Avg)}</td>
-          <td>${scoreCell(o.block2Avg)}</td>
-          <td>${scoreCell(o.block3Avg)}</td>
-          <td>${scoreCell(o.overallAvg)}</td>
-          <td>${o.count}</td>
-          <td style="font-size:12px;color:var(--gray)">${o.lastDate}</td>
-        </tr>
-        <tr id="evalRatingDetail${i}" style="display:none;background:var(--light)">
-          <td colspan="8" style="padding:10px 14px">
-            ${(o.evaluations||[]).map(e => `
-              <div style="font-size:12px;padding:6px 0;border-bottom:1px solid var(--border)">
-                <b>${e.date}</b> · ${e.equipmentType||""}${e.workType?" · "+e.workType:""} ·
-                Обяз.: ${e.block1Score} · Техн.: ${e.block2Score} · Экспл.: ${e.block3Score}
-                ${e.summary ? `<div style="color:var(--navy);margin-top:3px;line-height:1.4">${e.summary}</div>` : ""}
+    // Группировка: тип техники → участок → дата. Всё показывается сразу
+    // (без сворачивания разделов) — так и было решено: не прятать, а
+    // разложить по полочкам.
+    const byType = {};
+    evaluations.forEach(e => {
+      const type = e.equipmentType || "Без типа";
+      const site = e.site || "Без участка";
+      const date = e.date || "Без даты";
+      (byType[type] ??= {});
+      (byType[type][site] ??= {});
+      (byType[type][site][date] ??= []).push(e);
+    });
+
+    const scoreColor = v => (v === "-" || v === undefined) ? "var(--gray)" : (Number(v) <= 2 ? "var(--red)" : (Number(v) >= 4 ? "var(--green)" : "var(--yellow)"));
+    const wordEval = n => n === 1 ? "оценка" : (n >= 2 && n <= 4 ? "оценки" : "оценок");
+    const parseRuDate = s => { const m = String(s).match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})/); return m ? new Date(+m[3], +m[2]-1, +m[1]).getTime() : 0; };
+
+    const typeNames = Object.keys(byType).sort();
+    el.innerHTML = typeNames.map(type => {
+      const siteBlocks = byType[type];
+      const typeCount = Object.values(siteBlocks).reduce((sum, dates) => sum + Object.values(dates).reduce((s2,arr)=>s2+arr.length,0), 0);
+      const siteNames = Object.keys(siteBlocks).sort();
+
+      return `
+        <div style="margin-bottom:32px">
+          <div style="display:flex;align-items:center;gap:10px;padding-bottom:10px;margin-bottom:16px;border-bottom:2px solid #4338CA">
+            <span style="font-size:20px">🚜</span>
+            <span style="font-size:17px;font-weight:800;color:var(--navy)">${type}</span>
+            <span style="font-size:12px;color:var(--gray);font-weight:600">(${typeCount} ${wordEval(typeCount)})</span>
+          </div>
+          ${siteNames.map(siteName => {
+            const dateBlocks = siteBlocks[siteName];
+            const siteCount = Object.values(dateBlocks).reduce((s,arr)=>s+arr.length,0);
+            const dateNames = Object.keys(dateBlocks).sort((a,b) => parseRuDate(b) - parseRuDate(a));
+            return `
+              <div style="margin-left:14px;margin-bottom:20px">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+                  <span style="font-size:14px">📍</span>
+                  <span style="font-size:14px;font-weight:700;color:var(--navy2)">${siteName}</span>
+                  <span style="font-size:11px;color:var(--gray)">(${siteCount})</span>
+                </div>
+                ${dateNames.map(dateName => {
+                  const evalsOnDate = dateBlocks[dateName].slice().sort((a,b) => {
+                    const av = a.overallAvg === "-" ? -1 : Number(a.overallAvg);
+                    const bv = b.overallAvg === "-" ? -1 : Number(b.overallAvg);
+                    return bv - av;
+                  });
+                  return `
+                    <div style="margin-left:14px;margin-bottom:16px">
+                      <div style="font-size:12px;font-weight:700;color:var(--gray);margin-bottom:10px">📅 ${dateName}</div>
+                      ${evalsOnDate.map(e => renderEvalJournalCard(e, scoreColor)).join("")}
+                    </div>
+                  `;
+                }).join("")}
               </div>
-            `).join("") || `<div style="font-size:12px;color:var(--gray)">Нет данных.</div>`}
-          </td>
-        </tr>
-      `).join("")}</tbody>
-    </table></div>`;
+            `;
+          }).join("")}
+        </div>
+      `;
+    }).join("");
   } catch (err) {
     el.innerHTML = `<div class="empty">Не удалось загрузить: ${err.message}</div>`;
   }
 }
 
-function toggleEvalRatingDetail(i) {
-  const row = document.getElementById("evalRatingDetail"+i);
-  if (!row) return;
-  row.style.display = row.style.display === "none" ? "table-row" : "none";
+// Одна карточка оценки — «акцентированное событие», не строка таблицы:
+// крупный шрифт, полноразмерная диаграмма, цветная левая рамка по баллу.
+// Если это машинист экскаватора и в тот же день делался хронометраж —
+// присоединяем его отдельным блоком внутри той же карточки (не отдельной
+// сущностью на экране) — visually связано с конкретной оценкой.
+function renderEvalJournalCard(e, scoreColor) {
+  const clickable = e.empId
+    ? `<span style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted"
+         onclick="goToEmployeeProfile('${String(e.empId).replace(/'/g,"\\'")}')">${e.empName}</span>`
+    : e.empName;
+
+  const timingHtml = (e.timing && e.timing.length) ? `
+    <div style="margin-top:16px;padding:14px 16px;background:#F5F3FF;border-radius:10px;border-left:3px solid #7C3AED">
+      <div style="font-size:11px;font-weight:800;color:#7C3AED;margin-bottom:10px;letter-spacing:.3px">⏱ ХРОНОМЕТРАЖ ПОГРУЗКИ</div>
+      ${e.timing.map((t,i) => `
+        <div style="display:flex;gap:18px;flex-wrap:wrap;font-size:12.5px;${i>0?'margin-top:10px;padding-top:10px;border-top:1px dashed #DDD6FE':''}">
+          <span><b style="color:var(--navy)">${t.totalLoadTimeSec} с</b> погрузка</span>
+          <span><b style="color:var(--navy)">${t.bucketCount}</b> ковшей</span>
+          <span><b style="color:var(--navy)">${t.bucketFillPercent||'-'}%</b> наполнение</span>
+          <span><b style="color:var(--navy)">${t.cycleTimeSec} с</b> цикл</span>
+          <span style="color:${t.properLoading==='да'?'var(--green)':(t.properLoading==='нет'?'var(--red)':'var(--gray)')}">
+            <b>${t.properLoading==='да'?'✓ Паспорт соблюдён':(t.properLoading==='нет'?'✕ Паспорт нарушен':'—')}</b>
+          </span>
+          ${t.truckModel ? `<span style="color:var(--gray)">→ ${t.truckModel}</span>` : ""}
+        </div>
+      `).join("")}
+    </div>
+  ` : "";
+
+  return `
+    <div style="border:1px solid var(--border);border-radius:14px;padding:18px 20px;margin-bottom:14px;
+      background:#fff;box-shadow:0 1px 4px rgba(13,27,62,.07);border-left:4px solid ${scoreColor(e.overallAvg)}">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:16px;flex-wrap:wrap">
+        <div>
+          <div style="font-size:16px;font-weight:800;color:var(--navy)">${clickable}</div>
+          <div style="font-size:12px;color:var(--gray);margin-top:2px">${e.position||""}${e.equipmentModel?" · "+e.equipmentModel:""}${e.workType?" · "+e.workType:""}</div>
+        </div>
+        <div style="text-align:center">
+          <div style="font-size:22px;font-weight:800;color:${scoreColor(e.overallAvg)}">${e.overallAvg}</div>
+          <div style="font-size:9px;color:var(--gray)">средний балл</div>
+        </div>
+      </div>
+      ${evalBarsHtml(e.block1Score, e.block2Score, e.block3Score, false)}
+      ${e.summary ? `<div style="font-size:13px;color:var(--navy);margin-top:16px;line-height:1.5">${e.summary}</div>` : ""}
+      ${e.instructorName ? `<div style="font-size:11px;color:var(--gray);margin-top:10px">Оценил: ${e.instructorName}</div>` : ""}
+      ${timingHtml}
+    </div>
+  `;
 }
 
 // ══════════════════════════════════════════════════════
