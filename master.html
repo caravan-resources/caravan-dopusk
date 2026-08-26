@@ -78,6 +78,11 @@ td { padding:8px; border-bottom:1px solid var(--border); }
   #naryadPrintArea { position: absolute; top: 0; left: 0; width: 100%; }
 }
 </style>
+<!-- SheetJS — только для выгрузки наряда в .xlsx (кнопка "Скачать Excel").
+     Подключается с CDN, а не пишется руками — генерация xlsx-бинарника
+     вручную не имеет смысла. Если библиотека не подгрузится (плохая связь),
+     downloadNaryadExcel() покажет alert вместо тихого падения. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 <body>
 
@@ -182,7 +187,7 @@ td { padding:8px; border-bottom:1px solid var(--border); }
 
 <script>
 const CFG = {
-  PIN: "1234",
+  PIN: "2508",
   SHEET_URL: "https://script.google.com/macros/s/AKfycbwhdMV20k8US2BXUz1Xk2XCXE9MEwpHpQaadTF9xEfzbU1--dHL-Zuj06K2qXW-rFtKGw/exec",
 };
 
@@ -882,7 +887,7 @@ function openAssignModal(equipmentId, smena, row, curEmpId, curEmpName, curWorkS
     </div>
     <div class="field">
       <label>Сотрудник</label>
-      <input type="text" id="assignEmpInput" list="assignEmpList" placeholder="Начните вводить имя..." value="${prefill.replace(/"/g,'&quot;')}">
+      <input type="text" id="assignEmpInput" list="assignEmpList" placeholder="Начните вводить имя..." value="${prefill.replace(/"/g,'&quot;')}" data-original="${prefill.replace(/"/g,'&quot;')}">
       <datalist id="assignEmpList"></datalist>
     </div>
     <div class="field">
@@ -907,19 +912,35 @@ function openAssignModal(equipmentId, smena, row, curEmpId, curEmpName, curWorkS
 
 // submitAssign: поле "Сотрудник" можно намеренно оставить пустым — например,
 // чтобы проставить "Вид работы"/заметку на уже вакантном слоте, не назначая
-// никого. Блокируем сохранение только если человек что-то напечатал, но не
-// выбрал вариант из подсказок (это опечатка, а не осознанная вакансия). Баг
-// 24.08.2026: при создании НОВОЙ строки для слота "Управление участком"
+// никого. Блокируем сохранение только если человек РЕАЛЬНО поменял поле
+// (текст отличается от того, с чем модалка открылась) и результат не
+// резолвится в сотрудника из подсказок. Баг 26.08.2026: старая проверка
+// сравнивала введённый текст с базой по empId — а если у строки в базе
+// empName есть, а empId пустой (старые записи без строгого учёта ID),
+// поле открывалось как "Имя []" и тут же не проходило свою же проверку,
+// хотя человек его вообще не трогал. Теперь сверяем с исходным значением
+// поля (data-original), а не пытаемся резолвить его каждый раз заново.
+// Баг 24.08.2026: при создании НОВОЙ строки для слота "Управление участком"
 // (equipmentId пустой — Бригадир/Горный мастер/...) старый код искал
 // "любую строку с таким же equipmentId" — а у ВСЕХ таких позиций equipmentId
 // одинаково пустой, так что .find() подставлял position от первой попавшейся
 // позиции в массиве, а не от той, что реально редактировали. Теперь position
 // передаётся явно из карточки слота, а не угадывается по сэмплу.
 async function submitAssign(row, equipmentId, smena, position) {
-  const empText = document.getElementById("assignEmpInput").value.trim();
-  const empId = empText ? empIdFromInput(empText) : "";
-  const emp = empId ? empById(empId) : null;
-  if (empText && !emp) { alert("Выберите сотрудника из списка подсказок (начните печатать имя)"); return; }
+  const inputEl = document.getElementById("assignEmpInput");
+  const empText = inputEl.value.trim();
+  const original = (inputEl.dataset.original || "").trim();
+  // Осознанное изменение — только непустой текст, реально отличающийся от
+  // того, с чем модалка открылась. Если поле не трогали (даже если исходное
+  // значение само по себе "битое" — сотрудник без ID), сотрудника не
+  // резолвим и не проверяем вообще.
+  const touchedName = !!empText && empText !== original;
+  let emp = null;
+  if (touchedName) {
+    const empId = empIdFromInput(empText);
+    emp = empId ? empById(empId) : null;
+    if (!emp) { alert("Выберите сотрудника из списка подсказок (начните печатать имя)"); return; }
+  }
   const workStatus = document.getElementById("assignWorkStatus").value;
   const reassignNote = document.getElementById("assignReassignNote").value.trim();
 
@@ -927,10 +948,10 @@ async function submitAssign(row, equipmentId, smena, position) {
     let res;
     if (row) {
       const payload = { action: "updateShiftAssignment", row, workStatus, reassignNote };
-      // Сотрудника трогаем только если реально выбрали из подсказок — пустое
-      // поле не должно тихо снимать существующее назначение, для явного
-      // снятия есть отдельная кнопка "Снять".
-      if (emp) { payload.empId = emp.id; payload.empName = emp.name; payload.status = ""; }
+      // Сотрудника трогаем только если поле реально поменяли на валидный
+      // выбор из подсказок — иначе не трогаем совсем (ни очисткой, ни
+      // переписыванием тем же значением). Для явного снятия — кнопка "Снять".
+      if (touchedName) { payload.empId = emp.id; payload.empName = emp.name; payload.status = ""; }
       res = await fetch(CFG.SHEET_URL, { method:"POST", body: JSON.stringify(payload) });
     } else {
       res = await fetch(CFG.SHEET_URL, { method:"POST", body: JSON.stringify({
@@ -969,12 +990,29 @@ async function submitUnassign(row) {
 
 // ══ НАРЯД — замена старого Excel-файла для тех, кто пока получает его по
 // старинке (печать/WhatsApp). Строится из уже загруженных DATA.shiftAssignments
-// на клиенте, без новых запросов к серверу — та же группировка, что и на
-// карточках «Вахты» (getShiftGroups), но построчно: одна строка на человека
-// на смену. Это снимок ТЕКУЩЕГО состояния на момент нажатия кнопки, не архив
-// по датам (см. открытый вопрос №3 в оперативной базе — посуточная история
-// отдельная нерешённая задача). Добавлено 22.08.2026.
-function buildNaryadRows() {
+// на клиенте — та же группировка, что и на карточках «Вахты» (getShiftGroups),
+// но построчно: одна строка на человека на смену. Это снимок ТЕКУЩЕГО
+// состояния на момент нажатия кнопки, не архив по датам (см. открытый вопрос
+// №3 в оперативной базе — посуточная история отдельная нерешённая задача).
+// Добавлено 22.08.2026. 25.08.2026: добавлены колонки "Заправка" и
+// "Чек-лист" — сопоставление топлива/осмотров с конкретным слотом
+// техника+смена делается по времени записи (граница 07:00–19:00, та же,
+// что fuelShiftOf в instructor.html, чтобы обе панели считали одинаково).
+function naryadDayBounds() {
+  const start = new Date(); start.setHours(0,0,0,0);
+  const end = new Date(start); end.setDate(end.getDate()+1);
+  return [start, end];
+}
+function naryadSmenaOfTime(d) {
+  const h = d.getHours();
+  return (h >= 7 && h < 19) ? 1 : 2;
+}
+function naryadFmtTime(d) {
+  if (!d) return "";
+  return String(d.getHours()).padStart(2,"0") + ":" + String(d.getMinutes()).padStart(2,"0");
+}
+
+function buildNaryadRows(fuelByKey, checklistByKey) {
   const { usedTypes, rows } = getShiftGroups();
   const out = [];
   usedTypes.forEach(type => {
@@ -989,6 +1027,8 @@ function buildNaryadRows() {
         const empName = a
           ? (a.empName || (a.status==="вакансия" ? "вакансия" : a.status==="оптимизация" ? "не требуется" : "—"))
           : "—";
+        const key = `${g.equipmentId}|${sm}`;
+        const fuelInfo = (g.equipmentId && fuelByKey) ? fuelByKey[key] : null;
         out.push({
           equipmentId: g.equipmentId || g.position,
           model: eq ? eq.model : "",
@@ -996,6 +1036,10 @@ function buildNaryadRows() {
           empName,
           workStatus: a ? (a.workStatus||"") : "",
           reassignNote: a ? (a.reassignNote||"") : "",
+          hasEquipment: !!g.equipmentId,
+          fuelLiters: fuelInfo ? fuelInfo.liters : 0,
+          fuelTime: fuelInfo ? fuelInfo.lastTime : null,
+          checklistFilled: !!(g.equipmentId && checklistByKey && checklistByKey[key]),
         });
       });
     });
@@ -1007,38 +1051,162 @@ function naryadDateLabel() {
   return new Date().toLocaleDateString("ru-RU", { day:"2-digit", month:"2-digit", year:"numeric" });
 }
 
-function openNaryadModal() {
-  const rowsData = buildNaryadRows();
-  const vahtaLabel = (VAHTA_OPTIONS.find(o=>o.key===CURRENT_VAHTA)||{}).label || CURRENT_VAHTA;
-  const header = `Наряд — ${CURRENT_SITE} · ${vahtaLabel} · ${naryadDateLabel()}`;
+let NARYAD_ALL_ROWS = [];
+let NARYAD_FILTER = "all"; // "all" | "День" | "Ночь"
+let NARYAD_FUEL_FAILED = false;
+let NARYAD_CHECKLIST_FAILED = false;
 
-  const tableRows = rowsData.map(r => `
+async function openNaryadModal() {
+  // Топливо уже есть в DATA.fuel (грузится при входе). Чек-листы за сегодня —
+  // отдельный запрос только сейчас, по требованию: эти сырые записи не нужны
+  // на каждой загрузке приложения, только когда реально формируем наряд.
+  document.getElementById("modalBox").innerHTML = `<div style="padding:24px;text-align:center;color:var(--gray)">Формирую наряд…</div>`;
+  document.getElementById("modalOverlay").style.display = "flex";
+
+  let checklistToday = [];
+  let checklistFailed = false;
+  try {
+    const val = await fetchWithRetry(`${CFG.SHEET_URL}?action=getChecklistRecords&days=1`, 40000, 3);
+    if (Array.isArray(val)) checklistToday = val; else checklistFailed = true;
+  } catch (e) {
+    checklistFailed = true;
+    console.error("не удалось загрузить чек-листы для наряда:", e);
+  }
+
+  const [dayStart, dayEnd] = naryadDayBounds();
+  const eqIds = new Set((DATA.equipment||[]).map(e => String(e.equipmentId)));
+
+  const fuelByKey = {};
+  (DATA.fuel||[]).forEach(f => {
+    const d = new Date(f.date);
+    if (isNaN(d.getTime()) || d < dayStart || d >= dayEnd) return;
+    const key = `${f.equipmentId}|${naryadSmenaOfTime(d)}`;
+    if (!fuelByKey[key]) fuelByKey[key] = { liters: 0, lastTime: null };
+    fuelByKey[key].liters += Number(f.amountLiters) || 0;
+    if (!fuelByKey[key].lastTime || d > fuelByKey[key].lastTime) fuelByKey[key].lastTime = d;
+  });
+
+  const checklistByKey = {};
+  checklistToday.forEach(r => {
+    if (!eqIds.has(String(r.equipmentId))) return; // чужой участок — не наш
+    const d = new Date(r.date);
+    if (isNaN(d.getTime()) || d < dayStart || d >= dayEnd) return;
+    checklistByKey[`${r.equipmentId}|${naryadSmenaOfTime(d)}`] = true;
+  });
+
+  const rowsData = buildNaryadRows(fuelByKey, checklistByKey);
+
+  NARYAD_ALL_ROWS = rowsData;
+  NARYAD_FUEL_FAILED = LAST_FAILED_KEYS.includes("fuel");
+  NARYAD_CHECKLIST_FAILED = checklistFailed;
+  NARYAD_FILTER = "all";
+
+  document.getElementById("modalBox").innerHTML = `
+    <div style="display:flex;gap:6px;margin-bottom:10px">
+      <button class="btn-gold" id="naryadFilterAll" onclick="setNaryadFilter('all')">Обе смены</button>
+      <button class="btn-ghost" id="naryadFilterDay" onclick="setNaryadFilter('День')">День</button>
+      <button class="btn-ghost" id="naryadFilterNight" onclick="setNaryadFilter('Ночь')">Ночь</button>
+    </div>
+    <div id="naryadPrintArea"></div>
+    <div style="display:flex;gap:8px;margin-top:16px">
+      <button class="btn-gold" style="flex:1" onclick="window.print()">🖨 Печать</button>
+      <button class="btn-gold" style="flex:1" onclick="downloadNaryadExcel()">📥 Excel</button>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <button class="btn-ghost" style="flex:1" onclick="copyNaryadText()">📋 Скопировать текстом</button>
+      <button class="btn-ghost" onclick="closeModal()">Закрыть</button>
+    </div>
+  `;
+  renderNaryadTable();
+}
+
+// Фильтр по смене — печать/копирование "отдельно по каждой смене" (день
+// отдельным листом от ночи), без повторного похода на сервер: данные уже
+// собраны в NARYAD_ALL_ROWS, тут просто пересобирается разметка таблицы.
+// Добавлено 26.08.2026.
+function setNaryadFilter(f) {
+  NARYAD_FILTER = f;
+  [["all","naryadFilterAll"],["День","naryadFilterDay"],["Ночь","naryadFilterNight"]].forEach(([k, id]) => {
+    const el = document.getElementById(id);
+    if (el) el.className = (k === f) ? "btn-gold" : "btn-ghost";
+  });
+  renderNaryadTable();
+}
+
+function renderNaryadTable() {
+  const rowsData = NARYAD_FILTER === "all" ? NARYAD_ALL_ROWS : NARYAD_ALL_ROWS.filter(r => r.smena === NARYAD_FILTER);
+  const vahtaLabel = (VAHTA_OPTIONS.find(o=>o.key===CURRENT_VAHTA)||{}).label || CURRENT_VAHTA;
+  const shiftSuffix = NARYAD_FILTER === "all" ? "" : ` · ${NARYAD_FILTER}`;
+  const header = `Наряд — ${CURRENT_SITE} · ${vahtaLabel}${shiftSuffix} · ${naryadDateLabel()}`;
+
+  const tableRows = rowsData.map(r => {
+    const fuelCell = !r.hasEquipment ? "—"
+      : (r.fuelLiters > 0
+          ? `${r.fuelLiters} л <span style="color:var(--gray);font-size:11px">${naryadFmtTime(r.fuelTime)}</span>`
+          : (NARYAD_FUEL_FAILED ? `<span style="color:var(--gray)" title="Не удалось загрузить заправки">нет данных</span>` : `<span style="color:#c0392b">нет</span>`));
+    const chkCell = !r.hasEquipment ? "—"
+      : (NARYAD_CHECKLIST_FAILED
+          ? `<span style="color:var(--gray)" title="Не удалось загрузить чек-листы">нет данных</span>`
+          : (r.checklistFilled ? `<span style="color:#1a7d3a;font-weight:700">✓</span>` : `<span style="color:#c0392b;font-weight:700">—</span>`));
+    return `
     <tr>
       <td>${r.equipmentId}${r.model ? ` <span style="color:var(--gray);font-size:11px">${r.model}</span>` : ""}</td>
       <td>${r.smena}</td>
       <td>${r.empName}</td>
       <td style="${r.workStatus ? `color:${workStatusColor(r.workStatus)};font-weight:700` : ""}">${r.workStatus || "—"}</td>
       <td>${r.reassignNote || "—"}</td>
-    </tr>`).join("");
+      <td>${fuelCell}</td>
+      <td>${chkCell}</td>
+    </tr>`;
+  }).join("");
 
-  document.getElementById("modalBox").innerHTML = `
-    <div id="naryadPrintArea">
-      <div style="font-size:16px;font-weight:800;margin-bottom:2px">Наряд — ${CURRENT_SITE}</div>
-      <div style="font-size:13px;color:var(--gray);margin-bottom:14px">${vahtaLabel} · ${naryadDateLabel()}</div>
-      <table>
-        <thead><tr><th>Техника</th><th>Смена</th><th>Ф.И.О.</th><th>Вид работы</th><th>Привлечение</th></tr></thead>
-        <tbody>${tableRows || `<tr><td colspan="5" style="text-align:center;color:var(--gray)">Нет данных по этой вахте</td></tr>`}</tbody>
-      </table>
-    </div>
-    <div style="display:flex;gap:8px;margin-top:16px">
-      <button class="btn-gold" style="flex:1" onclick="window.print()">🖨 Печать</button>
-      <button class="btn-ghost" style="flex:1" onclick="copyNaryadText()">📋 Скопировать текстом</button>
-      <button class="btn-ghost" onclick="closeModal()">Закрыть</button>
-    </div>
+  document.getElementById("naryadPrintArea").innerHTML = `
+    <div style="font-size:16px;font-weight:800;margin-bottom:2px">Наряд — ${CURRENT_SITE}</div>
+    <div style="font-size:13px;color:var(--gray);margin-bottom:14px">${vahtaLabel}${shiftSuffix} · ${naryadDateLabel()}</div>
+    ${NARYAD_CHECKLIST_FAILED ? `<div style="font-size:12px;color:#c0392b;margin-bottom:6px">⚠ Чек-листы не загрузились — колонка «Чек-лист» сейчас недостоверна</div>` : ""}
+    ${NARYAD_FUEL_FAILED ? `<div style="font-size:12px;color:#c0392b;margin-bottom:10px">⚠ Заправки не загрузились — колонка «Заправка» сейчас недостоверна</div>` : ""}
+    <table>
+      <thead><tr><th>Техника</th><th>Смена</th><th>Ф.И.О.</th><th>Вид работы</th><th>Привлечение</th><th>Заправка</th><th>Чек-лист</th></tr></thead>
+      <tbody>${tableRows || `<tr><td colspan="7" style="text-align:center;color:var(--gray)">Нет данных по этой смене</td></tr>`}</tbody>
+    </table>
   `;
   window.__naryadRows = rowsData;
   window.__naryadHeader = header;
-  document.getElementById("modalOverlay").style.display = "flex";
+}
+
+// Выгрузка наряда в .xlsx (SheetJS, подключён в <head>). Берёт те же
+// отфильтрованные по смене строки, что уже показаны на экране
+// (window.__naryadRows из renderNaryadTable) — печать/копирование/Excel
+// всегда синхронны с тем, что выбрано (Обе смены/День/Ночь). Добавлено
+// 26.08.2026.
+function downloadNaryadExcel() {
+  if (typeof XLSX === "undefined") {
+    alert("Библиотека Excel не загрузилась (нужен интернет) — попробуй ещё раз, или используй «Печать»/«Скопировать текстом».");
+    return;
+  }
+  const rowsData = window.__naryadRows || [];
+  const aoa = [["Техника","Модель","Смена","Ф.И.О.","Вид работы","Привлечение","Заправка (л)","Время заправки","Чек-лист"]];
+  rowsData.forEach(r => {
+    aoa.push([
+      r.equipmentId,
+      r.model || "",
+      r.smena,
+      r.empName,
+      r.workStatus || "",
+      r.reassignNote || "",
+      r.hasEquipment ? (r.fuelLiters || 0) : "",
+      r.hasEquipment && r.fuelTime ? naryadFmtTime(r.fuelTime) : "",
+      !r.hasEquipment ? "" : (r.checklistFilled ? "заполнен" : "нет"),
+    ]);
+  });
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws["!cols"] = [{wch:10},{wch:20},{wch:7},{wch:28},{wch:22},{wch:22},{wch:12},{wch:10},{wch:10}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Наряд");
+  const vahtaLabel = ((VAHTA_OPTIONS.find(o=>o.key===CURRENT_VAHTA)||{}).label || CURRENT_VAHTA).replace(/\s/g,"");
+  const shiftSuffix = NARYAD_FILTER === "all" ? "" : `_${NARYAD_FILTER}`;
+  const dateSuffix = new Date().toISOString().slice(0,10);
+  XLSX.writeFile(wb, `Наряд_${CURRENT_SITE}_${vahtaLabel}${shiftSuffix}_${dateSuffix}.xlsx`);
 }
 
 function copyNaryadText() {
@@ -1048,6 +1216,10 @@ function copyNaryadText() {
     let line = `${r.equipmentId} (${r.smena}) — ${r.empName}`;
     if (r.workStatus) line += ` — ${r.workStatus}`;
     if (r.reassignNote) line += ` (${r.reassignNote})`;
+    if (r.hasEquipment) {
+      line += r.fuelLiters > 0 ? ` | Заправка: ${r.fuelLiters}л ${naryadFmtTime(r.fuelTime)}` : ` | Заправка: нет`;
+      line += r.checklistFilled ? ` | Чек-лист: ✓` : ` | Чек-лист: —`;
+    }
     lines.push(line);
   });
   const text = lines.join("\n");
