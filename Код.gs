@@ -2430,24 +2430,41 @@ function getShiftAssignments(site) {
 const SHEET_SHIFT_LOG = "ИсторияСмен";
 const SHIFT_LOG_HEADERS = ["timestamp","equipmentId","position","smena","vahta","site","empId","empName","status","dismissDate","skill","workStatus","reassignNote","action"];
 
+// Баг 26.08.2026: при быстрых последовательных вызовах первый запрос
+// создавал лист (insertSheet), но заголовок ("appendRow" сразу следом)
+// иногда не успевал зафиксироваться до возврата функции — а все
+// последующие вызовы видели через getSheetByName, что лист уже существует,
+// и пропускали инициализацию заголовка целиком (она была привязана только
+// к ветке "лист не найден"). Итог: данные писались, но без шапки, и место
+// для заголовка навсегда пропадало. Исправлено: 1) заголовок пишется по
+// признаку "лист пуст" (getLastRow()===0), а не "лист только что создан";
+// 2) LockService сериализует конкурентные вызовы — без него getLastRow()+1
+// для двух одновременных запросов может вернуть одно и то же число, и один
+// перезапишет другого.
 function logShiftEvents(entries) {
   if (!entries || !entries.length) return;
-  const ss = SpreadsheetApp.openById(SHEET_ID);
-  let sheet = ss.getSheetByName(SHEET_SHIFT_LOG);
-  if (!sheet) {
-    sheet = ss.insertSheet(SHEET_SHIFT_LOG);
-    sheet.appendRow(SHIFT_LOG_HEADERS);
-    sheet.getRange(1, 1, 1, SHIFT_LOG_HEADERS.length)
-      .setBackground("#0D1B3E").setFontColor("#F4A52A").setFontWeight("bold");
-    sheet.setFrozenRows(1);
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    let sheet = ss.getSheetByName(SHEET_SHIFT_LOG);
+    if (!sheet) sheet = ss.insertSheet(SHEET_SHIFT_LOG);
+    if (sheet.getLastRow() === 0) {
+      sheet.appendRow(SHIFT_LOG_HEADERS);
+      sheet.getRange(1, 1, 1, SHIFT_LOG_HEADERS.length)
+        .setBackground("#0D1B3E").setFontColor("#F4A52A").setFontWeight("bold");
+      sheet.setFrozenRows(1);
+    }
+    const now = new Date();
+    const rows = entries.map(e => SHIFT_LOG_HEADERS.map(h => {
+      if (h === "timestamp") return e.timestamp || now;
+      return (e[h] !== undefined && e[h] !== null) ? e[h] : "";
+    }));
+    ensureCapacity(sheet, rows.length);
+    sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, SHIFT_LOG_HEADERS.length).setValues(rows);
+  } finally {
+    lock.releaseLock();
   }
-  const now = new Date();
-  const rows = entries.map(e => SHIFT_LOG_HEADERS.map(h => {
-    if (h === "timestamp") return e.timestamp || now;
-    return (e[h] !== undefined && e[h] !== null) ? e[h] : "";
-  }));
-  ensureCapacity(sheet, rows.length);
-  sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, SHIFT_LOG_HEADERS.length).setValues(rows);
 }
 
 function saveShiftAssignment(p) {
