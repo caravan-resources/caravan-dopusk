@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Обучение — Caravan Resources</title>
+<!-- SheetJS — для импорта хронометража из .xlsx и выгрузки шаблона. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
 :root {
   --navy:#0B1A35; --navy2:#1B3B6F; --gold:#F4A52A;
@@ -369,6 +371,20 @@ td { padding:8px; border-bottom:1px solid var(--border); }
 
     <!-- ══ ХРОНОМЕТРАЖ ПОГРУЗКИ АВТОТРАНСПОРТА ══ -->
     <div id="screenTiming" class="screen">
+      <div class="panel">
+        <div class="panel-title">
+          <span>📤 Массовый ввод из Excel</span>
+          <button type="button" class="btn-ghost" onclick="downloadTimingTemplate()">⬇ Шаблон .xlsx</button>
+        </div>
+        <div class="hint" style="margin-bottom:12px">
+          Заполни шаблон (по строке на каждый самосвал; ФИО должно точно совпадать с базой сотрудников) —
+          можно на нескольких сотрудников и дат сразу. Загрузи файл — таблица развернётся ниже для
+          проверки, после чего одной кнопкой сохранится как отдельные замеры.
+        </div>
+        <input type="file" id="timingImportFile" accept=".xlsx,.xls" onchange="handleTimingImportFile(event)">
+        <div id="timingImportPreview" style="margin-top:14px"></div>
+      </div>
+
       <div class="panel">
         <div class="panel-title">⏱ Новый замер хронометража</div>
         <div class="hint" style="margin-bottom:12px">
@@ -2036,10 +2052,10 @@ async function loadTimingHistoryFor(empId) {
 }
 
 // Группа замеров за один день. Если самосвалов было несколько (обычный
-// случай — мастер меряет несколько заходов подряд), сверху — усреднённое
-// резюме дня (то же самое, что видит инструктор в отдельной вкладке
-// аналитики), под ним — сворачиваемый список отдельных замеров с
-// возможностью отредактировать любой из них.
+// случай — мастер меряет несколько заходов подряд), показываем все
+// отдельные замеры сразу — это исходные данные, они должны быть видны, а не
+// спрятаны за раскрытием. Резюме дня (средние значения) — производная от
+// них, поэтому идёт ниже, а не вместо них.
 function renderTimingDateGroup(date, records) {
   const first = records[0];
   const header = `
@@ -2050,12 +2066,7 @@ function renderTimingDateGroup(date, records) {
   const cards = records.map(renderTimingRecordCard).join("");
   if (records.length === 1) return header + cards;
 
-  return header + renderTimingDaySummary(records) + `
-    <details style="margin-bottom:12px">
-      <summary style="cursor:pointer;font-size:12px;color:#7C3AED;font-weight:700">Показать все замеры (${records.length})</summary>
-      <div style="margin-top:10px">${cards}</div>
-    </details>
-  `;
+  return header + cards + renderTimingDaySummary(records);
 }
 
 function renderTimingDaySummary(records) {
@@ -2168,6 +2179,156 @@ function cancelTimingEdit() {
 function resetLapCalc() {
   document.getElementById("lapRows").innerHTML = "";
   document.getElementById("lapCalcResult").style.display = "none";
+}
+
+// ── Массовый импорт из Excel ────────────────────────────────────────────
+// Формат — по строке на каждый замер (самосвал). ФИО сверяется с базой
+// сотрудников по точному совпадению (без учёта регистра) — если сотрудник
+// не найден, пишем empId невозможно, и строку помечаем ошибкой вместо того,
+// чтобы гадать. Дата принимается и как настоящая дата Excel, и как текст
+// ДД.ММ.ГГГГ. Каждая валидная строка уходит на бэкенд отдельным
+// saveTimingRecord — тем же действием, что и обычная форма, так что вся
+// дальнейшая логика (джойн с оценкой, резюме дня и т.д.) работает без
+// изменений на бэкенде.
+const TIMING_IMPORT_HEADERS = ["ФИО сотрудника","Дата","Тип техники","Модель экскаватора","Модель самосвала",
+  "Время погрузки, сек","Ковшей","Наполнение, %","Цикл, сек","Паспорт (да/нет)","Инструктор","Примечание"];
+
+function downloadTimingTemplate() {
+  const ws = XLSX.utils.aoa_to_sheet([
+    TIMING_IMPORT_HEADERS,
+    ["Иванов Иван Иванович","27.08.2026","Экскаватор с обратной лопатой","Sandvik DX800","Sany SKT 115S",125,6,92,25,"да","Петров П.П.",""],
+  ]);
+  ws['!cols'] = TIMING_IMPORT_HEADERS.map(h => ({ wch: Math.max(14, h.length) }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Хронометраж");
+  XLSX.writeFile(wb, "хронометраж_шаблон.xlsx");
+}
+
+let TIMING_IMPORT_ROWS = [];
+
+function handleTimingImportFile(evt) {
+  const file = evt.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const wb = XLSX.read(e.target.result, { type: "binary", cellDates: true });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+      TIMING_IMPORT_ROWS = rows.map(parseTimingImportRow);
+      renderTimingImportPreview();
+    } catch (err) {
+      document.getElementById("timingImportPreview").innerHTML = `<div class="empty">Не удалось прочитать файл: ${err.message}</div>`;
+    }
+  };
+  reader.readAsBinaryString(file);
+}
+
+function parseTimingImportRow(row) {
+  const get = (...keys) => { for (const k of keys) { if (row[k] !== undefined && row[k] !== "") return row[k]; } return ""; };
+
+  const name = String(get("ФИО сотрудника","ФИО","Сотрудник")).trim();
+  const emp = (DATA.employees||[]).find(e => String(e.name||"").trim().toLowerCase() === name.toLowerCase());
+
+  const dateRaw = get("Дата");
+  const dateStr = (dateRaw instanceof Date)
+    ? `${String(dateRaw.getDate()).padStart(2,"0")}.${String(dateRaw.getMonth()+1).padStart(2,"0")}.${dateRaw.getFullYear()}`
+    : String(dateRaw).trim();
+
+  const totalTime = Number(get("Время погрузки, сек","Время погрузки"));
+  const bucketCount = Number(get("Ковшей","Количество ковшей"));
+  const bucketFill = Number(get("Наполнение, %","Наполнение ковшей (%)"));
+  const cycleTime = Number(get("Цикл, сек","Средний цикл ковша, сек"));
+  const properRaw = String(get("Паспорт (да/нет)","Паспорт")).trim().toLowerCase();
+  const properLoading = properRaw === "да" ? "да" : (properRaw === "нет" ? "нет" : "");
+
+  const errors = [];
+  if (!name) errors.push("нет ФИО");
+  else if (!emp) errors.push("сотрудник не найден в базе");
+  if (!dateStr || !/^\d{1,2}\.\d{1,2}\.\d{4}$/.test(dateStr)) errors.push("некорректная дата");
+  if (!totalTime) errors.push("нет времени погрузки");
+  if (!bucketCount) errors.push("нет числа ковшей");
+  if (!cycleTime) errors.push("нет цикла");
+  if (!properLoading) errors.push("паспорт: да/нет");
+
+  return {
+    name, emp, dateStr,
+    equipmentType: String(get("Тип техники")).trim(),
+    equipmentModel: String(get("Модель экскаватора")).trim(),
+    truckModel: String(get("Модель самосвала")).trim(),
+    totalTime, bucketCount, bucketFill, cycleTime, properLoading,
+    instructorName: String(get("Инструктор")).trim(),
+    summary: String(get("Примечание")).trim(),
+    errors,
+  };
+}
+
+function renderTimingImportPreview() {
+  const el = document.getElementById("timingImportPreview");
+  if (!TIMING_IMPORT_ROWS.length) { el.innerHTML = `<div class="empty">Файл пуст или не распознан</div>`; return; }
+  const validCount = TIMING_IMPORT_ROWS.filter(r => !r.errors.length).length;
+
+  const th = label => `<th style="text-align:left;padding:6px 8px;font-size:10.5px;color:var(--gray);border-bottom:1px solid var(--border);white-space:nowrap">${label}</th>`;
+  const rowsHtml = TIMING_IMPORT_ROWS.map(r => `
+    <tr style="${r.errors.length ? 'background:var(--redbg)' : ''}">
+      <td style="padding:6px 8px;font-size:12px;border-bottom:1px solid var(--border);white-space:nowrap">${r.name||"—"}</td>
+      <td style="padding:6px 8px;font-size:12px;border-bottom:1px solid var(--border);white-space:nowrap">${r.dateStr||"—"}</td>
+      <td style="padding:6px 8px;font-size:12px;border-bottom:1px solid var(--border);white-space:nowrap">${r.truckModel||"—"}</td>
+      <td style="padding:6px 8px;font-size:12px;border-bottom:1px solid var(--border)">${r.totalTime||"—"}</td>
+      <td style="padding:6px 8px;font-size:12px;border-bottom:1px solid var(--border)">${r.bucketCount||"—"}</td>
+      <td style="padding:6px 8px;font-size:12px;border-bottom:1px solid var(--border)">${r.bucketFill||"—"}</td>
+      <td style="padding:6px 8px;font-size:12px;border-bottom:1px solid var(--border)">${r.cycleTime||"—"}</td>
+      <td style="padding:6px 8px;font-size:12px;border-bottom:1px solid var(--border)">${r.properLoading||"—"}</td>
+      <td style="padding:6px 8px;font-size:11px;border-bottom:1px solid var(--border);color:var(--red)">${r.errors.join(", ")}</td>
+    </tr>
+  `).join("");
+
+  el.innerHTML = `
+    <div style="font-size:12px;margin-bottom:8px">
+      Распознано строк: ${TIMING_IMPORT_ROWS.length}, готовы к сохранению:
+      <b style="color:var(--green)">${validCount}</b>${TIMING_IMPORT_ROWS.length>validCount?`, с ошибками: <b style="color:var(--red)">${TIMING_IMPORT_ROWS.length-validCount}</b>`:""}
+    </div>
+    <div style="overflow-x:auto">
+      <table style="border-collapse:collapse;width:100%;min-width:700px">
+        <thead><tr>${th("ФИО")}${th("Дата")}${th("Самосвал")}${th("Погрузка")}${th("Ковшей")}${th("Наполн.")}${th("Цикл")}${th("Паспорт")}${th("Ошибки")}</tr></thead>
+        <tbody>${rowsHtml}</tbody>
+      </table>
+    </div>
+    <button type="button" class="btn-gold" style="margin-top:12px" onclick="submitTimingImport(event)" ${validCount ? "" : "disabled"}>
+      💾 Сохранить ${validCount} ${timingWordCount(validCount)}
+    </button>
+  `;
+}
+
+async function submitTimingImport(evt) {
+  const valid = TIMING_IMPORT_ROWS.filter(r => !r.errors.length);
+  if (!valid.length) return;
+  const btn = evt.target;
+  btn.disabled = true;
+  btn.textContent = "⏳ Сохраняю...";
+  let ok = 0, fail = 0;
+  for (const r of valid) {
+    const payload = {
+      action: "saveTimingRecord",
+      empId: r.emp.id, empName: r.emp.name, position: r.emp.position || "",
+      date: r.dateStr,
+      equipmentType: r.equipmentType, equipmentModel: r.equipmentModel, truckModel: r.truckModel,
+      totalLoadTimeSec: r.totalTime, bucketCount: r.bucketCount, bucketFillPercent: r.bucketFill,
+      cycleTimeSec: r.cycleTime, properLoading: r.properLoading,
+      site: CURRENT_SITE, instructorName: r.instructorName, summary: r.summary,
+    };
+    try {
+      const res = await fetch(CFG.SHEET_URL, { method: "POST", body: JSON.stringify(payload) });
+      const val = await res.json();
+      if (val.ok) ok++; else fail++;
+    } catch (e) { fail++; }
+  }
+  alert(`Импорт завершён: сохранено ${ok}${fail ? ", ошибок " + fail : ""}.`);
+  document.getElementById("timingImportFile").value = "";
+  TIMING_IMPORT_ROWS = [];
+  document.getElementById("timingImportPreview").innerHTML = "";
+  const empId = empIdFromInput(document.getElementById("timingEmpInput").value);
+  if (empId) loadTimingHistoryFor(empId);
 }
 </script>
 </body>
