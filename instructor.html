@@ -87,6 +87,25 @@ main { padding:20px; max-width:1200px; margin:0 auto; }
 .stat-val { font-size:34px; font-weight:900; color:var(--navy); line-height:1; }
 .stat-lbl { font-size:12px; color:var(--gray); font-weight:600; margin-top:4px; }
 
+/* ── ДАШБОРД: компактные карточки-категории ── */
+.dash-cat-row { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:18px; }
+@media(max-width:900px){ .dash-cat-row { grid-template-columns:repeat(2,1fr); } }
+.dash-cat-card {
+  background:#fff; border:1.5px solid var(--border); border-radius:14px;
+  padding:16px 18px; cursor:pointer; text-align:left; width:100%;
+  font-family:inherit;
+}
+.dash-cat-card:hover { border-color:var(--gold); }
+.dash-cat-card.active { border-color:var(--navy); box-shadow:0 2px 14px rgba(13,27,62,.12); }
+.dash-cat-head { display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:10px; }
+.dash-cat-title { font-size:13px; font-weight:800; color:var(--navy); }
+.dash-cat-dot { width:9px; height:9px; border-radius:99px; flex-shrink:0; }
+.dash-cat-nums { display:flex; gap:16px; }
+.dash-cat-num-val { font-size:22px; font-weight:900; line-height:1; }
+.dash-cat-num-lbl { font-size:10px; color:var(--gray); font-weight:600; margin-top:3px; }
+.dash-group { display:none; }
+.dash-group.active { display:block; }
+
 /* ── ПАНЕЛЬ ── */
 .panel {
   background:#fff; border-radius:12px; border:1px solid var(--border);
@@ -236,98 +255,137 @@ tr:hover td { background:#FAFBFD; }
 
     <!-- ══ ДАШБОРД ══ -->
     <div id="tabDash" class="screen">
-      <!-- ГЛАВНОЕ: предсменный контроль техники -->
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:10px;flex-wrap:wrap">
-        <span style="font-size:15px;font-weight:800;color:var(--navy)">🔧 Предсменный осмотр техники</span>
-        <span style="display:flex;gap:8px;align-items:center">
-          <span style="font-size:11px;color:var(--gray)" id="historyHint">показаны последние 30 дней</span>
-          <button class="btn btn-ghost" style="width:auto;padding:6px 12px;font-size:12px"
-            onclick="loadFullHistory(this)">📜 Вся история</button>
-        </span>
-      </div>
-      <div class="stats-grid" id="statsGridEquipment"></div>
-      <div id="noTemplateBanner" style="display:none;margin-top:12px;padding:10px 12px;background:var(--yellowbg,#FFF8E1);border-radius:8px;font-size:13px;color:var(--yellow)"></div>
 
-      <div class="panel" style="margin-top:16px">
-        <div class="panel-title">
-          ⚠️ Техника с открытыми замечаниями
-          <span id="openDefectsCount" style="font-size:12px;color:var(--red)"></span>
-        </div>
-        <div class="hint" style="margin-bottom:10px">
-          В последнем осмотре были отмечены неисправности — значит проблема, скорее всего, ещё не устранена.
-        </div>
-        <div id="openDefectsList"></div>
-      </div>
+      <!-- Компактная сводка на 4 категории — клик разворачивает подробности одной из них -->
+      <div class="dash-cat-row" id="dashCatRow"></div>
 
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <!-- ═══ ОСМОТРЫ ТЕХНИКИ ═══ -->
+      <div id="dashGroupInspections" class="dash-group">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:10px;flex-wrap:wrap">
+          <span style="font-size:15px;font-weight:800;color:var(--navy)">🔧 Предсменный осмотр техники</span>
+          <span style="display:flex;gap:8px;align-items:center">
+            <span style="font-size:11px;color:var(--gray)" id="historyHint">показаны последние 30 дней</span>
+            <button class="btn btn-ghost" style="width:auto;padding:6px 12px;font-size:12px"
+              onclick="loadFullHistory(this)">📜 Вся история</button>
+          </span>
+        </div>
+        <div class="stats-grid" id="statsGridEquipment"></div>
+        <div id="noTemplateBanner" style="display:none;margin-top:12px;padding:10px 12px;background:var(--yellowbg,#FFF8E1);border-radius:8px;font-size:13px;color:var(--yellow)"></div>
+
+        <div class="panel" style="margin-top:16px">
+          <div class="panel-title">
+            ⚠️ Техника с открытыми замечаниями
+            <span id="openDefectsCount" style="font-size:12px;color:var(--red)"></span>
+          </div>
+          <div class="hint" style="margin-bottom:10px">
+            В последнем осмотре были отмечены неисправности — значит проблема, скорее всего, ещё не устранена.
+          </div>
+          <div id="openDefectsList"></div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+          <div class="panel">
+            <div class="panel-title">🔩 Слабые места парка — по узлам</div>
+            <div id="dashBySection"></div>
+          </div>
+          <div class="panel">
+            <div class="panel-title">🔁 Повторяющиеся неисправности</div>
+            <div id="dashTopDefects"></div>
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+          <div class="panel">
+            <div class="panel-title">👷 Кто осматривает внимательно</div>
+            <div class="hint" style="margin-bottom:10px">Находят неисправности и поясняют замечания</div>
+            <div id="dashTopOperators"></div>
+          </div>
+          <div class="panel">
+            <div class="panel-title">⚠️ Формальный осмотр</div>
+            <div class="hint" style="margin-bottom:10px">5+ проверок и ни одного замечания — требует внимания руководителя</div>
+            <div id="dashFormalOperators"></div>
+          </div>
+        </div>
+
         <div class="panel">
-          <div class="panel-title">🔩 Слабые места парка — по узлам</div>
-          <div id="dashBySection"></div>
+          <div class="panel-title">
+            📅 Динамика осмотров по дням
+          </div>
+          <div id="dashByDay"></div>
         </div>
+
         <div class="panel">
-          <div class="panel-title">🔁 Повторяющиеся неисправности</div>
-          <div id="dashTopDefects"></div>
+          <div class="panel-title">
+            ⚠ Свежие неисправности
+            <span id="defectsCount" style="font-size:12px;color:var(--red)"></span>
+          </div>
+          <div id="defectsList"></div>
         </div>
       </div>
 
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <!-- ═══ ОБУЧЕНИЕ И ДОПУСК ═══ -->
+      <div id="dashGroupTraining" class="dash-group">
+        <div style="font-size:15px;font-weight:800;color:var(--navy);margin-bottom:12px">👥 Кадры, допуск и обучение</div>
+        <div class="stats-grid" id="statsGridPersonnel"></div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px" id="trainingBySiteWrap">
+          <div class="panel">
+            <div class="panel-title">🎓 Обучение — Алмалы</div>
+            <div id="trainingBySiteAlmaty"></div>
+          </div>
+          <div class="panel">
+            <div class="panel-title">🎓 Обучение — Ашыктас</div>
+            <div id="trainingBySiteAshyktas"></div>
+          </div>
+        </div>
+
+        <div class="panel" style="margin-top:16px">
+          <div class="panel-title">
+            🔔 Требует внимания
+            <button class="btn btn-ghost" onclick="copyAttentionList()">📋 Скопировать</button>
+          </div>
+          <div id="attentionList"></div>
+        </div>
+
         <div class="panel">
-          <div class="panel-title">👷 Кто осматривает внимательно</div>
-          <div class="hint" style="margin-bottom:10px">Находят неисправности и поясняют замечания</div>
-          <div id="dashTopOperators"></div>
+          <div class="panel-title">
+            📋 Последние сдачи тестов
+            <span style="font-size:12px;color:var(--gray)" id="lastTestsDate"></span>
+          </div>
+          <div id="lastTestsList"></div>
         </div>
+      </div>
+
+      <!-- ═══ ЗАПРАВКА ═══ -->
+      <div id="dashGroupFuel" class="dash-group">
+        <div style="font-size:15px;font-weight:800;color:var(--navy);margin-bottom:12px">⛽ Заправка — последние 7 дней</div>
+        <div class="stats-grid" id="statsGridDashFuel"></div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+          <div class="panel">
+            <div class="panel-title">📍 Алмалы</div>
+            <div id="dashFuelAlmaty"></div>
+            <button class="btn btn-ghost" style="width:auto;margin-top:10px;padding:8px 14px;font-size:12px" onclick="showTab('fuelAlmaty')">Полная аналитика по Алмалы →</button>
+          </div>
+          <div class="panel">
+            <div class="panel-title">📍 Ашыктас</div>
+            <div id="dashFuelAshyktas"></div>
+            <button class="btn btn-ghost" style="width:auto;margin-top:10px;padding:8px 14px;font-size:12px" onclick="showTab('fuelAshyktas')">Полная аналитика по Ашыктас →</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ ОЦЕНКИ ОПЕРАТОРОВ ═══ -->
+      <div id="dashGroupEvaluations" class="dash-group">
+        <div style="font-size:15px;font-weight:800;color:var(--navy);margin-bottom:12px">🎯 Оценки работы операторов</div>
+        <div class="stats-grid" id="statsGridDashEval"></div>
         <div class="panel">
-          <div class="panel-title">⚠️ Формальный осмотр</div>
-          <div class="hint" style="margin-bottom:10px">5+ проверок и ни одного замечания — требует внимания руководителя</div>
-          <div id="dashFormalOperators"></div>
+          <div class="panel-title">🕐 Недавние оценки</div>
+          <div id="dashEvalList"></div>
+          <button class="btn btn-ghost" style="width:auto;margin-top:10px;padding:8px 14px;font-size:12px" onclick="showTab('operatorRating')">Все оценки и рейтинг →</button>
         </div>
       </div>
 
-      <div class="panel">
-        <div class="panel-title">
-          📅 Динамика осмотров по дням
-        </div>
-        <div id="dashByDay"></div>
-      </div>
-
-      <div class="panel">
-        <div class="panel-title">
-          ⚠ Свежие неисправности
-          <span id="defectsCount" style="font-size:12px;color:var(--red)"></span>
-        </div>
-        <div id="defectsList"></div>
-      </div>
-
-      <!-- НИЖЕ: кадры, допуск и обучение -->
-      <div style="font-size:15px;font-weight:800;color:var(--navy);margin:28px 0 12px;padding-top:20px;border-top:2px solid var(--border)">👥 Кадры, допуск и обучение</div>
-      <div class="stats-grid" id="statsGridPersonnel"></div>
-
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px" id="trainingBySiteWrap">
-        <div class="panel">
-          <div class="panel-title">🎓 Обучение — Алмалы</div>
-          <div id="trainingBySiteAlmaty"></div>
-        </div>
-        <div class="panel">
-          <div class="panel-title">🎓 Обучение — Ашыктас</div>
-          <div id="trainingBySiteAshyktas"></div>
-        </div>
-      </div>
-
-      <div class="panel" style="margin-top:16px">
-        <div class="panel-title">
-          🔔 Требует внимания
-          <button class="btn btn-ghost" onclick="copyAttentionList()">📋 Скопировать</button>
-        </div>
-        <div id="attentionList"></div>
-      </div>
-
-      <div class="panel">
-        <div class="panel-title">
-          📋 Последние сдачи тестов
-          <span style="font-size:12px;color:var(--gray)" id="lastTestsDate"></span>
-        </div>
-        <div id="lastTestsList"></div>
-      </div>
     </div>
 
     <!-- ══ РЕЗУЛЬТАТЫ ТЕСТОВ ══ -->
@@ -2092,6 +2150,239 @@ function renderDashboard() {
         `;
       }).join("")
     : `<div class="empty"><div class="empty-icon">✓</div>Неисправностей за последние 7 дней не найдено</div>`;
+
+  renderDashCategories();
+}
+
+// ══════════════════════════════════════════════════════
+// КОМПАКТНЫЙ ДАШБОРД — 4 карточки-категории (осмотры/обучение/заправка/
+// оценки) сверху, каждая кликабельна и разворачивает свою группу панелей
+// ниже (dashGroupInspections/Training/Fuel/Evaluations). По умолчанию всё
+// свёрнуто — видны только карточки; открыта максимум одна категория за раз,
+// иначе дашборд снова превращается в простыню, только с лишним кликом.
+//
+// Каждая функция статистики (inspectionStatsForDashboard/…) написана как
+// самостоятельная, не зависящая от локальных переменных renderDashboard() —
+// так renderDashCategories() можно безопасно дёргать откуда угодно (в т.ч.
+// из loadEvaluationRatingSection(), когда придут данные по оценкам).
+// ══════════════════════════════════════════════════════
+
+let DASH_ACTIVE_CAT = null; // null = всё свёрнуто
+
+function toggleDashCategory(name) {
+  DASH_ACTIVE_CAT = (DASH_ACTIVE_CAT === name) ? null : name;
+  ["Inspections","Training","Fuel","Evaluations"].forEach(g => {
+    const el = document.getElementById("dashGroup"+g);
+    if (el) el.classList.toggle("active", DASH_ACTIVE_CAT === g);
+  });
+  document.querySelectorAll(".dash-cat-card").forEach(c => {
+    c.classList.toggle("active", c.dataset.cat === DASH_ACTIVE_CAT);
+  });
+}
+
+function inspectionStatsForDashboard() {
+  const st = chkStats();
+  const equipment = DATA.equipment || [];
+  return {
+    openDefectsCount: st ? st.openDefects.length : 0,
+    defects7:         st ? st.defects7 : 0,
+    inspectedCount:   st ? st.inspectedCount : 0,
+    equipmentTotal:   equipment.length,
+  };
+}
+
+function trainingStatsForDashboard() {
+  const emps = DATA.employees || [];
+  const employeesLoaded = emps.length > 0;
+  const ps = DATA.personnelStats;
+  const instr = instruktazhAsAccessLike();
+  let expiredCount = 0, warningCount = 0;
+  if (employeesLoaded) {
+    expiredCount = [...emps, ...instr].filter(e => statusOf(e) === "expired").length;
+    warningCount = [...emps, ...instr].filter(e => statusOf(e) === "warning").length;
+  } else if (ps && ps.ok) {
+    expiredCount = ps.attention.filter(a => a.status === "expired").length;
+    warningCount = ps.attention.filter(a => a.status === "warning").length;
+  }
+  const failedTestsCount = (DATA.results || []).filter(r => !isPassed(r)).length;
+  return { expiredCount, warningCount, failedTestsCount };
+}
+
+// Заправка за последние 7 дней, отдельно по участкам — считаем прямо из
+// DATA.fuel (он уже грузится в общем loadAll(), доп. запрос не нужен).
+function fuelStatsForDashboard() {
+  const since = new Date(); since.setDate(since.getDate() - 7); since.setHours(0,0,0,0);
+  const out = {};
+  ["Алмалы", "Ашыктас"].forEach(site => {
+    const eqIds = new Set((DATA.equipment||[]).filter(e => (e.site||"").trim() === site).map(e => String(e.equipmentId)));
+    const recs = (DATA.fuel || []).filter(f => eqIds.has(String(f.equipmentId)))
+      .filter(f => { const d = parseRecordDate(f.date); return d && d >= since; });
+    out[site] = {
+      records: recs.length,
+      liters: recs.reduce((s,f) => s + (Number(f.amountLiters)||0), 0),
+      equipmentTouched: new Set(recs.map(f=>f.equipmentId)).size,
+      recs,
+    };
+  });
+  return out;
+}
+
+// Оценки работы — переиспользуем LAST_EVALUATIONS, который и так грузится
+// каждый раз в renderOperatorRating() (часть общего renderAll()). Отдельного
+// запроса под дашборд не заводим — пока список пуст, карточка честно
+// показывает «—» и обновится сама, как только данные придут.
+function evalStatsForDashboard() {
+  const list = (typeof LAST_EVALUATIONS !== "undefined" ? LAST_EVALUATIONS : []) || [];
+  const scored = list.map(e => Number(e.overallAvg)).filter(n => !isNaN(n));
+  const avg = scored.length ? scored.reduce((a,b)=>a+b,0) / scored.length : null;
+  const low = scored.filter(n => n <= 2).length;
+  return { count: list.length, avg, low };
+}
+
+function renderDashCatRow() {
+  const el = document.getElementById("dashCatRow");
+  if (!el) return;
+
+  const insp = inspectionStatsForDashboard();
+  const tr = trainingStatsForDashboard();
+  const fuel = fuelStatsForDashboard();
+  const fuelRecords = fuel["Алмалы"].records + fuel["Ашыктас"].records;
+  const fuelLiters = fuel["Алмалы"].liters + fuel["Ашыктас"].liters;
+  const ev = evalStatsForDashboard();
+
+  const cats = [
+    { key:"Inspections", icon:"🔧", title:"Осмотры техники",
+      dot: insp.openDefectsCount ? "var(--red)" : (insp.defects7 ? "var(--yellow)" : "var(--green)"),
+      nums: [
+        { val:insp.openDefectsCount, lbl:"с замечаниями", color: insp.openDefectsCount ? "var(--red)" : "var(--navy)" },
+        { val:`${insp.inspectedCount}/${insp.equipmentTotal}`, lbl:"осмотрено", color:"var(--navy)" },
+      ] },
+    { key:"Training", icon:"🎓", title:"Обучение и допуск",
+      dot: tr.expiredCount ? "var(--red)" : ((tr.warningCount || tr.failedTestsCount) ? "var(--yellow)" : "var(--green)"),
+      nums: [
+        { val:tr.expiredCount, lbl:"просрочено", color: tr.expiredCount ? "var(--red)" : "var(--navy)" },
+        { val:tr.warningCount, lbl:"истекает 30 дн.", color: tr.warningCount ? "var(--yellow)" : "var(--navy)" },
+      ] },
+    { key:"Fuel", icon:"⛽", title:"Заправка (7 дн.)",
+      dot: fuelRecords ? "var(--navy2)" : "var(--gray)",
+      nums: [
+        { val:fuelLiters.toLocaleString("ru-RU"), lbl:"литров", color:"var(--navy)" },
+        { val:fuelRecords, lbl:"заправок", color:"var(--navy)" },
+      ] },
+    { key:"Evaluations", icon:"🎯", title:"Оценки операторов",
+      dot: ev.count===0 ? "var(--gray)" : (ev.low ? "var(--red)" : "var(--green)"),
+      nums: [
+        { val: ev.avg!==null ? ev.avg.toFixed(1) : "—", lbl:"средний балл", color: ev.avg!==null ? evalScoreColor(ev.avg) : "var(--gray)" },
+        { val: ev.count, lbl:"оценок", color:"var(--navy)" },
+      ] },
+  ];
+
+  el.innerHTML = cats.map(c => `
+    <button type="button" class="dash-cat-card${DASH_ACTIVE_CAT===c.key?' active':''}" data-cat="${c.key}"
+      onclick="toggleDashCategory('${c.key}')">
+      <div class="dash-cat-head">
+        <span class="dash-cat-title">${c.icon} ${c.title}</span>
+        <span class="dash-cat-dot" style="background:${c.dot}"></span>
+      </div>
+      <div class="dash-cat-nums">
+        ${c.nums.map(n => `
+          <div>
+            <div class="dash-cat-num-val" style="color:${n.color}">${n.val}</div>
+            <div class="dash-cat-num-lbl">${n.lbl}</div>
+          </div>`).join("")}
+      </div>
+    </button>
+  `).join("");
+}
+
+function renderDashFuelDetail() {
+  const gridEl = document.getElementById("statsGridDashFuel");
+  if (!gridEl) return;
+  const fuel = fuelStatsForDashboard();
+  const totalLiters = fuel["Алмалы"].liters + fuel["Ашыктас"].liters;
+  const totalRecords = fuel["Алмалы"].records + fuel["Ашыктас"].records;
+  const totalEquipment = fuel["Алмалы"].equipmentTouched + fuel["Ашыктас"].equipmentTouched;
+
+  gridEl.innerHTML = [
+    { lbl:"Литров за 7 дней", val: totalLiters.toLocaleString("ru-RU"), acc:"var(--navy2)" },
+    { lbl:"Заправок за 7 дней", val: totalRecords, acc:"var(--gold)" },
+    { lbl:"Ед. техники заправлялось", val: totalEquipment, acc:"var(--gray)" },
+  ].map(s => `
+    <div class="stat-card" style="border-left-color:${s.acc}">
+      <div class="stat-val" style="color:${s.acc}">${s.val}</div>
+      <div class="stat-lbl">${s.lbl}</div>
+    </div>`).join("");
+
+  ["Алмалы","Ашыктас"].forEach(site => {
+    const suffix = site === "Ашыктас" ? "Ashyktas" : "Almaty";
+    const data = fuel[site];
+    const el = document.getElementById("dashFuel"+suffix);
+    if (!el) return;
+    if (!data.recs.length) {
+      el.innerHTML = `<div class="empty" style="padding:16px"><div class="empty-icon">⛽</div>Заправок за 7 дней нет</div>`;
+      return;
+    }
+    const eqStats = {};
+    data.recs.forEach(f => {
+      const id = f.equipmentId;
+      if (!eqStats[id]) eqStats[id] = { liters:0, count:0 };
+      eqStats[id].liters += Number(f.amountLiters)||0;
+      eqStats[id].count += 1;
+    });
+    const rows = Object.keys(eqStats).map(id => ({ id, ...eqStats[id] })).sort((a,b) => b.liters-a.liters).slice(0,6);
+    el.innerHTML = `<div style="font-size:12px;color:var(--gray);margin-bottom:8px">
+        ${data.records} заправок · ${data.liters.toLocaleString("ru-RU")} л · ${data.equipmentTouched} ед. техники
+      </div>` + rows.map(row => {
+        const eq = (DATA.equipment||[]).find(e => String(e.equipmentId)===String(row.id));
+        const label = eq ? `${eq.equipmentId} — ${eq.model}` : row.id;
+        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:12.5px">
+          <div>
+            <div style="font-weight:700;color:var(--navy)">${label}</div>
+            <div style="font-size:11px;color:var(--gray)">${row.count} заправк${row.count===1?'а':row.count<5?'и':'и'}</div>
+          </div>
+          <span style="font-weight:800;color:var(--navy2)">${row.liters.toLocaleString("ru-RU")} л</span>
+        </div>`;
+      }).join("");
+  });
+}
+
+function renderDashEvalDetail() {
+  const gridEl = document.getElementById("statsGridDashEval");
+  if (!gridEl) return;
+  const ev = evalStatsForDashboard();
+
+  gridEl.innerHTML = [
+    { lbl:"Оценок за период", val: ev.count, acc:"var(--navy2)" },
+    { lbl:"Средний балл", val: ev.avg!==null ? ev.avg.toFixed(1) : "—", acc: ev.avg!==null ? evalScoreColor(ev.avg) : "var(--gray)" },
+    { lbl:"Низких оценок (≤2)", val: ev.low, acc: ev.low ? "var(--red)" : "var(--gray)" },
+  ].map(s => `
+    <div class="stat-card" style="border-left-color:${s.acc}">
+      <div class="stat-val" style="color:${s.acc}">${s.val}</div>
+      <div class="stat-lbl">${s.lbl}</div>
+    </div>`).join("");
+
+  const el = document.getElementById("dashEvalList");
+  if (!el) return;
+  const list = ((typeof LAST_EVALUATIONS !== "undefined" ? LAST_EVALUATIONS : []) || [])
+    .slice().sort((a,b) => parseRuDate(b.date) - parseRuDate(a.date)).slice(0,8);
+  el.innerHTML = list.length ? list.map(e => `
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--border)">
+      <div>
+        <div style="font-size:13px;font-weight:700;color:var(--navy)">${e.empName || "—"}</div>
+        <div style="font-size:11px;color:var(--gray)">${[e.equipmentModel, e.site].filter(Boolean).join(" · ")}</div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-size:15px;font-weight:800;color:${evalScoreColor(e.overallAvg)}">${e.overallAvg}</div>
+        <div style="font-size:11px;color:var(--gray)">${e.date || ""}</div>
+      </div>
+    </div>`).join("")
+    : `<div class="empty" style="padding:16px"><div class="empty-icon">🎯</div>Оценок работы за период нет</div>`;
+}
+
+function renderDashCategories() {
+  renderDashCatRow();
+  renderDashFuelDetail();
+  renderDashEvalDetail();
 }
 
 // ══════════════════════════════════════════════════════
@@ -2214,6 +2505,13 @@ async function loadEvaluationRatingSection() {
   const pType = document.getElementById("panelEvalType");
   if (pTime && pTime.style.display !== "none") renderEvalByTime();
   if (pType && pType.style.display !== "none") { populateEvalTypeFilter(); renderEvalByType(); }
+
+  // Карточка «Оценки» на дашборде тоже держим на уровне LAST_EVALUATIONS —
+  // без этого числа там обновлялись бы только на следующей полной перерисовке.
+  if (typeof renderDashCatRow === "function" && document.getElementById("dashCatRow")) {
+    renderDashCatRow();
+    renderDashEvalDetail();
+  }
 }
 
 // «По времени»: хронологический список, сгруппированный по дате (сначала
