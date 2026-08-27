@@ -2091,6 +2091,9 @@ function getChecklistStats(p) {
         osmotrs: a.operator[n].osmotrs, defects: a.operator[n].defects,
         comments: a.operator[n].comments,
         equipmentCount: Object.keys(a.operator[n].eq).length,
+        equipmentList: Object.keys(a.operator[n].eq).map(id => ({
+          equipmentId: id, model: eqModel[id] || "",
+        })),
         daysCount: Object.keys(a.operator[n].days).length,
       })).sort((x, y) => y.defects - x.defects || y.osmotrs - x.osmotrs),
       byDay: Object.keys(a.day).map(d => ({
