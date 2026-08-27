@@ -59,6 +59,7 @@ function doGet(e) {
   else if (action === "getFuelRecords") result = getFuelRecords(e.parameter.site, e.parameter.days);
   else if (action === "getEquipmentDayDetail") result = getEquipmentDayDetail(e.parameter);
   else if (action === "getShiftAssignments") result = getShiftAssignments(e.parameter.site);
+  else if (action === "getNaryadForDate") result = getNaryadForDate(e.parameter.site, e.parameter.date);
   else if (action === "getActiveVahtas") result = getActiveVahtas();
   else if (action === "getEvaluationCriteria") result = getEvaluationCriteria(e.parameter.equipmentType);
   else if (action === "getEvaluationEquipmentTypes") result = getEvaluationEquipmentTypes();
@@ -2572,6 +2573,58 @@ function logShiftEvents(entries) {
   } finally {
     lock.releaseLock();
   }
+}
+
+// Реконструкция наряда на конкретную дату из журнала "ИсторияСмен" (см.
+// комментарий у SHEET_SHIFT_LOG выше). Для каждого слота (техника+должность+
+// смена+вахта) берём ПОСЛЕДНЮЮ запись журнала с timestamp < конец суток
+// запрошенной даты — это и есть состояние слота "на конец того дня".
+// Слоты, чья последняя запись на эту дату — action="deleted", в наряд не
+// попадают (слот на тот момент уже был снят).
+// Дата приходит как "YYYY-MM-DD", границы суток — локальное время сервера
+// (тот же принцип, что naryadDayBounds в master.html, чтобы день не плыл).
+// Универсально по site — Ашыктас начнёт получать данные тем же способом,
+// как только там начнут пользоваться master.html; хардкода участка нет.
+function getNaryadForDate(site, dateStr) {
+  const siteFilter = String(site || "").trim();
+  if (!dateStr) return json({ ok: false, error: "Нужна дата (date=YYYY-MM-DD)" });
+
+  const dayStart = new Date(dateStr + "T00:00:00");
+  if (isNaN(dayStart.getTime())) return json({ ok: false, error: "Некорректная дата" });
+  const dayEnd = new Date(dayStart);
+  dayEnd.setDate(dayEnd.getDate() + 1);
+
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName(SHEET_SHIFT_LOG);
+  if (!sheet || sheet.getLastRow() < 2) return json({ ok: true, date: dateStr, slots: [] });
+
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const col = h => headers.indexOf(h);
+  const cTs = col("timestamp"), cSite = col("site"), cEq = col("equipmentId"),
+        cPos = col("position"), cSm = col("smena"), cVah = col("vahta");
+
+  const latestBySlot = {};
+  for (let i = 1; i < data.length; i++) {
+    const r = data[i];
+    const ts = r[cTs];
+    if (!(ts instanceof Date) || ts >= dayEnd) continue;
+    if (siteFilter && cSite >= 0 && String(r[cSite] || "").trim() !== siteFilter) continue;
+    const key = [r[cEq], r[cPos], r[cSm], r[cVah]].join("||");
+    const prev = latestBySlot[key];
+    if (!prev || ts > prev.__ts) {
+      const o = {};
+      headers.forEach((h, j) => { o[h] = r[j]; });
+      o.__ts = ts;
+      latestBySlot[key] = o;
+    }
+  }
+
+  const slots = Object.values(latestBySlot)
+    .filter(o => o.action !== "deleted")
+    .map(o => { delete o.__ts; return o; });
+
+  return json({ ok: true, date: dateStr, slots });
 }
 
 function saveShiftAssignment(p) {
