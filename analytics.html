@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Осмотры техники — Caravan Resources</title>
+<!-- SheetJS — только для выгрузки таблицы «Кто проводит осмотры» в .xlsx. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
 :root {
   --navy:#0B1A35; --navy2:#1B3B6F; --gold:#F4A52A;
@@ -94,7 +96,9 @@ body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans
     <div class="stats-grid" id="statsGrid"></div>
 
     <div class="panel">
-      <div class="panel-title">📊 Аналитика по осмотрам — <span id="titleSite1"></span></div>
+      <div class="panel-title">📊 Аналитика по осмотрам — <span id="titleSite1"></span>
+        <button class="btn-ghost" onclick="loadAll()">🔄 Обновить</button>
+      </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
         <div>
           <div style="font-size:13px;font-weight:700;color:var(--navy2);margin-bottom:8px">По технике — где чаще всего неисправности</div>
@@ -139,6 +143,7 @@ body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans
     <div class="panel">
       <div class="panel-title">
         👷 Кто проводит осмотры
+        <button class="btn-ghost" onclick="downloadOperatorsExcel()">📥 Excel</button>
       </div>
       <p style="font-size:12px;color:var(--gray);margin-bottom:12px">
         Много осмотров подряд без единого замечания — обычно признак формального осмотра,
@@ -396,15 +401,50 @@ function renderByOperator() {
     <thead><tr><th>Оператор</th><th>Техника</th><th>Осмотров</th><th>Неисправ.</th><th>Коммент.</th></tr></thead>
     <tbody>${rows.map(v => {
       const formal = v.osmotrs >= 5 && v.defects === 0 && v.comments === 0;
+      const eqLabel = (v.equipmentList && v.equipmentList.length)
+        ? v.equipmentList.map(e => e.model ? `${e.equipmentId} — ${e.model}` : e.equipmentId).join(", ")
+        : `${v.equipmentCount} ед.`;
       return `<tr${formal?' style="background:var(--redbg)"':''}>
         <td><b>${v.empName}</b>${formal?' <span style="font-size:10px;color:var(--red)">формально</span>':''}</td>
-        <td style="color:var(--gray);font-size:12px">${v.equipmentCount} ед.</td>
+        <td style="color:var(--gray);font-size:12px">${eqLabel}</td>
         <td>${v.osmotrs}</td>
         <td${v.defects?' style="color:var(--red);font-weight:700"':''}>${v.defects}</td>
         <td${v.comments?' style="color:var(--navy2);font-weight:700"':''}>${v.comments}</td>
       </tr>`;
     }).join("")}</tbody>
   </table></div>`;
+}
+
+// Выгрузка таблицы «Кто проводит осмотры» в .xlsx (SheetJS, подключён в
+// <head>). Та же логика, что у downloadNaryadExcel в master.html — берём то,
+// что уже показано на экране, без отдельного запроса к серверу.
+function downloadOperatorsExcel() {
+  if (typeof XLSX === "undefined") {
+    alert("Библиотека Excel не загрузилась (нужен интернет) — попробуй ещё раз.");
+    return;
+  }
+  const st = chkStats();
+  const rows = st ? st.byOperator : [];
+  if (!rows.length) { alert("Пока нет данных для выгрузки."); return; }
+
+  const aoa = [["Оператор","Техника","Осмотров","Неисправностей","Комментариев"]];
+  rows.forEach(v => {
+    const eqLabel = (v.equipmentList && v.equipmentList.length)
+      ? v.equipmentList.map(e => e.model ? `${e.equipmentId} — ${e.model}` : e.equipmentId).join(", ")
+      : `${v.equipmentCount} ед.`;
+    aoa.push([v.empName, eqLabel, v.osmotrs, v.defects, v.comments]);
+  });
+
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws["!cols"] = [{wch:28},{wch:30},{wch:10},{wch:14},{wch:14}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Операторы");
+  XLSX.writeFile(wb, `Операторы_${CURRENT_SITE}_${todayIsoLocal()}.xlsx`);
+}
+
+function todayIsoLocal() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
 }
 
 function renderAll() {
