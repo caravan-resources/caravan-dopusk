@@ -2194,10 +2194,14 @@ const TIMING_IMPORT_HEADERS = ["ФИО сотрудника","Дата","Тип 
   "Время погрузки, сек","Ковшей","Наполнение, %","Цикл, сек","Паспорт (да/нет)","Инструктор","Примечание"];
 
 function downloadTimingTemplate() {
-  const ws = XLSX.utils.aoa_to_sheet([
-    TIMING_IMPORT_HEADERS,
-    ["Иванов Иван Иванович","27.08.2026","Экскаватор с обратной лопатой","Sandvik DX800","Sany SKT 115S",125,6,92,25,"да","Петров П.П.",""],
-  ]);
+  // Дата — сегодняшняя, а не захардкоженный пример: обычно замеры вносят в
+  // тот же день, когда мерили, так что дату лучше сразу не набирать вручную.
+  // Если замеряли не сегодня — просто исправить в паре ячеек, а не во всех.
+  const today = new Date();
+  const todayStr = `${String(today.getDate()).padStart(2,"0")}.${String(today.getMonth()+1).padStart(2,"0")}.${today.getFullYear()}`;
+  const exampleRow = ["Иванов Иван Иванович", todayStr, "Экскаватор с обратной лопатой", "Sandvik DX800", "Sany SKT 115S", 125, 6, 92, 25, "да", "Петров П.П.", "пример — замените своими данными"];
+  const blankRows = Array.from({ length: 5 }, () => ["", todayStr, "", "", "", "", "", "", "", "", "", ""]);
+  const ws = XLSX.utils.aoa_to_sheet([TIMING_IMPORT_HEADERS, exampleRow, ...blankRows]);
   ws['!cols'] = TIMING_IMPORT_HEADERS.map(h => ({ wch: Math.max(14, h.length) }));
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Хронометраж");
