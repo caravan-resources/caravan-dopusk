@@ -2451,6 +2451,7 @@ function renderTrainingBySite() {
 // и обоими развёрнутыми журналами (по времени / по технике).
 const evalScoreColor = v => (v === "-" || v === undefined) ? "var(--gray)" : (Number(v) <= 2 ? "var(--red)" : (Number(v) >= 4 ? "var(--green)" : "var(--yellow)"));
 const evalWordCount = n => n === 1 ? "оценка" : (n >= 2 && n <= 4 ? "оценки" : "оценок");
+const timingWordCount = n => (n % 10 === 1 && n % 100 !== 11) ? "замер" : ((n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20)) ? "замера" : "замеров");
 const parseRuDate = s => { const m = String(s).match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})/); return m ? new Date(+m[3], +m[2]-1, +m[1]).getTime() : 0; };
 
 // Загружает журнал оценок за выбранные вверху вкладки участок/период,
@@ -2643,6 +2644,77 @@ function renderEvalByType() {
   }).join("");
 }
 
+// Блок хронометража внутри карточки оценки. Замеры по одному экскаватору за
+// день обычно делаются на нескольких самосвалах подряд (несколько заходов —
+// несколько строк в «Хронометраж»), поэтому вместо построчного вывода
+// каждого замера показываем усреднённое резюме — так это и задумано
+// использоваться (внешний замер по видео/скриншотам, потом усреднение).
+// Отдельные замеры остаются доступны по клику, для проверки, если что-то
+// выглядит подозрительно (например, разброс между машинами).
+function renderTimingSummary(records) {
+  const n = records.length;
+  const avg = key => {
+    const vals = records.map(t => Number(t[key])).filter(v => !isNaN(v) && v !== null);
+    return vals.length ? vals.reduce((a,b) => a+b, 0) / vals.length : null;
+  };
+  const fmt = (v, digits) => v === null ? "—" : (Math.round(v * Math.pow(10,digits)) / Math.pow(10,digits));
+
+  const avgTotal  = avg("totalLoadTimeSec");
+  const avgBucket = avg("bucketCount");
+  const avgFill   = avg("bucketFillPercent");
+  const avgCycle  = avg("cycleTimeSec");
+
+  const properYes = records.filter(t => t.properLoading === "да").length;
+  const properNo  = records.filter(t => t.properLoading === "нет").length;
+  const trucks = Array.from(new Set(records.map(t => t.truckModel).filter(Boolean)));
+
+  const metric = (value, label) => `
+    <div>
+      <div style="font-size:19px;font-weight:800;color:var(--navy)">${value}</div>
+      <div style="font-size:10px;color:var(--gray);margin-top:1px">${label}</div>
+    </div>
+  `;
+
+  const detailRows = records.map((t,i) => `
+    <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--navy);${i>0?'margin-top:8px;padding-top:8px;border-top:1px dashed #DDD6FE':''}">
+      <span>${t.totalLoadTimeSec} с погрузка</span>
+      <span>${t.bucketCount} ковшей</span>
+      <span>${t.bucketFillPercent||'-'}% наполнение</span>
+      <span>${t.cycleTimeSec} с цикл</span>
+      <span style="color:${t.properLoading==='да'?'var(--green)':(t.properLoading==='нет'?'var(--red)':'var(--gray)')}">
+        ${t.properLoading==='да'?'✓ паспорт':(t.properLoading==='нет'?'✕ паспорт':'—')}
+      </span>
+      ${t.truckModel ? `<span style="color:var(--gray)">→ ${t.truckModel}</span>` : ""}
+    </div>
+  `).join("");
+
+  return `
+    <div style="margin-top:16px;padding:14px 16px;background:#F5F3FF;border-radius:10px;border-left:3px solid #7C3AED">
+      <div style="font-size:11px;font-weight:800;color:#7C3AED;margin-bottom:12px;letter-spacing:.3px">
+        ⏱ ХРОНОМЕТРАЖ ПОГРУЗКИ — РЕЗЮМЕ (${n} ${timingWordCount(n)})
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(115px,1fr));gap:12px">
+        ${metric(fmt(avgTotal,0) + " с", "ср. полное время погрузки")}
+        ${metric(fmt(avgBucket,1), "ср. ковшей загружено")}
+        ${metric(fmt(avgFill,0) + "%", "ср. наполнение ковша")}
+        ${metric(fmt(avgCycle,1) + " с", "ср. цикл ковша")}
+      </div>
+      ${(properYes+properNo) ? `
+        <div style="font-size:12px;margin-top:12px">
+          <span style="color:var(--green)">✓ ${properYes}</span> / <span style="color:var(--red)">✕ ${properNo}</span> соблюдение паспорта погрузки
+        </div>
+      ` : ""}
+      ${trucks.length ? `<div style="font-size:11px;color:var(--gray);margin-top:6px">Самосвалы: ${trucks.join(", ")}</div>` : ""}
+      ${n > 1 ? `
+        <details style="margin-top:10px">
+          <summary style="cursor:pointer;font-size:11px;color:#7C3AED;font-weight:700">Показать все замеры (${n})</summary>
+          <div style="margin-top:8px">${detailRows}</div>
+        </details>
+      ` : ""}
+    </div>
+  `;
+}
+
 // Одна карточка оценки — «акцентированное событие», не строка таблицы:
 // крупный шрифт, полноразмерная диаграмма, цветная левая рамка по баллу.
 // Если это машинист экскаватора и в тот же день делался хронометраж —
@@ -2654,23 +2726,7 @@ function renderEvalJournalCard(e, scoreColor, showSite) {
          onclick="goToEmployeeProfile('${String(e.empId).replace(/'/g,"\\'")}')">${e.empName}</span>`
     : e.empName;
 
-  const timingHtml = (e.timing && e.timing.length) ? `
-    <div style="margin-top:16px;padding:14px 16px;background:#F5F3FF;border-radius:10px;border-left:3px solid #7C3AED">
-      <div style="font-size:11px;font-weight:800;color:#7C3AED;margin-bottom:10px;letter-spacing:.3px">⏱ ХРОНОМЕТРАЖ ПОГРУЗКИ</div>
-      ${e.timing.map((t,i) => `
-        <div style="display:flex;gap:18px;flex-wrap:wrap;font-size:12.5px;${i>0?'margin-top:10px;padding-top:10px;border-top:1px dashed #DDD6FE':''}">
-          <span><b style="color:var(--navy)">${t.totalLoadTimeSec} с</b> погрузка</span>
-          <span><b style="color:var(--navy)">${t.bucketCount}</b> ковшей</span>
-          <span><b style="color:var(--navy)">${t.bucketFillPercent||'-'}%</b> наполнение</span>
-          <span><b style="color:var(--navy)">${t.cycleTimeSec} с</b> цикл</span>
-          <span style="color:${t.properLoading==='да'?'var(--green)':(t.properLoading==='нет'?'var(--red)':'var(--gray)')}">
-            <b>${t.properLoading==='да'?'✓ Паспорт соблюдён':(t.properLoading==='нет'?'✕ Паспорт нарушен':'—')}</b>
-          </span>
-          ${t.truckModel ? `<span style="color:var(--gray)">→ ${t.truckModel}</span>` : ""}
-        </div>
-      `).join("")}
-    </div>
-  ` : "";
+  const timingHtml = (e.timing && e.timing.length) ? renderTimingSummary(e.timing) : "";
 
   return `
     <div style="border:1px solid var(--border);border-radius:14px;padding:18px 20px;margin-bottom:14px;
