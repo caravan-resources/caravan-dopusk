@@ -413,6 +413,29 @@ td { padding:8px; border-bottom:1px solid var(--border); }
               overflow-y:auto;box-shadow:0 4px 14px rgba(0,0,0,.1)"></div>
           </div>
         </div>
+        <div style="border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:16px">
+          <div style="display:flex;justify-content:space-between;align-items:center;cursor:pointer" onclick="toggleLapCalc()">
+            <span style="font-size:13px;font-weight:700;color:var(--navy)">🧮 Калькулятор по секундомеру</span>
+            <span id="lapCalcToggleIcon" style="color:var(--gray)">▾</span>
+          </div>
+          <div id="lapCalcBody" style="display:none;margin-top:12px">
+            <div class="hint" style="margin-bottom:10px">
+              Вводи отсечки секундомера по одной, в секундах (напр. 21.22) — таймер стартует в момент
+              выгрузки 1-го ковша, поэтому отсечек всегда на одну меньше, чем ковшей. Случайно отсекли лишний раз —
+              удалите одну из двух соседних строк и прибавьте её значение к оставшейся.
+            </div>
+            <div id="lapRows"></div>
+            <button type="button" class="btn-ghost" style="font-size:12px;padding:6px 12px;margin-top:4px" onclick="addLapRow()">+ Добавить отсечку</button>
+            <div id="lapCalcResult" style="display:none;margin-top:14px;padding:12px;background:var(--light);border-radius:10px">
+              <div style="display:flex;gap:20px;flex-wrap:wrap">
+                <div><div style="font-size:18px;font-weight:800;color:var(--navy)" id="lapResTotal">-</div><div style="font-size:10px;color:var(--gray)">время погрузки, сек</div></div>
+                <div><div style="font-size:18px;font-weight:800;color:var(--navy)" id="lapResBuckets">-</div><div style="font-size:10px;color:var(--gray)">ковшей</div></div>
+                <div><div style="font-size:18px;font-weight:800;color:var(--navy)" id="lapResCycle">-</div><div style="font-size:10px;color:var(--gray)">ср. цикл, сек</div></div>
+              </div>
+              <button type="button" class="btn-gold" style="font-size:13px;padding:8px 14px;margin-top:12px" onclick="applyLapCalc()">↓ Подставить в поля формы</button>
+            </div>
+          </div>
+        </div>
         <div class="field">
           <label>Время погрузки самосвала (сек) *</label>
           <input type="number" id="timingTotalTime" min="1" placeholder="напр. 180">
@@ -1818,6 +1841,76 @@ async function saveCriteriaEdits() {
 // ══════════════════════════════════════════════════════════
 let TIMING_EDITING_ID = null;
 let TIMING_HISTORY_CACHE = {};
+const timingWordCount = n => (n % 10 === 1 && n % 100 !== 11) ? "замер" : ((n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20)) ? "замера" : "замеров");
+
+// ── Калькулятор по секундомеру ──────────────────────────────────────────
+// Мастер измеряет вручную по видео/скриншотам секундомера: таймер стартует
+// в момент выгрузки 1-го ковша (он же встречает следующий самосвал), каждая
+// последующая отсечка — момент выгрузки очередного ковша. Значит ковшей
+// всегда на 1 больше, чем отсечек, время погрузки = сумма отсечек, средний
+// цикл = время погрузки / число отсечек. Случайные повторные отсечки не
+// разруливаем автоматически — пользователь удаляет лишнюю строку и вручную
+// суммирует её значение с соседней (проще и надёжнее угадывания).
+let LAP_ROW_SEQ = 0;
+
+function toggleLapCalc() {
+  const body = document.getElementById("lapCalcBody");
+  const icon = document.getElementById("lapCalcToggleIcon");
+  const show = body.style.display === "none";
+  body.style.display = show ? "block" : "none";
+  icon.textContent = show ? "▴" : "▾";
+  if (show && document.getElementById("lapRows").children.length === 0) {
+    addLapRow(); addLapRow();
+  }
+}
+
+function addLapRow() {
+  LAP_ROW_SEQ++;
+  const wrap = document.getElementById("lapRows");
+  const row = document.createElement("div");
+  row.id = `lapRow_${LAP_ROW_SEQ}`;
+  row.style.cssText = "display:flex;gap:8px;align-items:center;margin-bottom:6px";
+  row.innerHTML = `
+    <span class="lapRowNum" style="font-size:12px;color:var(--gray);width:20px">${wrap.children.length + 1}.</span>
+    <input type="number" step="0.01" min="0" placeholder="напр. 21.22" style="flex:1" oninput="computeLapCalc()">
+    <button type="button" class="btn-ghost" style="padding:3px 8px;font-size:12px" onclick="removeLapRow('lapRow_${LAP_ROW_SEQ}')">✕</button>
+  `;
+  wrap.appendChild(row);
+  computeLapCalc();
+}
+
+function removeLapRow(rowId) {
+  const row = document.getElementById(rowId);
+  if (row) row.remove();
+  document.querySelectorAll("#lapRows > div").forEach((r,i) => {
+    const num = r.querySelector(".lapRowNum");
+    if (num) num.textContent = (i+1) + ".";
+  });
+  computeLapCalc();
+}
+
+function computeLapCalc() {
+  const inputs = Array.from(document.querySelectorAll("#lapRows input"));
+  const vals = inputs.map(i => Number(i.value)).filter(v => !isNaN(v) && v > 0);
+  const resultEl = document.getElementById("lapCalcResult");
+  if (!vals.length) { resultEl.style.display = "none"; return; }
+  const total = vals.reduce((a,b) => a+b, 0);
+  const buckets = vals.length + 1;
+  const cycle = total / vals.length;
+  document.getElementById("lapResTotal").textContent = Math.round(total * 100) / 100;
+  document.getElementById("lapResBuckets").textContent = buckets;
+  document.getElementById("lapResCycle").textContent = Math.round(cycle * 10) / 10;
+  resultEl.style.display = "block";
+}
+
+function applyLapCalc() {
+  const totalText = document.getElementById("lapResTotal").textContent;
+  if (totalText === "-") return;
+  document.getElementById("timingTotalTime").value = totalText;
+  document.getElementById("timingBucketCount").value = document.getElementById("lapResBuckets").textContent;
+  document.getElementById("timingCycleTime").value = document.getElementById("lapResCycle").textContent;
+  document.getElementById("timingTotalTime").scrollIntoView({ behavior: "smooth", block: "center" });
+}
 
 function renderTimingEquipmentTypeSelect() {
   const el = document.getElementById("timingEquipmentType");
@@ -1907,6 +2000,7 @@ async function submitTiming() {
     document.getElementById("timingSummary").value = "";
     setProperLoading("");
     document.querySelectorAll("#timingProperLoadingBtns .eval-opt-btn").forEach(b => b.classList.remove("active","high","low"));
+    resetLapCalc();
     loadTimingHistoryFor(emp.id);
     loadTimingTruckModels(); // новая модель самосвала (если впервые) сразу попадёт в подсказки
   } catch (e) {
@@ -1924,34 +2018,99 @@ async function loadTimingHistoryFor(empId) {
     TIMING_HISTORY_CACHE = {};
     list.forEach(r => { TIMING_HISTORY_CACHE[r.recordId] = r; });
     if (!list.length) { el.innerHTML = `<div class="empty"><div class="empty-icon">⏱</div>Замеров пока нет</div>`; return; }
-    el.innerHTML = list.map(r => {
-      const avgLoadPerBucket = r.bucketCount > 0 ? Math.round((r.totalLoadTimeSec / r.bucketCount) * 10) / 10 : "-";
-      return `
-      <div style="border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:12px;background:#fff">
-        <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:12px">
-          <div>
-            <div style="font-size:12px;color:var(--gray)">${r.date} · ${r.equipmentType||""}${r.equipmentModel?" ("+r.equipmentModel+")":""}${r.truckModel?" → "+r.truckModel:""}</div>
-          </div>
-          <div style="display:flex;align-items:flex-start;gap:8px">
-            <span style="font-size:12px;color:var(--gray)">${r.instructorName||""}</span>
-            <button type="button" class="btn-ghost" style="padding:3px 10px;font-size:12px"
-              onclick="editTimingRecord('${String(r.recordId).replace(/'/g,"\\'")}')">✏️ Редактировать</button>
-          </div>
-        </div>
-        <div style="display:flex;gap:20px;flex-wrap:wrap">
-          <div><div style="font-size:18px;font-weight:800;color:var(--navy)">${r.totalLoadTimeSec} с</div><div style="font-size:10px;color:var(--gray)">время погрузки</div></div>
-          <div><div style="font-size:18px;font-weight:800;color:var(--navy)">${r.bucketCount}</div><div style="font-size:10px;color:var(--gray)">ковшей</div></div>
-          <div><div style="font-size:18px;font-weight:800;color:${r.bucketFillPercent && Number(r.bucketFillPercent)<85?'var(--yellow)':'var(--navy)'}">${r.bucketFillPercent||"-"}%</div><div style="font-size:10px;color:var(--gray)">наполнение ковша</div></div>
-          <div><div style="font-size:18px;font-weight:800;color:var(--navy)">${r.cycleTimeSec} с</div><div style="font-size:10px;color:var(--gray)">средний цикл</div></div>
-          <div><div style="font-size:18px;font-weight:800;color:var(--gray)">${avgLoadPerBucket} с</div><div style="font-size:10px;color:var(--gray)">в среднем/ковш*</div></div>
-          <div><div style="font-size:18px;font-weight:800;color:${r.properLoading==='да'?'var(--green)':'var(--red)'}">${r.properLoading==='да'?'✓ Да':(r.properLoading==='нет'?'✕ Нет':'-')}</div><div style="font-size:10px;color:var(--gray)">паспорт загрузки</div></div>
-        </div>
-        ${r.summary ? `<div style="font-size:13px;color:var(--navy);margin-top:12px;line-height:1.5">${r.summary}</div>` : ""}
-      </div>
-    `;}).join("") + `<div style="font-size:11px;color:var(--gray);margin-top:4px">* время погрузки / число ковшей — справочно, не то же самое, что цикл одного ковша</div>`;
+
+    // Список от бэкенда уже отсортирован по дате (новые сверху) — группировка
+    // по ключу "дата" сохраняет этот порядок без дополнительной сортировки.
+    const byDate = {};
+    const dateOrder = [];
+    list.forEach(r => {
+      if (!byDate[r.date]) { byDate[r.date] = []; dateOrder.push(r.date); }
+      byDate[r.date].push(r);
+    });
+
+    el.innerHTML = dateOrder.map(date => renderTimingDateGroup(date, byDate[date])).join("")
+      + `<div style="font-size:11px;color:var(--gray);margin-top:4px">* время погрузки / число ковшей — справочно, не то же самое, что цикл одного ковша</div>`;
   } catch (err) {
     el.innerHTML = `<div class="empty">Не удалось загрузить: ${err.message}</div>`;
   }
+}
+
+// Группа замеров за один день. Если самосвалов было несколько (обычный
+// случай — мастер меряет несколько заходов подряд), сверху — усреднённое
+// резюме дня (то же самое, что видит инструктор в отдельной вкладке
+// аналитики), под ним — сворачиваемый список отдельных замеров с
+// возможностью отредактировать любой из них.
+function renderTimingDateGroup(date, records) {
+  const first = records[0];
+  const header = `
+    <div style="font-size:12px;font-weight:700;color:var(--gray);margin:16px 0 8px">
+      📅 ${date} · ${first.equipmentType||""}${first.equipmentModel?" ("+first.equipmentModel+")":""}
+    </div>
+  `;
+  const cards = records.map(renderTimingRecordCard).join("");
+  if (records.length === 1) return header + cards;
+
+  return header + renderTimingDaySummary(records) + `
+    <details style="margin-bottom:12px">
+      <summary style="cursor:pointer;font-size:12px;color:#7C3AED;font-weight:700">Показать все замеры (${records.length})</summary>
+      <div style="margin-top:10px">${cards}</div>
+    </details>
+  `;
+}
+
+function renderTimingDaySummary(records) {
+  const n = records.length;
+  const avg = key => {
+    const vals = records.map(r => Number(r[key])).filter(v => !isNaN(v) && v !== null);
+    return vals.length ? vals.reduce((a,b) => a+b, 0) / vals.length : null;
+  };
+  const fmt = (v, digits) => v === null ? "—" : (Math.round(v * Math.pow(10,digits)) / Math.pow(10,digits));
+  const avgTotal = avg("totalLoadTimeSec"), avgBucket = avg("bucketCount"),
+        avgFill = avg("bucketFillPercent"), avgCycle = avg("cycleTimeSec");
+  const properYes = records.filter(r => r.properLoading === "да").length;
+  const properNo  = records.filter(r => r.properLoading === "нет").length;
+  const trucks = Array.from(new Set(records.map(r => r.truckModel).filter(Boolean)));
+
+  return `
+    <div style="margin-bottom:12px;padding:14px 16px;background:#F5F3FF;border-radius:10px;border-left:3px solid #7C3AED">
+      <div style="font-size:11px;font-weight:800;color:#7C3AED;margin-bottom:10px;letter-spacing:.3px">
+        РЕЗЮМЕ ЗА ДЕНЬ (${n} ${timingWordCount(n)})
+      </div>
+      <div style="display:flex;gap:20px;flex-wrap:wrap">
+        <div><div style="font-size:18px;font-weight:800;color:var(--navy)">${fmt(avgTotal,0)} с</div><div style="font-size:10px;color:var(--gray)">ср. время погрузки</div></div>
+        <div><div style="font-size:18px;font-weight:800;color:var(--navy)">${fmt(avgBucket,1)}</div><div style="font-size:10px;color:var(--gray)">ср. ковшей</div></div>
+        <div><div style="font-size:18px;font-weight:800;color:var(--navy)">${fmt(avgFill,0)}%</div><div style="font-size:10px;color:var(--gray)">ср. наполнение</div></div>
+        <div><div style="font-size:18px;font-weight:800;color:var(--navy)">${fmt(avgCycle,1)} с</div><div style="font-size:10px;color:var(--gray)">ср. цикл</div></div>
+      </div>
+      ${(properYes+properNo) ? `<div style="font-size:12px;margin-top:10px"><span style="color:var(--green)">✓ ${properYes}</span> / <span style="color:var(--red)">✕ ${properNo}</span> соблюдение паспорта</div>` : ""}
+      ${trucks.length ? `<div style="font-size:11px;color:var(--gray);margin-top:6px">Самосвалы: ${trucks.join(", ")}</div>` : ""}
+    </div>
+  `;
+}
+
+function renderTimingRecordCard(r) {
+  const avgLoadPerBucket = r.bucketCount > 0 ? Math.round((r.totalLoadTimeSec / r.bucketCount) * 10) / 10 : "-";
+  return `
+    <div style="border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:12px;background:#fff">
+      <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:12px">
+        <div style="font-size:12px;color:var(--gray)">${r.truckModel ? "→ " + r.truckModel : "самосвал не указан"}</div>
+        <div style="display:flex;align-items:flex-start;gap:8px">
+          <span style="font-size:12px;color:var(--gray)">${r.instructorName||""}</span>
+          <button type="button" class="btn-ghost" style="padding:3px 10px;font-size:12px"
+            onclick="editTimingRecord('${String(r.recordId).replace(/'/g,"\\'")}')">✏️ Редактировать</button>
+        </div>
+      </div>
+      <div style="display:flex;gap:20px;flex-wrap:wrap">
+        <div><div style="font-size:18px;font-weight:800;color:var(--navy)">${r.totalLoadTimeSec} с</div><div style="font-size:10px;color:var(--gray)">время погрузки</div></div>
+        <div><div style="font-size:18px;font-weight:800;color:var(--navy)">${r.bucketCount}</div><div style="font-size:10px;color:var(--gray)">ковшей</div></div>
+        <div><div style="font-size:18px;font-weight:800;color:${r.bucketFillPercent && Number(r.bucketFillPercent)<85?'var(--yellow)':'var(--navy)'}">${r.bucketFillPercent||"-"}%</div><div style="font-size:10px;color:var(--gray)">наполнение ковша</div></div>
+        <div><div style="font-size:18px;font-weight:800;color:var(--navy)">${r.cycleTimeSec} с</div><div style="font-size:10px;color:var(--gray)">средний цикл</div></div>
+        <div><div style="font-size:18px;font-weight:800;color:var(--gray)">${avgLoadPerBucket} с</div><div style="font-size:10px;color:var(--gray)">в среднем/ковш*</div></div>
+        <div><div style="font-size:18px;font-weight:800;color:${r.properLoading==='да'?'var(--green)':'var(--red)'}">${r.properLoading==='да'?'✓ Да':(r.properLoading==='нет'?'✕ Нет':'-')}</div><div style="font-size:10px;color:var(--gray)">паспорт загрузки</div></div>
+      </div>
+      ${r.summary ? `<div style="font-size:13px;color:var(--navy);margin-top:12px;line-height:1.5">${r.summary}</div>` : ""}
+    </div>
+  `;
 }
 
 async function editTimingRecord(recordId) {
@@ -2003,6 +2162,12 @@ function cancelTimingEdit() {
   document.getElementById("timingTruckModel").value = "";
   document.getElementById("timingSummary").value = "";
   setProperLoading("");
+  resetLapCalc();
+}
+
+function resetLapCalc() {
+  document.getElementById("lapRows").innerHTML = "";
+  document.getElementById("lapCalcResult").style.display = "none";
 }
 </script>
 </body>
