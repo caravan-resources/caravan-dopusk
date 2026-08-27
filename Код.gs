@@ -2575,6 +2575,62 @@ function logShiftEvents(entries) {
   }
 }
 
+// ══════════════════════════════════════════════════════
+// ОДНОРАЗОВАЯ ЧИСТКА (27.08.2026) — до 26.08.2026 статус техники и статус
+// работника были одним полем workStatus. После разделения на equipmentStatus
+// (техника, ставит сам работник через QR) и workStatus (вид работы, ставит
+// мастер — см. дропдаун "Вид работы сейчас" в master.html, где "В работе"/
+// "Ремонт" больше НЕТ как опций) — старые строки с этими значениями в
+// workStatus не мигрировали. Итог: на карточке в master.html статус
+// дублировался ("🔧 В работе" + отдельной строкой "В работе"), путая мастеров
+// (см. разбор Ивана 27.08.2026: "ремонт и в работе относятся к технике,
+// остальные — к работнику").
+// НЕ публичный HTTP-экшен — это мутация ~60 строк разом, такому не место на
+// URL. Запускать ОДИН РАЗ вручную из редактора Apps Script: выбрать функцию
+// cleanupLegacyWorkStatus в выпадающем списке наверху редактора → ▶ Run.
+// Результат — в View > Logs (или Ctrl+Enter после запуска).
+function cleanupLegacyWorkStatus() {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName(SHEET_SHIFTS);
+  if (!sheet) { Logger.log('Лист "Смены" не найден'); return; }
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const col = h => headers.indexOf(h);
+  const cWs = col("workStatus"), cEs = col("equipmentStatus");
+  if (cWs < 0 || cEs < 0) { Logger.log("Столбцы workStatus/equipmentStatus не найдены"); return; }
+
+  const LEGACY_VALUES = ["В работе", "Ремонт"];
+  let movedCount = 0, clearedCount = 0;
+  const snapshotsForLog = [];
+
+  for (let i = 1; i < data.length; i++) {
+    const ws = String(data[i][cWs] || "").trim();
+    if (!LEGACY_VALUES.includes(ws)) continue;
+    const es = String(data[i][cEs] || "").trim();
+    const row = i + 1;
+    if (!es) {
+      sheet.getRange(row, cEs + 1).setValue(ws); // переносим в equipmentStatus, раз там пусто
+      movedCount++;
+    } else {
+      clearedCount++; // equipmentStatus уже заполнен своим значением — просто убираем дубль
+    }
+    sheet.getRange(row, cWs + 1).setValue(""); // workStatus всегда чистим
+
+    const afterRow = sheet.getRange(row, 1, 1, headers.length).getValues()[0];
+    const snapshot = {};
+    headers.forEach((h, j) => { snapshot[h] = afterRow[j]; });
+    snapshotsForLog.push({ ...snapshot, action: "updated" });
+  }
+
+  if (snapshotsForLog.length) logShiftEvents(snapshotsForLog);
+
+  Logger.log(
+    `Готово. Перенесено в equipmentStatus: ${movedCount}. ` +
+    `Просто очищено (equipmentStatus уже был заполнен): ${clearedCount}. ` +
+    `Итого затронуто строк: ${movedCount + clearedCount}.`
+  );
+}
+
 // Реконструкция наряда на конкретную дату из журнала "ИсторияСмен" (см.
 // комментарий у SHEET_SHIFT_LOG выше). Для каждого слота (техника+должность+
 // смена+вахта) берём ПОСЛЕДНЮЮ запись журнала с timestamp < конец суток
