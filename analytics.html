@@ -86,8 +86,13 @@ body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans
     <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center;flex-wrap:wrap">
       <span style="font-size:13px;color:var(--gray);font-weight:600">Участок:</span>
       <div id="siteSwitch" style="display:flex;gap:8px"></div>
-      <span style="margin-left:auto;display:flex;gap:8px;align-items:center">
-        <span style="font-size:11px;color:var(--gray)">последние 30 дней</span>
+      <span style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <span style="font-size:11px;color:var(--gray)">Период:</span>
+        <input type="date" id="statFrom" style="font-size:12px;padding:5px 8px;border:1.5px solid var(--border);border-radius:8px">
+        <span style="font-size:11px;color:var(--gray)">—</span>
+        <input type="date" id="statTo" style="font-size:12px;padding:5px 8px;border:1.5px solid var(--border);border-radius:8px">
+        <button class="btn-ghost" style="padding:6px 12px;font-size:12px" onclick="applyStatPeriod()">Применить</button>
+        <button class="btn-ghost" style="padding:6px 12px;font-size:12px" onclick="resetStatPeriod()">Сброс (30 дней)</button>
         <button class="btn-ghost" style="padding:6px 12px;font-size:12px"
           onclick="loadFullHistory(this)">📜 Вся история</button>
       </span>
@@ -228,8 +233,13 @@ async function loadAll() {
   ).then(a => a[0]);
   // Готовая аналитика с сервера вместо всех записей: объём почти не растёт
   // вместе с числом осмотров (~150 КБ против мегабайтов).
+  // По умолчанию — последние 30 дней; если выбран период дат (STAT_FROM/
+  // STAT_TO), запрашиваем сервер за точное окно вместо фиксированных 30 дней.
+  const statsUrl = (STAT_FROM && STAT_TO)
+    ? `${CFG.SHEET_URL}?action=getChecklistStats&from=${encodeURIComponent(STAT_FROM)}&to=${encodeURIComponent(STAT_TO)}`
+    : `${CFG.SHEET_URL}?action=getChecklistStats&days=30`;
   const records = await Promise.allSettled(
-    [fetchWithRetry(`${CFG.SHEET_URL}?action=getChecklistStats&days=30`, 90000, 3)]
+    [fetchWithRetry(statsUrl, 90000, 3)]
   ).then(a => a[0]);
   let failed = false;
 
@@ -243,6 +253,32 @@ async function loadAll() {
   if (banner) banner.style.display = failed ? "block" : "none";
   renderAll();
 }
+
+// ── Выбор произвольного периода дат для всей страницы ──
+// null/null = поведение по умолчанию (последние 30 дней, как раньше).
+let STAT_FROM = null, STAT_TO = null;
+
+function applyStatPeriod() {
+  const fromVal = document.getElementById("statFrom").value;
+  const toVal   = document.getElementById("statTo").value;
+  if (!fromVal || !toVal) { alert("Укажите обе даты периода."); return; }
+  if (fromVal > toVal) { alert("Дата «с» позже даты «по» — проверьте период."); return; }
+  // «to» на сервере — исключающая верхняя граница, поэтому сдвигаем на
+  // начало следующих суток, чтобы выбранный день полностью попал в выборку.
+  const toDate = new Date(toVal + "T00:00:00");
+  toDate.setDate(toDate.getDate() + 1);
+  STAT_FROM = fromVal + "T00:00:00";
+  STAT_TO = toDate.toISOString();
+  loadAll();
+}
+
+function resetStatPeriod() {
+  STAT_FROM = null; STAT_TO = null;
+  document.getElementById("statFrom").value = "";
+  document.getElementById("statTo").value = "";
+  loadAll();
+}
+
 
 // Текущий выбранный участок — переключается вверху страницы
 let CURRENT_SITE = "Алмалы";
@@ -439,7 +475,7 @@ function downloadOperatorsExcel() {
   ws["!cols"] = [{wch:28},{wch:30},{wch:10},{wch:14},{wch:14}];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Операторы");
-  XLSX.writeFile(wb, `Операторы_${CURRENT_SITE}_${todayIsoLocal()}.xlsx`);
+  XLSX.writeFile(wb, `Операторы_${CURRENT_SITE}_${STAT_FROM ? STAT_FROM.slice(0,10)+"_"+STAT_TO.slice(0,10) : todayIsoLocal()}.xlsx`);
 }
 
 function todayIsoLocal() {
