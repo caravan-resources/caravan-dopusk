@@ -829,7 +829,21 @@ tr:hover td { background:#FAFBFD; }
         </div>
       </div>
 
+      <!-- ── ДАШБОРД: актуальная сводка на одном экране ── -->
       <div id="ratingSummary"></div>
+      <div class="panel">
+        <div class="panel-title">🥇 Топ-3 периода — по осмотрам</div>
+        <div id="ratingTop3"></div>
+      </div>
+
+      <div id="evalSummaryPanel" class="panel" style="border-top:3px solid #4338CA">
+        <div class="panel-title">🎯 Оценки работы — сводка</div>
+        <div class="hint" style="margin-bottom:10px">
+          Журнал формальных оценок работы, а не осмотров техники — только для информации
+          инструктора/руководства, ни на что автоматически не влияет.
+        </div>
+        <div id="evalSummary"></div>
+      </div>
 
       <!-- Итоги недели — награда «Отличник ДГР» -->
       <div class="panel" style="border-top:3px solid var(--gold)">
@@ -846,12 +860,29 @@ tr:hover td { background:#FAFBFD; }
         <div id="weeklyAward"></div>
       </div>
 
+      <!-- ── Остальное — по кнопке, чтобы вкладка не превращалась в портянку ── -->
       <div class="panel">
-        <div class="panel-title">👀 Внимательные — находят неисправности и пишут комментарии</div>
-        <div id="ratingAttentive"></div>
+        <div class="panel-title">📂 Подробности</div>
+        <div class="hint" style="margin-bottom:12px">
+          Полные списки и журналы скрыты по умолчанию — открывайте по мере необходимости.
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-ghost" style="width:auto;padding:9px 14px" onclick="toggleRatingSection('table')">📋 Все операторы</button>
+          <button class="btn btn-ghost" id="btnFormalToggle" style="width:auto;padding:9px 14px" onclick="toggleRatingSection('formal')">⚠️ Формальный осмотр</button>
+          <button class="btn btn-ghost" style="width:auto;padding:9px 14px" onclick="toggleRatingSection('evalTime')">🕐 Журнал оценок — по времени</button>
+          <button class="btn btn-ghost" style="width:auto;padding:9px 14px" onclick="toggleRatingSection('evalType')">🚜 Журнал оценок — по технике</button>
+        </div>
       </div>
 
-      <div class="panel">
+      <div class="panel" id="panelRatingTable" style="display:none">
+        <div class="panel-title">
+          📋 Все операторы
+          <button class="btn btn-ghost" onclick="exportRatingCSV()">⬇️ Скачать CSV</button>
+        </div>
+        <div id="ratingTable"></div>
+      </div>
+
+      <div class="panel" id="panelRatingFormal" style="display:none">
         <div class="panel-title">⚠️ Формальный осмотр — много проверок, ни одного замечания</div>
         <div class="hint" style="margin-bottom:10px">
           Это не обвинение: техника может быть исправной. Но если человек провёл много осмотров
@@ -860,23 +891,34 @@ tr:hover td { background:#FAFBFD; }
         <div id="ratingFormal"></div>
       </div>
 
-      <div class="panel">
+      <div class="panel" id="panelEvalTime" style="display:none;border-top:3px solid #4338CA">
         <div class="panel-title">
-          📋 Все операторы
-          <button class="btn btn-ghost" onclick="exportRatingCSV()">⬇️ Скачать CSV</button>
+          🕐 Оценки работы — по времени
+          <select id="evalTimeScope" onchange="renderEvalByTime()" style="max-width:160px">
+            <option value="0">За весь загруженный период</option>
+            <option value="7">Последние 7 дней</option>
+            <option value="1">Сегодня</option>
+          </select>
         </div>
-        <div id="ratingTable"></div>
+        <div class="hint" style="margin-bottom:10px">
+          Хронологически, сначала свежие. Участок и техника указаны в каждой карточке.
+          Общий диапазон дат задаётся фильтром «Период» вверху вкладки.
+        </div>
+        <div id="evalTimeList"></div>
       </div>
 
-      <div class="panel" style="border-top:3px solid #4338CA">
-        <div class="panel-title">🎯 Оценки работы</div>
-        <div class="hint" style="margin-bottom:10px">
-          Журнал формальных оценок работы, а не осмотров техники — только для информации
-          инструктора/руководства, ни на что автоматически не влияет. Сгруппировано: тип
-          техники → участок → дата (фильтры выше сужают период/участок). У машинистов
-          экскаватора к оценке присоединён хронометраж погрузки, если он делался в тот же день.
+      <div class="panel" id="panelEvalType" style="display:none;border-top:3px solid #4338CA">
+        <div class="panel-title">
+          🚜 Оценки работы — по технике
+          <select id="evalTypeScope" onchange="renderEvalByType()" style="max-width:200px">
+            <option value="all">Все типы техники</option>
+          </select>
         </div>
-        <div id="evalRatingList"></div>
+        <div class="hint" style="margin-bottom:10px">
+          Сгруппировано: участок → дата. У машинистов экскаватора к оценке присоединён
+          хронометраж погрузки, если он делался в тот же день.
+        </div>
+        <div id="evalTypeList"></div>
       </div>
     </div>
 
@@ -2114,8 +2156,18 @@ function renderTrainingBySite() {
 // см. getEvaluationStats в Код.gs.
 // ══════════════════════════════════════════════════════
 
+// Общие утилиты для секции «Оценки работы» — используются и сводкой,
+// и обоими развёрнутыми журналами (по времени / по технике).
+const evalScoreColor = v => (v === "-" || v === undefined) ? "var(--gray)" : (Number(v) <= 2 ? "var(--red)" : (Number(v) >= 4 ? "var(--green)" : "var(--yellow)"));
+const evalWordCount = n => n === 1 ? "оценка" : (n >= 2 && n <= 4 ? "оценки" : "оценок");
+const parseRuDate = s => { const m = String(s).match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})/); return m ? new Date(+m[3], +m[2]-1, +m[1]).getTime() : 0; };
+
+// Загружает журнал оценок за выбранные вверху вкладки участок/период,
+// кэширует в LAST_EVALUATIONS и рисует только компактную сводку —
+// тяжёлые списки (по времени / по технике) строятся отдельно, лениво,
+// при открытии соответствующей панели через toggleRatingSection().
 async function loadEvaluationRatingSection() {
-  const el = document.getElementById("evalRatingList");
+  const el = document.getElementById("evalSummary");
   if (!el) return;
   el.innerHTML = `<div class="empty"><div class="empty-icon">⏳</div>Загружаю...</div>`;
 
@@ -2129,75 +2181,168 @@ async function loadEvaluationRatingSection() {
 
   try {
     const val = await jsonpFetchRetry(`${CFG.SHEET_URL}?${params.toString()}`, "cb_evaluations_list", 30000, 3);
-    const evaluations = (val && val.ok && Array.isArray(val.evaluations)) ? val.evaluations : [];
-    if (!evaluations.length) {
+    LAST_EVALUATIONS = (val && val.ok && Array.isArray(val.evaluations)) ? val.evaluations : [];
+
+    if (!LAST_EVALUATIONS.length) {
       el.innerHTML = `<div class="empty"><div class="empty-icon">🎯</div>Оценок работы за выбранный период нет</div>`;
-      return;
+    } else {
+      const scored = LAST_EVALUATIONS.map(e => Number(e.overallAvg)).filter(n => !isNaN(n));
+      const avg = scored.length ? (scored.reduce((a,b)=>a+b,0) / scored.length) : null;
+      const low = scored.filter(n => n <= 2).length;
+      const typesCount = new Set(LAST_EVALUATIONS.map(e => e.equipmentType || "Без типа")).size;
+
+      el.innerHTML = `<div class="stats-grid">
+        ${[
+          {lbl:"Оценок за период", val:LAST_EVALUATIONS.length, acc:"var(--navy2)"},
+          {lbl:"Средний балл", val: avg!==null ? avg.toFixed(1) : "—", acc: avg!==null ? evalScoreColor(avg) : "var(--gray)"},
+          {lbl:"Низких оценок (≤2)", val: low, acc: low ? "var(--red)" : "var(--gray)"},
+          {lbl:"Типов техники в выборке", val: typesCount, acc:"var(--navy2)"},
+        ].map(s=>`
+          <div class="stat-card" style="border-left-color:${s.acc}">
+            <div class="stat-val" style="color:${s.acc};${String(s.val).length>6?'font-size:20px':''}">${s.val}</div>
+            <div class="stat-lbl">${s.lbl}</div>
+          </div>`).join("")}
+      </div>`;
     }
+  } catch (err) {
+    LAST_EVALUATIONS = [];
+    el.innerHTML = `<div class="empty">Не удалось загрузить: ${err.message}</div>`;
+  }
 
-    // Группировка: тип техники → участок → дата. Всё показывается сразу
-    // (без сворачивания разделов) — так и было решено: не прятать, а
-    // разложить по полочкам.
-    const byType = {};
-    evaluations.forEach(e => {
-      const type = e.equipmentType || "Без типа";
-      const site = e.site || "Без участка";
-      const date = e.date || "Без даты";
-      (byType[type] ??= {});
-      (byType[type][site] ??= {});
-      (byType[type][site][date] ??= []).push(e);
+  // Если журналы уже открыты — держим их синхронными с новыми фильтрами.
+  const pTime = document.getElementById("panelEvalTime");
+  const pType = document.getElementById("panelEvalType");
+  if (pTime && pTime.style.display !== "none") renderEvalByTime();
+  if (pType && pType.style.display !== "none") { populateEvalTypeFilter(); renderEvalByType(); }
+}
+
+// «По времени»: хронологический список, сгруппированный по дате (сначала
+// свежие), без разбивки по технике — участок/техника видны в каждой карточке.
+// Дополнительно сужается локальным селектом evalTimeScope поверх уже
+// загруженных данных (без повторного запроса к серверу).
+function renderEvalByTime() {
+  const el = document.getElementById("evalTimeList");
+  if (!el) return;
+  if (!LAST_EVALUATIONS.length) {
+    el.innerHTML = `<div class="empty"><div class="empty-icon">🎯</div>Оценок работы за выбранный период нет</div>`;
+    return;
+  }
+
+  const scopeDays = Number(document.getElementById("evalTimeScope")?.value || "0");
+  let list = LAST_EVALUATIONS;
+  if (scopeDays) {
+    const since = new Date(); since.setDate(since.getDate() - scopeDays); since.setHours(0,0,0,0);
+    list = list.filter(e => parseRuDate(e.date) >= since.getTime());
+  }
+  if (!list.length) {
+    el.innerHTML = `<div class="empty"><div class="empty-icon">🎯</div>Нет оценок в этом диапазоне</div>`;
+    return;
+  }
+
+  const byDate = {};
+  list.forEach(e => { (byDate[e.date || "Без даты"] ??= []).push(e); });
+  const dateNames = Object.keys(byDate).sort((a,b) => parseRuDate(b) - parseRuDate(a));
+
+  el.innerHTML = dateNames.map(dateName => {
+    const evalsOnDate = byDate[dateName].slice().sort((a,b) => {
+      const av = a.overallAvg === "-" ? -1 : Number(a.overallAvg);
+      const bv = b.overallAvg === "-" ? -1 : Number(b.overallAvg);
+      return bv - av;
     });
+    return `
+      <div style="margin-bottom:20px">
+        <div style="font-size:12px;font-weight:700;color:var(--gray);margin-bottom:10px">
+          📅 ${dateName} <span style="font-weight:400">(${evalsOnDate.length} ${evalWordCount(evalsOnDate.length)})</span>
+        </div>
+        ${evalsOnDate.map(e => renderEvalJournalCard(e, evalScoreColor, true)).join("")}
+      </div>
+    `;
+  }).join("");
+}
 
-    const scoreColor = v => (v === "-" || v === undefined) ? "var(--gray)" : (Number(v) <= 2 ? "var(--red)" : (Number(v) >= 4 ? "var(--green)" : "var(--yellow)"));
-    const wordEval = n => n === 1 ? "оценка" : (n >= 2 && n <= 4 ? "оценки" : "оценок");
-    const parseRuDate = s => { const m = String(s).match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})/); return m ? new Date(+m[3], +m[2]-1, +m[1]).getTime() : 0; };
+// Заполняет выпадающий список техники в панели «по технике» уникальными
+// значениями equipmentType из уже загруженного LAST_EVALUATIONS.
+function populateEvalTypeFilter() {
+  const sel = document.getElementById("evalTypeScope");
+  if (!sel) return;
+  const current = sel.value || "all";
+  const types = Array.from(new Set(LAST_EVALUATIONS.map(e => e.equipmentType || "Без типа"))).sort();
+  sel.innerHTML = `<option value="all">Все типы техники</option>` +
+    types.map(t => `<option value="${t.replace(/"/g,'&quot;')}">${t}</option>`).join("");
+  if (types.includes(current)) sel.value = current;
+}
 
-    const typeNames = Object.keys(byType).sort();
-    el.innerHTML = typeNames.map(type => {
-      const siteBlocks = byType[type];
-      const typeCount = Object.values(siteBlocks).reduce((sum, dates) => sum + Object.values(dates).reduce((s2,arr)=>s2+arr.length,0), 0);
-      const siteNames = Object.keys(siteBlocks).sort();
+// «По технике»: если выбран конкретный тип — список участок → дата для
+// него; если «все типы» — прежняя трёхуровневая группировка тип → участок → дата.
+function renderEvalByType() {
+  const el = document.getElementById("evalTypeList");
+  if (!el) return;
+  if (!LAST_EVALUATIONS.length) {
+    el.innerHTML = `<div class="empty"><div class="empty-icon">🎯</div>Оценок работы за выбранный период нет</div>`;
+    return;
+  }
 
+  const selected = document.getElementById("evalTypeScope")?.value || "all";
+  const list = selected === "all" ? LAST_EVALUATIONS : LAST_EVALUATIONS.filter(e => (e.equipmentType || "Без типа") === selected);
+  if (!list.length) {
+    el.innerHTML = `<div class="empty"><div class="empty-icon">🎯</div>Нет оценок для этого типа техники</div>`;
+    return;
+  }
+
+  const renderSiteDateBlocks = (evalsForType) => {
+    const bySite = {};
+    evalsForType.forEach(e => { const s = e.site || "Без участка"; (bySite[s] ??= {}); const d = e.date || "Без даты"; (bySite[s][d] ??= []).push(e); });
+    const siteNames = Object.keys(bySite).sort();
+    return siteNames.map(siteName => {
+      const dateBlocks = bySite[siteName];
+      const siteCount = Object.values(dateBlocks).reduce((s,arr)=>s+arr.length,0);
+      const dateNames = Object.keys(dateBlocks).sort((a,b) => parseRuDate(b) - parseRuDate(a));
       return `
-        <div style="margin-bottom:32px">
-          <div style="display:flex;align-items:center;gap:10px;padding-bottom:10px;margin-bottom:16px;border-bottom:2px solid #4338CA">
-            <span style="font-size:20px">🚜</span>
-            <span style="font-size:17px;font-weight:800;color:var(--navy)">${type}</span>
-            <span style="font-size:12px;color:var(--gray);font-weight:600">(${typeCount} ${wordEval(typeCount)})</span>
+        <div style="margin-left:14px;margin-bottom:20px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+            <span style="font-size:14px">📍</span>
+            <span style="font-size:14px;font-weight:700;color:var(--navy2)">${siteName}</span>
+            <span style="font-size:11px;color:var(--gray)">(${siteCount})</span>
           </div>
-          ${siteNames.map(siteName => {
-            const dateBlocks = siteBlocks[siteName];
-            const siteCount = Object.values(dateBlocks).reduce((s,arr)=>s+arr.length,0);
-            const dateNames = Object.keys(dateBlocks).sort((a,b) => parseRuDate(b) - parseRuDate(a));
+          ${dateNames.map(dateName => {
+            const evalsOnDate = dateBlocks[dateName].slice().sort((a,b) => {
+              const av = a.overallAvg === "-" ? -1 : Number(a.overallAvg);
+              const bv = b.overallAvg === "-" ? -1 : Number(b.overallAvg);
+              return bv - av;
+            });
             return `
-              <div style="margin-left:14px;margin-bottom:20px">
-                <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
-                  <span style="font-size:14px">📍</span>
-                  <span style="font-size:14px;font-weight:700;color:var(--navy2)">${siteName}</span>
-                  <span style="font-size:11px;color:var(--gray)">(${siteCount})</span>
-                </div>
-                ${dateNames.map(dateName => {
-                  const evalsOnDate = dateBlocks[dateName].slice().sort((a,b) => {
-                    const av = a.overallAvg === "-" ? -1 : Number(a.overallAvg);
-                    const bv = b.overallAvg === "-" ? -1 : Number(b.overallAvg);
-                    return bv - av;
-                  });
-                  return `
-                    <div style="margin-left:14px;margin-bottom:16px">
-                      <div style="font-size:12px;font-weight:700;color:var(--gray);margin-bottom:10px">📅 ${dateName}</div>
-                      ${evalsOnDate.map(e => renderEvalJournalCard(e, scoreColor)).join("")}
-                    </div>
-                  `;
-                }).join("")}
+              <div style="margin-left:14px;margin-bottom:16px">
+                <div style="font-size:12px;font-weight:700;color:var(--gray);margin-bottom:10px">📅 ${dateName}</div>
+                ${evalsOnDate.map(e => renderEvalJournalCard(e, evalScoreColor)).join("")}
               </div>
             `;
           }).join("")}
         </div>
       `;
     }).join("");
-  } catch (err) {
-    el.innerHTML = `<div class="empty">Не удалось загрузить: ${err.message}</div>`;
+  };
+
+  if (selected !== "all") {
+    el.innerHTML = renderSiteDateBlocks(list);
+    return;
   }
+
+  const byType = {};
+  list.forEach(e => { const t = e.equipmentType || "Без типа"; (byType[t] ??= []).push(e); });
+  const typeNames = Object.keys(byType).sort();
+  el.innerHTML = typeNames.map(type => {
+    const evalsForType = byType[type];
+    return `
+      <div style="margin-bottom:32px">
+        <div style="display:flex;align-items:center;gap:10px;padding-bottom:10px;margin-bottom:16px;border-bottom:2px solid #4338CA">
+          <span style="font-size:20px">🚜</span>
+          <span style="font-size:17px;font-weight:800;color:var(--navy)">${type}</span>
+          <span style="font-size:12px;color:var(--gray);font-weight:600">(${evalsForType.length} ${evalWordCount(evalsForType.length)})</span>
+        </div>
+        ${renderSiteDateBlocks(evalsForType)}
+      </div>
+    `;
+  }).join("");
 }
 
 // Одна карточка оценки — «акцентированное событие», не строка таблицы:
@@ -2205,7 +2350,7 @@ async function loadEvaluationRatingSection() {
 // Если это машинист экскаватора и в тот же день делался хронометраж —
 // присоединяем его отдельным блоком внутри той же карточки (не отдельной
 // сущностью на экране) — visually связано с конкретной оценкой.
-function renderEvalJournalCard(e, scoreColor) {
+function renderEvalJournalCard(e, scoreColor, showSite) {
   const clickable = e.empId
     ? `<span style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted"
          onclick="goToEmployeeProfile('${String(e.empId).replace(/'/g,"\\'")}')">${e.empName}</span>`
@@ -2235,7 +2380,7 @@ function renderEvalJournalCard(e, scoreColor) {
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:16px;flex-wrap:wrap">
         <div>
           <div style="font-size:16px;font-weight:800;color:var(--navy)">${clickable}</div>
-          <div style="font-size:12px;color:var(--gray);margin-top:2px">${e.position||""}${e.equipmentModel?" · "+e.equipmentModel:""}${e.workType?" · "+e.workType:""}</div>
+          <div style="font-size:12px;color:var(--gray);margin-top:2px">${e.position||""}${e.equipmentModel?" · "+e.equipmentModel:""}${e.workType?" · "+e.workType:""}${showSite && e.site?" · 📍 "+e.site:""}</div>
         </div>
         <div style="text-align:center">
           <div style="font-size:22px;font-weight:800;color:${scoreColor(e.overallAvg)}">${e.overallAvg}</div>
@@ -5419,6 +5564,13 @@ function computeOperatorRating() {
 let AWARD_PERIOD = "week";   // week | month | quarter
 let AWARD_OFFSET = 0;        // 0 — текущий период, -1 — предыдущий, и т.д.
 
+// Кэш для вкладки «Рейтинг операторов»: тяжёлые списки (полная таблица,
+// журналы оценок) больше не рендерятся сразу — только по клику на кнопку.
+// Данные загружаются один раз в renderOperatorRating()/loadEvaluationRatingSection(),
+// а сами DOM-деревья строятся лениво, при открытии соответствующей панели.
+let LAST_RATING_ROWS = [];
+let LAST_EVALUATIONS = [];
+
 function awardPeriodRange(kind, offset) {
   const now = new Date();
   const off = offset || 0;
@@ -5800,31 +5952,41 @@ async function printAwardCertificate(empId, empName, place, defects, comments, o
   window.print();
 }
 
+// Клик по имени открывает карточку сотрудника — используется во всех
+// списках вкладки «Рейтинг операторов» (топ-3, таблица, формальный осмотр).
+function ratingClickable(r, inner) {
+  return r.empId
+    ? `<span style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted"
+         onclick="goToEmployeeProfile('${String(r.empId).replace(/'/g,"\\'")}')">${inner}</span>`
+    : inner;
+}
+
 async function renderOperatorRating() {
   // Догружаем агрегат за выбранный период, если его ещё нет
   const pv = document.getElementById("ratingPeriod")?.value || "30";
   await statsForDays(pv === "all" ? 0 : Number(pv));
   loadEvaluationRatingSection(); // независимая секция, не блокирует остальное
   renderWeeklyAward();
+
   const rows = computeOperatorRating();
+  LAST_RATING_ROWS = rows;
+
   const sum = document.getElementById("ratingSummary");
-  const att = document.getElementById("ratingAttentive");
-  const frm = document.getElementById("ratingFormal");
-  const tbl = document.getElementById("ratingTable");
-  if (!tbl) return;
+  const top3El = document.getElementById("ratingTop3");
+  const formalBtn = document.getElementById("btnFormalToggle");
 
   if (!rows.length) {
     if (sum) sum.innerHTML = "";
-    att.innerHTML = `<div class="empty"><div class="empty-icon">📊</div>Нет данных за выбранный период</div>`;
-    frm.innerHTML = `<div class="empty"><div class="empty-icon">📊</div>Нет данных</div>`;
-    tbl.innerHTML = `<div class="empty"><div class="empty-icon">📊</div>Нет данных</div>`;
+    if (top3El) top3El.innerHTML = `<div class="empty"><div class="empty-icon">📊</div>Нет данных за выбранный период</div>`;
+    if (formalBtn) formalBtn.textContent = "⚠️ Формальный осмотр";
+    renderRatingTableFull(rows);
+    renderRatingFormalFull(rows);
     return;
   }
 
   const totalDefects = rows.reduce((n,r)=>n+r.defects,0);
   const totalComments = rows.reduce((n,r)=>n+r.comments,0);
   const formalList = rows.filter(r => r.formal);
-  const attentive = rows.filter(r => r.defects > 0 || r.comments > 0).slice(0, 10);
 
   if (sum) {
     sum.innerHTML = `<div class="stats-grid" style="margin-bottom:16px">
@@ -5841,19 +6003,35 @@ async function renderOperatorRating() {
     </div>`;
   }
 
-  const medal = i => ["🥇","🥈","🥉"][i] || `${i+1}.`;
-  const clickable = (r, inner) => r.empId
-    ? `<span style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted"
-         onclick="goToEmployeeProfile('${String(r.empId).replace(/'/g,"\\'")}')">${inner}</span>`
-    : inner;
+  if (formalBtn) formalBtn.textContent = formalList.length ? `⚠️ Формальный осмотр (${formalList.length})` : `✓ Формальный осмотр (0)`;
 
-  att.innerHTML = attentive.length ? attentive.map((r,i)=>`
+  renderRatingTop3(rows);
+
+  // Полная таблица и список формальных осмотров тяжёлые и скрыты по
+  // умолчанию — пересчитываем их DOM только если панель уже открыта
+  // (иначе просто обновим при следующем toggleRatingSection).
+  const tPanel = document.getElementById("panelRatingTable");
+  const fPanel = document.getElementById("panelRatingFormal");
+  if (tPanel && tPanel.style.display !== "none") renderRatingTableFull(rows);
+  if (fPanel && fPanel.style.display !== "none") renderRatingFormalFull(rows);
+}
+
+function renderRatingTop3(rows) {
+  const el = document.getElementById("ratingTop3");
+  if (!el) return;
+  const attentive = rows.filter(r => r.defects > 0 || r.comments > 0).slice(0, 3);
+  if (!attentive.length) {
+    el.innerHTML = `<div class="empty" style="padding:16px"><div class="empty-icon">🔍</div>Пока никто не отметил ни одной неисправности</div>`;
+    return;
+  }
+  const medal = i => ["🥇","🥈","🥉"][i] || `${i+1}.`;
+  el.innerHTML = attentive.map((r,i)=>`
     <div style="display:flex;justify-content:space-between;align-items:center;
       padding:10px 0;border-bottom:1px solid var(--border)">
       <div style="display:flex;align-items:center;gap:10px">
         <span style="font-size:16px;min-width:28px">${medal(i)}</span>
         <div>
-          <div style="font-size:13px;font-weight:700;color:var(--navy)">${clickable(r, r.name)}</div>
+          <div style="font-size:13px;font-weight:700;color:var(--navy)">${ratingClickable(r, r.name)}</div>
           <div style="font-size:11px;color:var(--gray)">
             🚜 ${r.equipmentLabel} · ${r.osmotrs} осмотр(ов) · ${r.daysCount} дн.${r.fuel?` · ${r.fuel} заправ.`:""}
           </div>
@@ -5863,15 +6041,46 @@ async function renderOperatorRating() {
         <div><b style="color:var(--red)">${r.defects}</b> неиспр. · <b style="color:var(--navy2)">${r.comments}</b> комм.</div>
         <div style="color:var(--gray);font-size:11px">балл ${r.score}</div>
       </div>
-    </div>`).join("")
-    : `<div class="empty" style="padding:16px"><div class="empty-icon">🔍</div>Пока никто не отметил ни одной неисправности</div>`;
+    </div>`).join("");
+}
 
+function renderRatingTableFull(rows) {
+  const tbl = document.getElementById("ratingTable");
+  if (!tbl) return;
+  if (!rows.length) {
+    tbl.innerHTML = `<div class="empty"><div class="empty-icon">📊</div>Нет данных</div>`;
+    return;
+  }
+  tbl.innerHTML = `<div class="tbl-wrap"><table style="font-size:13px">
+    <thead><tr>
+      <th>#</th><th>Оператор</th><th>Техника</th><th>Осмотров</th><th>Дней</th>
+      <th>Неисправ.</th><th>Коммент.</th><th>Заправок</th><th>Балл</th>
+    </tr></thead>
+    <tbody>${rows.map((r,i)=>`
+      <tr${r.formal?' style="background:var(--redbg,#FEECEC)"':''}>
+        <td>${i+1}</td>
+        <td><b>${ratingClickable(r, r.name)}</b>${r.formal?' <span style="font-size:10px;color:var(--red)">формально</span>':''}</td>
+        <td style="font-size:12px;color:var(--gray)">${r.equipmentLabel}</td>
+        <td>${r.osmotrs}</td>
+        <td>${r.daysCount}</td>
+        <td${r.defects?' style="font-weight:700;color:var(--red)"':''}>${r.defects}</td>
+        <td${r.comments?' style="font-weight:700;color:var(--navy2)"':''}>${r.comments}</td>
+        <td>${r.fuel}</td>
+        <td><b>${r.score}</b></td>
+      </tr>`).join("")}</tbody>
+  </table></div>`;
+}
+
+function renderRatingFormalFull(rows) {
+  const frm = document.getElementById("ratingFormal");
+  if (!frm) return;
+  const formalList = rows.filter(r => r.formal);
   frm.innerHTML = formalList.length ? formalList
     .sort((a,b)=>b.osmotrs-a.osmotrs).map(r=>`
     <div style="display:flex;justify-content:space-between;align-items:center;
       padding:10px 12px;background:var(--redbg,#FEECEC);border-radius:8px;margin-bottom:6px">
       <div>
-        <div style="font-size:13px;font-weight:700;color:var(--navy)">${clickable(r, r.name)}</div>
+        <div style="font-size:13px;font-weight:700;color:var(--navy)">${ratingClickable(r, r.name)}</div>
         <div style="font-size:11px;color:var(--gray)">🚜 ${r.equipmentLabel} · ${r.daysCount} дн.</div>
       </div>
       <div style="text-align:right;font-size:12px;color:var(--red)">
@@ -5882,25 +6091,26 @@ async function renderOperatorRating() {
     : `<div style="padding:10px 12px;background:var(--greenbg,#EAF7ED);border-radius:8px;font-size:13px;color:var(--green,#2E7D32)">
         ✓ Формальных осмотров не выявлено — все, кто проводил 5+ проверок, что-то отмечали
       </div>`;
+}
 
-  tbl.innerHTML = `<div class="tbl-wrap"><table style="font-size:13px">
-    <thead><tr>
-      <th>#</th><th>Оператор</th><th>Техника</th><th>Осмотров</th><th>Дней</th>
-      <th>Неисправ.</th><th>Коммент.</th><th>Заправок</th><th>Балл</th>
-    </tr></thead>
-    <tbody>${rows.map((r,i)=>`
-      <tr${r.formal?' style="background:var(--redbg,#FEECEC)"':''}>
-        <td>${i+1}</td>
-        <td><b>${clickable(r, r.name)}</b>${r.formal?' <span style="font-size:10px;color:var(--red)">формально</span>':''}</td>
-        <td style="font-size:12px;color:var(--gray)">${r.equipmentLabel}</td>
-        <td>${r.osmotrs}</td>
-        <td>${r.daysCount}</td>
-        <td${r.defects?' style="font-weight:700;color:var(--red)"':''}>${r.defects}</td>
-        <td${r.comments?' style="font-weight:700;color:var(--navy2)"':''}>${r.comments}</td>
-        <td>${r.fuel}</td>
-        <td><b>${r.score}</b></td>
-      </tr>`).join("")}</tbody>
-  </table></div>`;
+// Разворачивает/сворачивает один из четырёх скрытых по умолчанию блоков
+// вкладки «Рейтинг операторов». Тяжёлый DOM строится лениво, при первом
+// открытии (и далее пересчитывается вместе с фильтрами — см. вызовы выше).
+function toggleRatingSection(key) {
+  const map = { table: "panelRatingTable", formal: "panelRatingFormal", evalTime: "panelEvalTime", evalType: "panelEvalType" };
+  const id = map[key];
+  const panel = id && document.getElementById(id);
+  if (!panel) return;
+  const opening = panel.style.display === "none";
+  panel.style.display = opening ? "" : "none";
+  if (!opening) return;
+
+  if (key === "table") renderRatingTableFull(LAST_RATING_ROWS);
+  if (key === "formal") renderRatingFormalFull(LAST_RATING_ROWS);
+  if (key === "evalTime") renderEvalByTime();
+  if (key === "evalType") { populateEvalTypeFilter(); renderEvalByType(); }
+
+  panel.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function exportRatingCSV() {
