@@ -129,6 +129,8 @@ td { padding:8px; border-bottom:1px solid var(--border); }
       <div id="vahtaSwitch" style="display:flex;gap:8px"></div>
       <div id="swapDayNightWrap"></div>
       <button class="btn-ghost" style="margin-left:8px" onclick="openNaryadModal()">📋 Наряд</button>
+      <button id="shiftRefreshBtn" class="btn-ghost" style="margin-left:8px" title="Обновить данные по вахте" onclick="refreshShiftData(true)">🔄</button>
+      <span id="shiftLastUpdatedLabel" style="font-size:11px;color:var(--gray)"></span>
     </div>
 
     <!-- ══ ВАХТА ══ -->
@@ -237,12 +239,68 @@ async function checkPin() {
       CURRENT_VAHTA = ACTIVE_VAHTAS[CURRENT_SITE];
     }
     loadAll();
+    startShiftAutoRefresh();
+    LAST_SHIFT_REFRESH_AT = new Date();
+    shiftLastUpdatedLabel();
   } else {
     document.getElementById("loginErr").style.display = "block";
     document.getElementById("pinInput").value = "";
     document.getElementById("pinInput").focus();
   }
 }
+
+// ══════════════════════════════════════════════════════
+// АВТООБНОВЛЕНИЕ СМЕН — раньше DATA.shiftAssignments грузился только один
+// раз при входе, при смене участка и после собственных действий мастера.
+// Если водитель сдавал чек-лист (checklist.html, статус техники "В работе"/
+// "Ремонт") на СВОЁМ телефоне, мастер это узнавал только перезайдя в
+// приложение — панель весь день показывала замороженный снимок с момента
+// логина. Баг подтверждён 27.08.2026: сверка по HT202 показала, что бэкенд
+// пишет статус корректно и почти мгновенно, проблема была чисто в том, что
+// клиент никогда не переспрашивал сервер.
+// Тянем ТОЛЬКО shiftAssignments (лёгкий payload, тот же вызов, что и
+// точечные обновления после своих действий) — не весь loadAll(), чтобы не
+// дёргать лишний раз тяжёлые заправки/техники на слабой связи в карьере.
+const SHIFT_AUTOREFRESH_MS = 3 * 60 * 1000; // 3 минуты
+let SHIFT_AUTOREFRESH_TIMER = null;
+let LAST_SHIFT_REFRESH_AT = null;
+
+function shiftLastUpdatedLabel() {
+  const el = document.getElementById("shiftLastUpdatedLabel");
+  if (!el) return;
+  if (!LAST_SHIFT_REFRESH_AT) { el.textContent = ""; return; }
+  const t = LAST_SHIFT_REFRESH_AT.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+  el.textContent = `обновлено в ${t}`;
+}
+
+async function refreshShiftData(manual) {
+  const btn = document.getElementById("shiftRefreshBtn");
+  if (manual && btn) { btn.disabled = true; btn.textContent = "⏳"; }
+  try {
+    await loadAll(["shiftAssignments"]);
+    LAST_SHIFT_REFRESH_AT = new Date();
+  } finally {
+    shiftLastUpdatedLabel();
+    if (manual && btn) { btn.disabled = false; btn.textContent = "🔄"; }
+  }
+}
+
+function startShiftAutoRefresh() {
+  if (SHIFT_AUTOREFRESH_TIMER) clearInterval(SHIFT_AUTOREFRESH_TIMER);
+  SHIFT_AUTOREFRESH_TIMER = setInterval(() => {
+    if (document.visibilityState === "visible") refreshShiftData(false);
+  }, SHIFT_AUTOREFRESH_MS);
+}
+
+// Возврат во вкладку (разблокировал телефон, переключился обратно) — самый
+// частый в поле случай, когда стоит перепроверить данные, не дожидаясь
+// таймера. Троттлинг в полминуты — чтобы быстрые переключения между
+// приложениями не долбили сервер запросами подряд.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState !== "visible") return;
+  if (LAST_SHIFT_REFRESH_AT && (new Date() - LAST_SHIFT_REFRESH_AT) < 30000) return;
+  refreshShiftData(false);
+});
 function logout() {
   document.getElementById("loginScreen").style.display = "flex";
   document.getElementById("app").style.display = "none";
