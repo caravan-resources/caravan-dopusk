@@ -150,6 +150,14 @@ body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans
         👷 Кто проводит осмотры
         <button class="btn-ghost" onclick="downloadOperatorsExcel()">📥 Excel</button>
       </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+        <span style="font-size:11px;color:var(--gray)">Скачать за период:</span>
+        <input type="date" id="opFrom" style="font-size:12px;padding:5px 8px;border:1.5px solid var(--border);border-radius:8px">
+        <span style="font-size:11px;color:var(--gray)">—</span>
+        <input type="date" id="opTo" style="font-size:12px;padding:5px 8px;border:1.5px solid var(--border);border-radius:8px">
+        <button class="btn-ghost" style="padding:6px 12px;font-size:12px"
+          onclick="downloadOperatorsExcelForPeriod(this)">📥 Excel за период</button>
+      </div>
       <p style="font-size:12px;color:var(--gray);margin-bottom:12px">
         Много осмотров подряд без единого замечания — обычно признак формального осмотра,
         а не исправной техники.
@@ -452,16 +460,14 @@ function renderByOperator() {
 }
 
 // Выгрузка таблицы «Кто проводит осмотры» в .xlsx (SheetJS, подключён в
-// <head>). Та же логика, что у downloadNaryadExcel в master.html — берём то,
-// что уже показано на экране, без отдельного запроса к серверу.
-function downloadOperatorsExcel() {
+// <head>). Общий помощник — строит и скачивает файл из готового массива
+// byOperator, чтобы не дублировать код между «текущий период» и «свой период».
+function operatorsRowsToExcel(rows, periodLabel) {
   if (typeof XLSX === "undefined") {
     alert("Библиотека Excel не загрузилась (нужен интернет) — попробуй ещё раз.");
     return;
   }
-  const st = chkStats();
-  const rows = st ? st.byOperator : [];
-  if (!rows.length) { alert("Пока нет данных для выгрузки."); return; }
+  if (!rows || !rows.length) { alert("Нет данных для выгрузки за этот период."); return; }
 
   const aoa = [["Оператор","Техника","Осмотров","Неисправностей","Комментариев"]];
   rows.forEach(v => {
@@ -475,7 +481,48 @@ function downloadOperatorsExcel() {
   ws["!cols"] = [{wch:28},{wch:30},{wch:10},{wch:14},{wch:14}];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Операторы");
-  XLSX.writeFile(wb, `Операторы_${CURRENT_SITE}_${STAT_FROM ? STAT_FROM.slice(0,10)+"_"+STAT_TO.slice(0,10) : todayIsoLocal()}.xlsx`);
+  XLSX.writeFile(wb, `Операторы_${CURRENT_SITE}_${periodLabel}.xlsx`);
+}
+
+// Скачать то, что уже показано на экране (текущий период страницы) — без
+// отдельного запроса к серверу.
+function downloadOperatorsExcel() {
+  const st = chkStats();
+  const rows = st ? st.byOperator : [];
+  const periodLabel = STAT_FROM ? STAT_FROM.slice(0,10)+"_"+STAT_TO.slice(0,10) : todayIsoLocal();
+  operatorsRowsToExcel(rows, periodLabel);
+}
+
+// Скачать за произвольный период дат, выбранный прямо в этой панели — не
+// меняет то, что видно на экране (не трогает CURRENT/STAT_FROM/STAT_TO
+// страницы), делает отдельный запрос к серверу под конкретный период.
+async function downloadOperatorsExcelForPeriod(btn) {
+  const fromVal = document.getElementById("opFrom").value;
+  const toVal   = document.getElementById("opTo").value;
+  if (!fromVal || !toVal) { alert("Укажите обе даты периода."); return; }
+  if (fromVal > toVal) { alert("Дата «с» позже даты «по» — проверьте период."); return; }
+  // «to» на сервере — исключающая верхняя граница, сдвигаем на начало
+  // следующих суток, чтобы выбранный день полностью попал в выборку.
+  const toDate = new Date(toVal + "T00:00:00");
+  toDate.setDate(toDate.getDate() + 1);
+  const from = fromVal + "T00:00:00";
+  const to = toDate.toISOString();
+
+  const old = btn ? btn.textContent : "";
+  if (btn) { btn.disabled = true; btn.textContent = "⏳ Загружаю..."; }
+  try {
+    const data = await fetchWithRetry(
+      `${CFG.SHEET_URL}?action=getChecklistStats&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+      90000, 3);
+    if (!data || !data.ok) { alert("Не удалось загрузить данные за этот период."); return; }
+    const siteStats = (data.sites && data.sites[CURRENT_SITE]) || null;
+    operatorsRowsToExcel(siteStats ? siteStats.byOperator : [], `${fromVal}_${toVal}`);
+  } catch(e) {
+    console.error("Выгрузка операторов за период:", e);
+    alert("Ошибка загрузки данных за период.");
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = old; }
+  }
 }
 
 function todayIsoLocal() {
