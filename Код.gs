@@ -91,6 +91,7 @@ function doPost(e) {
     if (d.action === "saveResult")     return saveResult(d.result);
     if (d.action === "backfillTestIds") return backfillTestIds();
     if (d.action === "deleteResultById") return deleteResultById(d.id);
+    if (d.action === "renameEmpInResults") return renameEmpInResults(d.oldName, d.newName);
     if (d.action === "updateAccess")   return updateAccess(d.empName, d.passDate, d.validUntil, d.position, d.site, d.empId);
     if (d.action === "saveTraining")   return saveTraining(d.empId, d.empName, d.course, d.date, d.validUntil);
     if (d.action === "getTraining")    return getTraining();
@@ -546,6 +547,29 @@ function deleteResultById(id) {
     }
   }
   return json({ ok: false, error: "not found" });
+}
+
+// Поправить empName в Результатах после исправления опечатки/формата
+// в карточке сотрудника (updateEmployee меняет имя только в «Сотрудники»,
+// а Результаты связаны с ним просто строкой — без этого шага записи
+// "отрываются" от карточки, тем же способом, что и testId сегодня).
+function renameEmpInResults(oldName, newName) {
+  if (!oldName || !newName) return json({ ok: false, error: "Нужны oldName и newName" });
+  const ss    = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName(SHEET_RESULTS);
+  if (!sheet) return json({ ok: false, error: "no sheet" });
+
+  const rows = sheet.getDataRange().getValues();
+  const EMP_NAME_COL = 3; // та же фиксированная позиция, что и везде в этом файле
+
+  let updated = 0;
+  for (let i = 1; i < rows.length; i++) {
+    if (String(rows[i][EMP_NAME_COL]).trim() === String(oldName).trim()) {
+      sheet.getRange(i + 1, EMP_NAME_COL + 1).setValue(newName);
+      updated++;
+    }
+  }
+  return json({ ok: true, updated: updated });
 }
 
 // ── Получить все результаты тестов ──────────────────
