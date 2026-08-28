@@ -488,37 +488,36 @@ function backfillTestIds() {
   const rows = sheet.getDataRange().getValues();
   if (rows.length < 2) return json({ ok: true, updated: 0 });
 
-  const headers = rows[0];
-  const testTitleCol = headers.indexOf("Тест");
-  const testIdCol    = headers.indexOf("ID теста");
-  if (testTitleCol < 0 || testIdCol < 0) {
-    return json({ ok: false, error: "columns not found (Тест / ID теста)" });
-  }
+  // Фиксированные позиции колонок Результатов — те же, что в getResults/saveResult:
+  // 0=id, 1=date, 2=time, 3=empName, 4=testTitle, 5=result, ..., 13=testId
+  const TEST_TITLE_COL = 4;
+  const TEST_ID_COL    = 13;
 
+  // Каталог тестов читаем той же логикой протяжки testId по пустым строкам
+  // блока вопросов, что и в getTests() — иначе title→id собьётся.
   const testsSheet = ss.getSheetByName(SHEET_TESTS);
   const titleToId = {};
   if (testsSheet) {
     const testRows = testsSheet.getDataRange().getValues();
-    const tHeaders = testRows[0];
-    const idCol2    = tHeaders.indexOf("testId");
-    const titleCol2 = tHeaders.indexOf("testTitle");
-    if (idCol2 >= 0 && titleCol2 >= 0) {
-      testRows.slice(1).forEach(r => {
-        const title = String(r[titleCol2] || "").trim();
-        const id    = String(r[idCol2] || "").trim();
-        if (title && id && !(title in titleToId)) titleToId[title] = id;
-      });
-    }
+    let curTestId = "", curTitle = "";
+    testRows.slice(1).forEach(r => {
+      const rawTestId = String(r[0]).trim();
+      if (rawTestId) {
+        curTestId = rawTestId;
+        curTitle  = String(r[1]).trim();
+        if (curTitle && !(curTitle in titleToId)) titleToId[curTitle] = curTestId;
+      }
+    });
   }
 
   let updated = 0, skipped = 0;
   for (let i = 1; i < rows.length; i++) {
-    const currentId = String(rows[i][testIdCol] || "").trim();
+    const currentId = String(rows[i][TEST_ID_COL] || "").trim();
     if (currentId) continue; // уже проставлен
-    const title = String(rows[i][testTitleCol] || "").trim();
+    const title = String(rows[i][TEST_TITLE_COL] || "").trim();
     const id = titleToId[title];
     if (id) {
-      sheet.getRange(i + 1, testIdCol + 1).setValue(id);
+      sheet.getRange(i + 1, TEST_ID_COL + 1).setValue(id);
       updated++;
     } else {
       skipped++;
@@ -530,7 +529,7 @@ function backfillTestIds() {
 
 // Удалить одну строку Результатов по её id — на случай случайного
 // дубля (например, при повторной отправке после таймаута сети).
-// Матчим по колонке id, не по номеру строки — безопаснее.
+// Матчим по колонке id (позиция 0), не по номеру строки — безопаснее.
 function deleteResultById(id) {
   if (!id) return json({ ok: false, error: "Нужен id" });
   const ss    = SpreadsheetApp.openById(SHEET_ID);
@@ -538,12 +537,10 @@ function deleteResultById(id) {
   if (!sheet) return json({ ok: false, error: "no sheet" });
 
   const rows = sheet.getDataRange().getValues();
-  const headers = rows[0];
-  const idCol = headers.indexOf("id");
-  if (idCol < 0) return json({ ok: false, error: "no id column" });
+  const ID_COL = 0;
 
   for (let i = 1; i < rows.length; i++) {
-    if (String(rows[i][idCol]).trim() === String(id).trim()) {
+    if (String(rows[i][ID_COL]).trim() === String(id).trim()) {
       sheet.deleteRow(i + 1);
       return json({ ok: true, deleted: id });
     }
