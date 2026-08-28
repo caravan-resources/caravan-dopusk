@@ -391,9 +391,9 @@ function saveResult(r) {
     sheet.appendRow([
       "ID","Дата","Время","Сотрудник","Тест",
       "Результат","Балл (%)","Правильных","Всего вопросов",
-      "Проходной (%)","Время (мин)","Истекло время","Ответы"
+      "Проходной (%)","Время (мин)","Истекло время","Ответы","ID теста"
     ]);
-    sheet.getRange(1,1,1,13)
+    sheet.getRange(1,1,1,14)
       .setBackground("#0D1B3E").setFontColor("#F4A52A").setFontWeight("bold");
     sheet.setFrozenRows(1);
   }
@@ -402,11 +402,16 @@ function saveResult(r) {
   const date = Utilities.formatDate(now,"Asia/Almaty","dd.MM.yyyy");
   const time = Utilities.formatDate(now,"Asia/Almaty","HH:mm");
 
-  // Если у листа ещё 12 колонок (старый формат) — дописываем заголовок «Ответы»,
-  // чтобы разбор ошибок заработал без пересоздания листа
-  const headers = sheet.getRange(1,1,1,sheet.getLastColumn()).getValues()[0];
+  // Если у листа ещё нет каких-то колонок (старый формат) — дописываем заголовки,
+  // чтобы разбор ошибок и сверка по testId заработали без пересоздания листа
+  let headers = sheet.getRange(1,1,1,sheet.getLastColumn()).getValues()[0];
   if (headers.indexOf("Ответы") < 0) {
     sheet.getRange(1, headers.length+1).setValue("Ответы")
+      .setBackground("#0D1B3E").setFontColor("#F4A52A").setFontWeight("bold");
+    headers = sheet.getRange(1,1,1,sheet.getLastColumn()).getValues()[0];
+  }
+  if (headers.indexOf("ID теста") < 0) {
+    sheet.getRange(1, headers.length+1).setValue("ID теста")
       .setBackground("#0D1B3E").setFontColor("#F4A52A").setFontWeight("bold");
   }
 
@@ -421,10 +426,15 @@ function saveResult(r) {
     // Ответы работника: {"q1":[0],"q2":[2],...} — нужны, чтобы видеть,
     // на каких именно вопросах человек ошибается
     r.answers ? JSON.stringify(r.answers) : "",
+    // ID теста из каталога (DATA.tests) — нужен для сверки «Компетенции по
+    // должности» (competencyGap в instructor.html). Раньше клиент его слал,
+    // а бэкенд молча терял — из-за этого проверка требований никогда не
+    // находила пройденные тесты, для всех сотрудников без исключения.
+    r.testId || "",
   ]);
 
   const lastRow = sheet.getLastRow();
-  sheet.getRange(lastRow,1,1,13)
+  sheet.getRange(lastRow,1,1,14)
     .setBackground(r.passed?"#E8F5E9":"#FFEBEE");
 
   return json({ ok: true });
@@ -468,7 +478,7 @@ function getResults() {
   const rows = sheet.getDataRange().getValues();
   if (rows.length < 2) return json([]);
 
-  const HEADERS = ["id","date","time","empName","testTitle","result","score","correctQ","totalQ","passingScore","duration","expired","answers"];
+  const HEADERS = ["id","date","time","empName","testTitle","result","score","correctQ","totalQ","passingScore","duration","expired","answers","testId"];
 
   const data = rows.slice(1).filter(r=>r[0]).map(r=>{
     const o = {};
