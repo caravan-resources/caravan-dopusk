@@ -2850,7 +2850,7 @@ function saveShiftAssignment(p) {
 // Изменить существующее назначение по номеру строки. equipmentId тоже можно
 // менять — нужно при переименовании техники, чтобы записи смен не осиротели.
 function updateShiftAssignment(p) {
-  const { row, equipmentId, empId, empName, status, dismissDate, skill, workStatus, reassignNote, equipmentStatus } = p || {};
+  const { row, equipmentId, empId, empName, status, dismissDate, skill, workStatus, reassignNote, equipmentStatus, site, vahta } = p || {};
   if (!row) return json({ ok: false, error: "Нужен row" });
   const ss    = SpreadsheetApp.openById(SHEET_ID);
   const sheet = ss.getSheetByName(SHEET_SHIFTS);
@@ -2863,6 +2863,10 @@ function updateShiftAssignment(p) {
   if (status      !== undefined && col("status")      > 0) sheet.getRange(row, col("status")).setValue(status);
   if (dismissDate !== undefined && col("dismissDate") > 0) sheet.getRange(row, col("dismissDate")).setValue(dismissDate);
   if (skill       !== undefined && col("skill")       > 0) sheet.getRange(row, col("skill")).setValue(skill);
+  // site/vahta — нужны при переезде техники/экипажа между участками (см. кейс EX223,
+  // 28.08.2026): раньше их нельзя было поменять без удаления и пересоздания строки.
+  if (site        !== undefined && col("site")        > 0) sheet.getRange(row, col("site")).setValue(site);
+  if (vahta       !== undefined && col("vahta")       > 0) sheet.getRange(row, col("vahta")).setValue(vahta);
   // Пишутся, только если такие столбцы реально есть на листе (см. комментарий
   // в saveShiftAssignment) — на старом листе без них просто ничего не произойдёт,
   // без ошибки.
