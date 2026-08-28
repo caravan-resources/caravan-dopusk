@@ -4468,7 +4468,7 @@ function selectPersonnelEmployee(id) {
             </span>
             <span style="white-space:nowrap">
               <b style="color:${Number(t.score)>=Number(t.passingScore||80)?'var(--green,#2E7D32)':'var(--red)'}">${t.score||"—"}%</b>
-              ${resultBadge(isPassed(t))}
+              ${isPassed(t) ? `<span class="badge b-green">✓ Сдал</span>` : `<span class="badge b-gray">Попытка не пройдена</span>`}
               <span style="color:var(--gray)">${fmtDate(t.date)}</span>
             </span>
           </div>`;
