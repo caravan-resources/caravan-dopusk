@@ -92,6 +92,7 @@ function doPost(e) {
     if (d.action === "backfillTestIds") return backfillTestIds();
     if (d.action === "deleteResultById") return deleteResultById(d.id);
     if (d.action === "renameEmpInResults") return renameEmpInResults(d.oldName, d.newName);
+    if (d.action === "fixTrainingEmp") return fixTrainingEmp(d.oldName, d.newName, d.newEmpId);
     if (d.action === "updateAccess")   return updateAccess(d.empName, d.passDate, d.validUntil, d.position, d.site, d.empId);
     if (d.action === "saveTraining")   return saveTraining(d.empId, d.empName, d.course, d.date, d.validUntil);
     if (d.action === "getTraining")    return getTraining();
@@ -566,6 +567,30 @@ function renameEmpInResults(oldName, newName) {
   for (let i = 1; i < rows.length; i++) {
     if (String(rows[i][EMP_NAME_COL]).trim() === String(oldName).trim()) {
       sheet.getRange(i + 1, EMP_NAME_COL + 1).setValue(newName);
+      updated++;
+    }
+  }
+  return json({ ok: true, updated: updated });
+}
+
+// Перепривязать запись(и) в «Обучение» с одного сотрудника на другого —
+// нужно при слиянии карточек-дублей, чтобы факт обучения не потерялся
+// (у Обучения нет своего update-экшена, только appendTrainingFact).
+function fixTrainingEmp(oldName, newName, newEmpId) {
+  if (!oldName || !newName) return json({ ok: false, error: "Нужны oldName и newName" });
+  const ss    = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName(SHEET_TRAINING);
+  if (!sheet) return json({ ok: false, error: "no sheet" });
+
+  const rows = sheet.getDataRange().getValues();
+  const EMP_ID_COL   = 0;
+  const EMP_NAME_COL = 1;
+
+  let updated = 0;
+  for (let i = 1; i < rows.length; i++) {
+    if (String(rows[i][EMP_NAME_COL]).trim() === String(oldName).trim()) {
+      sheet.getRange(i + 1, EMP_NAME_COL + 1).setValue(newName);
+      if (newEmpId) sheet.getRange(i + 1, EMP_ID_COL + 1).setValue(newEmpId);
       updated++;
     }
   }
