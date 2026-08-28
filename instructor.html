@@ -5560,7 +5560,10 @@ function isCrawlerEquipment(equipmentId) {
 // Пары «утренняя+вечерняя» заправка по дням — только дни, где ровно 2 заправки
 // в дневную смену (07:00–19:00). Если заправок в день больше/меньше двух —
 // день пропускаем: смешивать в один расчёт нечего, это не наш чистый случай.
-function dayShiftFuelPairs(equipmentId) {
+// start/end (необязательные Date) — фильтр по периоду, применяется к дню смены
+// (start.date пары), а не к отдельным записям, чтобы не разваливать пару
+// «утро+вечер» на границе периода.
+function dayShiftFuelPairs(equipmentId, start, end) {
   const byDay = {};
   (DATA.fuel||[]).filter(f => String(f.equipmentId)===String(equipmentId)).forEach(f => {
     const d = parseRecordDate(f.date);
@@ -5572,21 +5575,22 @@ function dayShiftFuelPairs(equipmentId) {
   Object.values(byDay).forEach(recs => {
     if (recs.length !== 2) return;
     recs.sort((a,b) => a.date - b.date);
-    const [start, end] = recs;
-    const hours = (end.date - start.date) / 3600000;
+    const [s, e] = recs;
+    const hours = (e.date - s.date) / 3600000;
     if (hours <= 0) return;
     pairs.push({
-      date: start.date, startTime: start.date, endTime: end.date,
-      startLiters: start.liters, endLiters: end.liters,
-      hours: +hours.toFixed(2), rate: +(end.liters / hours).toFixed(2),
+      date: s.date, startTime: s.date, endTime: e.date,
+      startLiters: s.liters, endLiters: e.liters,
+      hours: +hours.toFixed(2), rate: +(e.liters / hours).toFixed(2),
     });
   });
-  pairs.sort((a,b) => b.date - a.date);
-  return pairs;
+  const filtered = pairs.filter(p => (!start || p.date >= start) && (!end || p.date < end));
+  filtered.sort((a,b) => b.date - a.date);
+  return filtered;
 }
 
 function avgShiftFuelRate(equipmentId, start, end) {
-  const pairs = dayShiftFuelPairs(equipmentId).filter(p => (!start || p.date >= start) && (!end || p.date < end));
+  const pairs = dayShiftFuelPairs(equipmentId, start, end);
   if (!pairs.length) return null;
   const avg = pairs.reduce((s,p)=>s+p.rate,0) / pairs.length;
   return { avg: +avg.toFixed(2), days: pairs.length };
@@ -5614,6 +5618,7 @@ function renderFuelAnalytics(site) {
   const start = fuelPeriodStart(period);
 
   populateFuelHistorySelect(site);
+  renderFuelEquipmentHistory(site); // если история по машине уже открыта — синхронизируем расход л/ч с новым периодом
   const records = all.filter(f => {
     const d = parseRecordDate(f.date);
     return d && (!start || d >= start);
@@ -5824,14 +5829,21 @@ function renderFuelEquipmentHistory(site) {
   // ── Расход л/ч по сменам — только для гусеничной техники (2 заправки/день) ──
   let rateBlock = "";
   if (isCrawlerEquipment(equipmentId)) {
-    const pairs = dayShiftFuelPairs(equipmentId);
+    // Синхронизировано с переключателем периода наверху вкладки (Сутки/Неделя/
+    // Месяц/Всё время), чтобы это число совпадало со сводкой в списке «По технике» —
+    // раньше здесь всегда считалось «за всё время», независимо от периода,
+    // и цифры расходились.
+    const period = FUEL_PERIOD[site];
+    const periodLabel = { day: "сутки", week: "неделю", month: "месяц", all: "всё время" }[period] || "выбранный период";
+    const start = fuelPeriodStart(period);
+    const pairs = dayShiftFuelPairs(equipmentId, start, null);
     const fmtDay = d => `${String(d.getDate()).padStart(2,"0")}.${String(d.getMonth()+1).padStart(2,"0")}.${d.getFullYear()}`;
     const fmtTime = d => `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
     if (pairs.length) {
       const avgAll = +(pairs.reduce((s,p)=>s+p.rate,0) / pairs.length).toFixed(2);
       rateBlock = `
         <div style="font-size:13px;font-weight:700;color:var(--navy2);margin:14px 0 8px">
-          ⛽➜⏱ Расход по сменам (утро+вечер) — в среднем <span style="color:var(--navy)">${avgAll} л/ч</span> по ${pairs.length} см.
+          ⛽➜⏱ Расход по сменам (утро+вечер) — в среднем <span style="color:var(--navy)">${avgAll} л/ч</span> по ${pairs.length} см. за ${periodLabel}
         </div>
         <div class="tbl-wrap" style="margin-bottom:14px">
           <table style="font-size:13px">
@@ -5848,11 +5860,12 @@ function renderFuelEquipmentHistory(site) {
         </div>
         <div style="font-size:11px;color:var(--gray);margin-bottom:8px">
           Расход = объём вечерней заправки (бак снова полный) ÷ часы между заправками. Дни с заправкой не 2 раза за смену сюда не попадают.
+          Период — как в переключателе Сутки/Неделя/Месяц/Всё время наверху вкладки.
         </div>
       `;
     } else {
       rateBlock = `<div style="font-size:12px;color:var(--gray);margin:14px 0 8px">
-        Гусеничная техника — расход л/ч считается по дням с ровно двумя дневными заправками (утро+вечер). Пока таких дней нет.
+        Гусеничная техника — расход л/ч считается по дням с ровно двумя дневными заправками (утро+вечер). За ${periodLabel} таких дней нет.
       </div>`;
     }
   }
