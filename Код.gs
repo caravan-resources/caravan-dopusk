@@ -89,6 +89,8 @@ function doPost(e) {
   try {
     const d = JSON.parse(e.postData.contents);
     if (d.action === "saveResult")     return saveResult(d.result);
+    if (d.action === "backfillTestIds") return backfillTestIds();
+    if (d.action === "deleteResultById") return deleteResultById(d.id);
     if (d.action === "updateAccess")   return updateAccess(d.empName, d.passDate, d.validUntil, d.position, d.site, d.empId);
     if (d.action === "saveTraining")   return saveTraining(d.empId, d.empName, d.course, d.date, d.validUntil);
     if (d.action === "getTraining")    return getTraining();
@@ -468,6 +470,85 @@ function doOptions(e) {
   return ContentService
     .createTextOutput("")
     .setMimeType(ContentService.MimeType.TEXT);
+}
+
+// ══════════════════════════════════════════════════════════
+// РАЗОВАЯ МИГРАЦИЯ: проставить testId старым строкам Результатов,
+// у которых он пуст (все записи до фикса от 28.08.2026 — клиент
+// присылал testId, но saveResult его не сохранял). Сопоставляем
+// по точному совпадению testTitle с каталогом тестов (лист «Тесты»).
+// Строки, для которых тест не найден в каталоге (переименован/удалён),
+// не трогаем — оставляем как есть, чтобы не записать неверный id.
+// ══════════════════════════════════════════════════════════
+function backfillTestIds() {
+  const ss    = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName(SHEET_RESULTS);
+  if (!sheet) return json({ ok: false, error: "no sheet" });
+
+  const rows = sheet.getDataRange().getValues();
+  if (rows.length < 2) return json({ ok: true, updated: 0 });
+
+  const headers = rows[0];
+  const testTitleCol = headers.indexOf("Тест");
+  const testIdCol    = headers.indexOf("ID теста");
+  if (testTitleCol < 0 || testIdCol < 0) {
+    return json({ ok: false, error: "columns not found (Тест / ID теста)" });
+  }
+
+  const testsSheet = ss.getSheetByName(SHEET_TESTS);
+  const titleToId = {};
+  if (testsSheet) {
+    const testRows = testsSheet.getDataRange().getValues();
+    const tHeaders = testRows[0];
+    const idCol2    = tHeaders.indexOf("testId");
+    const titleCol2 = tHeaders.indexOf("testTitle");
+    if (idCol2 >= 0 && titleCol2 >= 0) {
+      testRows.slice(1).forEach(r => {
+        const title = String(r[titleCol2] || "").trim();
+        const id    = String(r[idCol2] || "").trim();
+        if (title && id && !(title in titleToId)) titleToId[title] = id;
+      });
+    }
+  }
+
+  let updated = 0, skipped = 0;
+  for (let i = 1; i < rows.length; i++) {
+    const currentId = String(rows[i][testIdCol] || "").trim();
+    if (currentId) continue; // уже проставлен
+    const title = String(rows[i][testTitleCol] || "").trim();
+    const id = titleToId[title];
+    if (id) {
+      sheet.getRange(i + 1, testIdCol + 1).setValue(id);
+      updated++;
+    } else {
+      skipped++;
+    }
+  }
+
+  return json({ ok: true, updated: updated, skipped: skipped });
+}
+
+// Удалить одну строку Результатов по её id — на случай случайного
+// дубля (например, при повторной отправке после таймаута сети).
+// Матчим по колонке id, не по номеру строки — безопаснее.
+function deleteResultById(id) {
+  if (!id) return json({ ok: false, error: "Нужен id" });
+  const ss    = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName(SHEET_RESULTS);
+  if (!sheet) return json({ ok: false, error: "no sheet" });
+
+  const rows = sheet.getDataRange().getValues();
+  const headers = rows[0];
+  const idCol = headers.indexOf("id");
+  if (idCol < 0) return json({ ok: false, error: "no id column" });
+
+  for (let i = 1; i < rows.length; i++) {
+    if (String(rows[i][idCol]).trim() === String(id).trim()) {
+      sheet.deleteRow(i + 1);
+      return json({ ok: true, deleted: id });
+    }
+  }
+  return json({ ok: false, error: "not found" });
 }
 
 // ── Получить все результаты тестов ──────────────────
