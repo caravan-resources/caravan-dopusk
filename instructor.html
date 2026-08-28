@@ -2023,18 +2023,15 @@ function renderDashboard() {
   `).join("");
   renderTrainingBySite();
 
-  // Требует внимания — допуски (просроченные+истекающие), несданные тесты,
-  // вакансии по вахтам — всё в одном месте вместо отдельной вкладки.
+  // Требует внимания — допуски (просроченные+истекающие),  
+    // вакансии по вахтам — всё в одном месте вместо отдельной вкладки.
   // Компактный баннер, если совсем чисто, иначе — секции по каждой категории.
   // Тесты и вакансии показываем, только если их данные уже пришли — до этого
   // просто не участвуют в счётчике, а не показываются как "их нет".
-  const resultsLoaded = (DATA.results||[]).length > 0;
   const shiftsLoaded = (DATA.shiftAssignments||[]).length > 0;
-  const failedTests = resultsLoaded ? (DATA.results||[]).filter(r => !isPassed(r))
-    .sort((a,b) => new Date(getField(b,"date","Дата")||0) - new Date(getField(a,"date","Дата")||0)) : [];
   const shiftVacanciesList = shiftsLoaded ? (DATA.shiftAssignments||[]).filter(a => a.status === "вакансия") : [];
 
-  const attentionTotal = expired.length + warning.length + failedTests.length + shiftVacanciesList.length;
+  const attentionTotal = expired.length + warning.length + shiftVacanciesList.length;
   const stillLoading = !employeesLoaded && !ps;
 
   if (stillLoading) {
@@ -2045,7 +2042,7 @@ function renderDashboard() {
   } else if (attentionTotal === 0) {
     document.getElementById("attentionList").innerHTML =
       `<div style="display:flex;align-items:center;gap:8px;padding:10px 12px;background:var(--greenbg,#EAF7ED);border-radius:8px;font-size:13px;color:var(--green,#2E7D32);font-weight:700">
-        ✓ Всё чисто — ни просроченных допусков, ни несданных тестов, ни вакансий на линии
+                  ✓ Всё чисто — ни просроченных допусков, ни вакансий на линии
       </div>`;
   } else {
     // Единая строка и для полных объектов сотрудников (employeesLoaded),
@@ -2069,16 +2066,7 @@ function renderDashboard() {
       .map(e => rowHtml(e, "var(--red)", fmtDate(e.validUntil), `${Math.abs(dl(e)||0)} дн. назад`)).join("");
     const warningHtml = warning.sort((a,b)=>(dl(a)||0)-(dl(b)||0)).slice(0,6)
       .map(e => rowHtml(e, "var(--yellow)", fmtDate(e.validUntil), `${dl(e)} дн.`)).join("");
-    const failedHtml = failedTests.slice(0,6).map(r => `
-      <div style="display:flex;justify-content:space-between;align-items:center;
-        padding:9px 0;border-bottom:1px solid var(--border)">
-        <div>
-          <div style="font-size:13px;font-weight:700;color:var(--navy)">${getField(r,"empName","Сотрудник")}</div>
-          <div style="font-size:11px;color:var(--gray)">${getField(r,"testTitle","Тест")}</div>
-        </div>
-        <div style="text-align:right;font-size:12px;color:var(--gray)">${getField(r,"date","Дата")}</div>
-      </div>`).join("");
-
+    
     const vacBySite = {};
     shiftVacanciesList.forEach(a => { vacBySite[a.site||"—"] = (vacBySite[a.site||"—"]||0)+1; });
     const vacHtml = shiftVacanciesList.length
@@ -2091,11 +2079,10 @@ function renderDashboard() {
     document.getElementById("attentionList").innerHTML =
       (expired.length ? `<div style="font-size:11px;font-weight:700;color:var(--red);text-transform:uppercase;margin-bottom:2px">🔴 Просрочено (${expired.length})</div>${expiredHtml}` : "") +
       (warning.length ? `<div style="font-size:11px;font-weight:700;color:var(--yellow);text-transform:uppercase;margin:${expired.length?"12px":"0"} 0 2px">🟡 Истекает в 30 дней (${warning.length})</div>${warningHtml}` : "") +
-      (failedTests.length ? `<div style="font-size:11px;font-weight:700;color:var(--navy2);text-transform:uppercase;margin:${expired.length||warning.length?"12px":"0"} 0 2px">📋 Не сдали тест (${failedTests.length})</div>${failedHtml}` : "") +
       (shiftVacanciesList.length ? `<div style="font-size:11px;font-weight:700;color:var(--gold);text-transform:uppercase;margin:12px 0 2px">👷 Вакансий на вахтах (${shiftVacanciesList.length})</div>${vacHtml}` : "");
   }
-
-  // Последние тесты
+  const resultsLoaded = (DATA.results||[]).length > 0;
+    // Последние тесты
   const last = [...results].reverse().slice(0,6);
   document.getElementById("lastTestsList").innerHTML = last.length
     ? last.map(r=>{
