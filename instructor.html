@@ -241,11 +241,11 @@ tr:hover td { background:#FAFBFD; }
   <nav class="nav-sub" id="subTraining" style="display:none">
     <button id="navTests"   onclick="showTab('tests')">📋 Результаты тестов</button>
     <button id="navTraining" onclick="showTab('training')">🎓 Обучение</button>
-    <button id="navCertPrintProfession" onclick="showTab('certPrintProfession')">🎓 Обучение по профессии</button>
     <button id="navTrainingPlan" onclick="showTab('trainingPlan')">📚 График обучения</button>
     <button id="navImport"   onclick="showTab('import')">➕ Импорт теста</button>
     <button id="navAccess"  onclick="showTab('access')">🪪 Сроки допусков</button>
-    <button id="navPrint"    onclick="showTab('print')">🖨 Печать карточек</button>
+    <button id="navCertPrintProfession" onclick="showTab('certPrintProfession')">🖨 Печать удостоверений</button>
+    <button id="navPrint"    onclick="showTab('print')">🖨 Печать допусков</button>
   </nav>
 
   <nav class="nav-sub" id="subAdmin" style="display:none">
@@ -1245,7 +1245,7 @@ tr:hover td { background:#FAFBFD; }
     <div id="tabCertPrintProfession" class="screen">
       <div class="panel">
         <div class="panel-title">
-          Обучение по профессии (по 10 на лист А4)
+          Печать удостоверений по профессии (по 10 на лист А4)
           <div style="display:flex;gap:8px">
             <button class="btn btn-ghost" onclick="clearCertPrintSelect('profession')">Сбросить</button>
             <button class="btn btn-gold" onclick="printCertCards('profession')">🎓 Печать / PDF</button>
