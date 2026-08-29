@@ -503,6 +503,11 @@ tr:hover td { background:#FAFBFD; }
     <!-- ══ СРОКИ ДОПУСКОВ ══ -->
     <div id="tabAccess" class="screen">
       <div class="panel">
+        <div class="panel-title">Сроки допусков</div>
+        <p style="font-size:13px;color:var(--gray);margin-bottom:12px;line-height:1.5">
+          Таблица допусков всех сотрудников по датам: кто просрочен, у кого истекает в ближайшие
+          дни, а у кого всё в порядке. Фильтруйте по участку, статусу или дате прохождения.
+        </p>
         <div class="filters">
           <input type="text" id="searchAccess" placeholder="🔍 Поиск по имени..."
             oninput="renderAccessTable()">
@@ -1171,13 +1176,17 @@ tr:hover td { background:#FAFBFD; }
     <div id="tabPrint" class="screen">
       <div class="panel">
         <div class="panel-title">
-          Выберите сотрудников для печати (по 10 на лист А4, листов будет столько, сколько нужно)
+          Печать допусков
           <div style="display:flex;gap:8px">
             <button class="btn btn-ghost" onclick="selectAllPrint()">Выбрать всех</button>
             <button class="btn btn-ghost" onclick="clearPrintSelect()">Сбросить</button>
             <button class="btn btn-gold" onclick="printCards()">🖨 Печать / PDF</button>
           </div>
         </div>
+        <p style="font-size:13px;color:var(--gray);margin-bottom:12px;line-height:1.5">
+          Карточка «Допуск в карьер» с датой прохождения и сроком действия — не путать
+          с удостоверением по профессии. По 10 на лист А4, листов будет столько, сколько нужно.
+        </p>
         <div class="filters">
           <input type="text" id="searchPrint" placeholder="🔍 Поиск..."
             oninput="renderPrintSelect()">
@@ -1251,6 +1260,10 @@ tr:hover td { background:#FAFBFD; }
             <button class="btn btn-gold" onclick="printCertCards('profession')">🎓 Печать / PDF</button>
           </div>
         </div>
+        <p style="font-size:13px;color:var(--gray);margin-bottom:12px;line-height:1.5">
+          Удостоверение о прохождении обучения по конкретной профессии/курсу — не путать
+          с допуском в карьер. Выберите сотрудников ниже, карточки соберутся в лист А4 сами.
+        </p>
         <div class="filters">
           <input type="text" id="searchCertPrintProfession" placeholder="🔍 Поиск по имени или курсу..."
             oninput="renderCertPrintSelect('profession')">
