@@ -208,6 +208,8 @@ tr:hover td { background:#FAFBFD; }
 }
 </style>
 <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+<!-- SheetJS — экспорт заправок в .xlsx -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 <body>
 
@@ -756,14 +758,54 @@ tr:hover td { background:#FAFBFD; }
 
       <div class="panel">
         <div class="panel-title">
+          Расход по типу техники
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+          <select id="fuelTypeFilterTypeAlmaty" style="max-width:220px" onchange="onFuelTypeFilterTypeChange('Алмалы', this.value)">
+            <option value="">— все типы —</option>
+          </select>
+          <input type="text" id="fuelTypeFilterModelAlmaty" placeholder="Фильтр по модели, напр. TONLY"
+            style="max-width:220px" oninput="onFuelTypeFilterModelInput('Алмалы', this.value)">
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+          <span style="font-size:11px;color:var(--gray);font-weight:600">Период:</span>
+          <div id="fuelTypeFilterPeriodButtonsAlmaty" style="display:flex;gap:6px"></div>
+          <span style="font-size:11px;color:var(--gray);margin-left:10px">или диапазон:</span>
+          <input type="date" id="fuelTypeFromAlmaty" style="max-width:150px">
+          <span style="font-size:11px;color:var(--gray)">—</span>
+          <input type="date" id="fuelTypeToAlmaty" style="max-width:150px">
+          <button class="btn btn-ghost" style="width:auto;padding:6px 12px;font-size:11px" onclick="applyFuelTypeCustomRange('Алмалы')">Применить</button>
+        </div>
+        <div id="fuelTypeFilterResultAlmaty"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">
+          История заправок по машине
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <select id="fuelHistoryEquipmentAlmaty" style="max-width:240px" onchange="renderFuelEquipmentHistory('Алмалы')">
+              <option value="">— выберите технику —</option>
+            </select>
+            <button class="btn btn-ghost" onclick="exportFuelEquipmentExcel('Алмалы')">⬇️ Excel по машине</button>
+          </div>
+        </div>
+        <div style="font-size:12px;color:var(--gray);padding:6px 0">
+          Полная история заправок выбранной машины за всё время, от новых к старым — можно найти любой день.
+        </div>
+        <div id="fuelHistoryTableAlmaty"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">
           Записи заправок — Алмалы
           <div style="display:flex;gap:8px">
+            <button class="btn btn-ghost" onclick="exportFuelExcel('Алмалы')">⬇️ Скачать Excel</button>
             <button class="btn btn-ghost" onclick="exportFuelCSV('Алмалы')">⬇️ Скачать CSV</button>
             <button class="btn btn-ghost" onclick="loadAll()">🔄 Обновить</button>
           </div>
         </div>
         <div style="font-size:12px;color:var(--gray);padding:6px 0">
-          Полный список заправок с начала заполнения чек-листов — в CSV-файле.
+          Полный список заправок с начала заполнения чек-листов — в Excel/CSV-файле.
         </div>
       </div>
     </div>
@@ -800,14 +842,54 @@ tr:hover td { background:#FAFBFD; }
 
       <div class="panel">
         <div class="panel-title">
+          Расход по типу техники
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+          <select id="fuelTypeFilterTypeAshyktas" style="max-width:220px" onchange="onFuelTypeFilterTypeChange('Ашыктас', this.value)">
+            <option value="">— все типы —</option>
+          </select>
+          <input type="text" id="fuelTypeFilterModelAshyktas" placeholder="Фильтр по модели, напр. TONLY"
+            style="max-width:220px" oninput="onFuelTypeFilterModelInput('Ашыктас', this.value)">
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+          <span style="font-size:11px;color:var(--gray);font-weight:600">Период:</span>
+          <div id="fuelTypeFilterPeriodButtonsAshyktas" style="display:flex;gap:6px"></div>
+          <span style="font-size:11px;color:var(--gray);margin-left:10px">или диапазон:</span>
+          <input type="date" id="fuelTypeFromAshyktas" style="max-width:150px">
+          <span style="font-size:11px;color:var(--gray)">—</span>
+          <input type="date" id="fuelTypeToAshyktas" style="max-width:150px">
+          <button class="btn btn-ghost" style="width:auto;padding:6px 12px;font-size:11px" onclick="applyFuelTypeCustomRange('Ашыктас')">Применить</button>
+        </div>
+        <div id="fuelTypeFilterResultAshyktas"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">
+          История заправок по машине
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <select id="fuelHistoryEquipmentAshyktas" style="max-width:240px" onchange="renderFuelEquipmentHistory('Ашыктас')">
+              <option value="">— выберите технику —</option>
+            </select>
+            <button class="btn btn-ghost" onclick="exportFuelEquipmentExcel('Ашыктас')">⬇️ Excel по машине</button>
+          </div>
+        </div>
+        <div style="font-size:12px;color:var(--gray);padding:6px 0">
+          Полная история заправок выбранной машины за всё время, от новых к старым — можно найти любой день.
+        </div>
+        <div id="fuelHistoryTableAshyktas"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">
           Записи заправок — Ашыктас
           <div style="display:flex;gap:8px">
+            <button class="btn btn-ghost" onclick="exportFuelExcel('Ашыктас')">⬇️ Скачать Excel</button>
             <button class="btn btn-ghost" onclick="exportFuelCSV('Ашыктас')">⬇️ Скачать CSV</button>
             <button class="btn btn-ghost" onclick="loadAll()">🔄 Обновить</button>
           </div>
         </div>
         <div style="font-size:12px;color:var(--gray);padding:6px 0">
-          Полный список заправок с начала заполнения чек-листов — в CSV-файле.
+          Полный список заправок с начала заполнения чек-листов — в Excel/CSV-файле.
         </div>
       </div>
     </div>
@@ -5590,6 +5672,58 @@ function fuelShiftOf(date) {
   return (h >= 7 && h < 19) ? "День" : "Ночь";
 }
 
+// ══════════════════════════════════════════════════════
+// РАСХОД Л/Ч ДЛЯ ГУСЕНИЧНОЙ ТЕХНИКИ (метод «дозаправка до полного бака»)
+// ──────────────────────────────────────────────────────
+// Экскаваторы, бульдозеры и буровые станки заправляются дважды за дневную
+// смену — утром (перед началом работы, бак полный) и вечером (в конце смены,
+// снова до полного). Объём вечерней заправки = фактически сожжённое топливо
+// за смену, а часы между заправками — фактическое время между ними. Это
+// единственный объективный способ считать л/ч без ежедневных показаний
+// моточасов из чек-листов (для остальной техники таких данных просто нет).
+const CRAWLER_FUEL_TYPES = ["Экскаватор", "Бульдозер", "Буровой станок"];
+
+function isCrawlerEquipment(equipmentId) {
+  const eq = (DATA.equipment||[]).find(e => String(e.equipmentId)===String(equipmentId));
+  return !!eq && CRAWLER_FUEL_TYPES.indexOf(eq.type) >= 0;
+}
+
+// start/end (необязательные Date) — фильтр по периоду, применяется к дню смены
+// (start.date пары), а не к отдельным записям, чтобы не разваливать пару
+// «утро+вечер» на границе периода.
+function dayShiftFuelPairs(equipmentId, start, end) {
+  const byDay = {};
+  (DATA.fuel||[]).filter(f => String(f.equipmentId)===String(equipmentId)).forEach(f => {
+    const d = parseRecordDate(f.date);
+    if (!d || fuelShiftOf(d) !== "День") return;
+    const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+    (byDay[key] = byDay[key] || []).push({ date: d, liters: Number(f.amountLiters)||0 });
+  });
+  const pairs = [];
+  Object.values(byDay).forEach(recs => {
+    if (recs.length !== 2) return;
+    recs.sort((a,b) => a.date - b.date);
+    const [s, e] = recs;
+    const hours = (e.date - s.date) / 3600000;
+    if (hours <= 0) return;
+    pairs.push({
+      date: s.date, startTime: s.date, endTime: e.date,
+      startLiters: s.liters, endLiters: e.liters,
+      hours: +hours.toFixed(2), rate: +(e.liters / hours).toFixed(2),
+    });
+  });
+  const filtered = pairs.filter(p => (!start || p.date >= start) && (!end || p.date < end));
+  filtered.sort((a,b) => b.date - a.date);
+  return filtered;
+}
+
+function avgShiftFuelRate(equipmentId, start, end) {
+  const pairs = dayShiftFuelPairs(equipmentId, start, end);
+  if (!pairs.length) return null;
+  const avg = pairs.reduce((s,p)=>s+p.rate,0) / pairs.length;
+  return { avg: +avg.toFixed(2), days: pairs.length };
+}
+
 function setFuelPeriod(site, p) {
   FUEL_PERIOD[site] = p;
   renderFuelAnalytics(site);
@@ -5610,6 +5744,8 @@ function renderFuelAnalytics(site) {
   const eqIds = new Set((DATA.equipment||[]).filter(e => (e.site||"").trim() === site).map(e => String(e.equipmentId)));
   const all = (DATA.fuel||[]).filter(f => eqIds.has(String(f.equipmentId)));
   const start = fuelPeriodStart(period);
+
+  populateFuelHistorySelect(site);
   const records = all.filter(f => {
     const d = parseRecordDate(f.date);
     return d && (!start || d >= start);
@@ -5648,11 +5784,13 @@ function renderFuelAnalytics(site) {
       byEqEl.innerHTML = rows.map(row => {
         const eq = (DATA.equipment||[]).find(e => String(e.equipmentId)===String(row.id));
         const label = eq ? `${eq.equipmentId} — ${eq.model}` : row.id;
+        const rate = isCrawlerEquipment(row.id) ? avgShiftFuelRate(row.id, start, null) : null;
         return `
-          <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border);font-size:13px">
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border);font-size:13px;cursor:pointer"
+            onclick="selectFuelHistoryEquipment('${site}','${row.id}')" title="Открыть историю по этой машине">
             <div>
               <div style="font-weight:700;color:var(--navy)">${label}</div>
-              <div style="font-size:11px;color:var(--gray)">${row.count} заправк${row.count===1?'а':row.count<5?'и':'и'}</div>
+              <div style="font-size:11px;color:var(--gray)">${row.count} заправк${row.count===1?'а':row.count<5?'и':'и'}${rate ? ` · ~${rate.avg} л/ч (${rate.days} см.)` : ""}</div>
             </div>
             <span style="font-weight:800;color:var(--navy2)">${row.liters.toLocaleString("ru-RU")} л</span>
           </div>
@@ -5717,6 +5855,156 @@ function renderFuelAnalytics(site) {
       `).join("");
     }
   }
+
+  renderFuelTypeFilterControls(site);
+  renderFuelTypePanel(site);
+}
+
+// ══════════════════════════════════════════════════════
+// РАСХОД ПО ТИПУ ТЕХНИКИ — фильтр по типу + модели, с произвольным периодом
+// (кнопки Сутки/Неделя/Месяц/Всё время ИЛИ свой диапазон дат "с — по").
+// Для гусеничной техники — л/ч тем же методом (dayShiftFuelPairs). Для
+// остальных типов (самосвалы и т.д.) — только литры/заправки, без л/ч:
+// объективного метода без данных хронометража сейчас нет (решение 29.08.2026 —
+// не считать л/ч через дельту моточасов, это уже признано ненадёжным).
+// ══════════════════════════════════════════════════════
+let FUEL_TYPE_FILTER = {
+  "Алмалы":  { type: "", model: "", mode: "day", customFrom: "", customTo: "" },
+  "Ашыктас": { type: "", model: "", mode: "day", customFrom: "", customTo: "" },
+};
+
+function fuelTypeFilterRange(site) {
+  const st = FUEL_TYPE_FILTER[site];
+  if (st.mode === "custom") {
+    if (!st.customFrom || !st.customTo) return [null, null];
+    const start = parseAnchorDate(st.customFrom);
+    let end = parseAnchorDate(st.customTo);
+    if (end) { end = new Date(end); end.setDate(end.getDate() + 1); } // включаем весь день "по"
+    return [start, end];
+  }
+  return [fuelPeriodStart(st.mode), null];
+}
+
+function renderFuelTypeFilterControls(site) {
+  const suffix = site === "Ашыктас" ? "Ashyktas" : "Almaty";
+  const btnsEl = document.getElementById("fuelTypeFilterPeriodButtons"+suffix);
+  if (!btnsEl) return;
+  const st = FUEL_TYPE_FILTER[site];
+  const periods = [["day","Сутки"],["week","Неделя"],["month","Месяц"],["all","Всё время"]];
+  btnsEl.innerHTML = periods.map(([key,label]) => `
+    <button class="btn ${st.mode===key?'btn-gold':'btn-ghost'}" style="width:auto;padding:6px 10px;font-size:11px"
+      onclick="setFuelTypeFilterMode('${site}','${key}')">${label}</button>
+  `).join("");
+}
+
+function setFuelTypeFilterMode(site, mode) {
+  FUEL_TYPE_FILTER[site].mode = mode;
+  const suffix = site === "Ашыктас" ? "Ashyktas" : "Almaty";
+  const fromEl = document.getElementById("fuelTypeFrom"+suffix);
+  const toEl = document.getElementById("fuelTypeTo"+suffix);
+  if (fromEl) fromEl.value = "";
+  if (toEl) toEl.value = "";
+  renderFuelTypeFilterControls(site);
+  renderFuelTypePanel(site);
+}
+
+function applyFuelTypeCustomRange(site) {
+  const suffix = site === "Ашыктас" ? "Ashyktas" : "Almaty";
+  const fromEl = document.getElementById("fuelTypeFrom"+suffix);
+  const toEl = document.getElementById("fuelTypeTo"+suffix);
+  const from = fromEl ? fromEl.value : "";
+  const to = toEl ? toEl.value : "";
+  if (!from || !to) { alert("Укажите обе даты — «с» и «по»."); return; }
+  if (from > to) { alert("Дата «с» позже даты «по» — проверьте диапазон."); return; }
+  FUEL_TYPE_FILTER[site].mode = "custom";
+  FUEL_TYPE_FILTER[site].customFrom = from;
+  FUEL_TYPE_FILTER[site].customTo = to;
+  renderFuelTypeFilterControls(site);
+  renderFuelTypePanel(site);
+}
+
+function onFuelTypeFilterTypeChange(site, val) {
+  FUEL_TYPE_FILTER[site].type = val;
+  renderFuelTypePanel(site);
+}
+
+function onFuelTypeFilterModelInput(site, val) {
+  FUEL_TYPE_FILTER[site].model = val;
+  renderFuelTypePanel(site);
+}
+
+function renderFuelTypePanel(site) {
+  const suffix = site === "Ашыктас" ? "Ashyktas" : "Almaty";
+  const typeSelEl = document.getElementById("fuelTypeFilterType"+suffix);
+  const resultEl = document.getElementById("fuelTypeFilterResult"+suffix);
+  if (!typeSelEl || !resultEl) return;
+  const st = FUEL_TYPE_FILTER[site];
+
+  // Список типов техники на этом участке — из живых данных, не жёстко зашит.
+  const types = Array.from(new Set((DATA.equipment||[]).filter(e => (e.site||"").trim()===site).map(e=>e.type).filter(Boolean))).sort();
+  const prevVal = typeSelEl.value || st.type;
+  typeSelEl.innerHTML = `<option value="">— выберите тип —</option>` + types.map(t=>`<option value="${t}">${t}</option>`).join("");
+  if (prevVal && types.indexOf(prevVal) >= 0) typeSelEl.value = prevVal;
+
+  if (!st.type) {
+    resultEl.innerHTML = `<div class="empty" style="padding:16px"><div class="empty-icon">🚛</div>Выберите тип техники, чтобы увидеть расход</div>`;
+    return;
+  }
+
+  const [start, end] = fuelTypeFilterRange(site);
+  if (st.mode === "custom" && (!start || !end)) {
+    resultEl.innerHTML = `<div class="empty" style="padding:16px"><div class="empty-icon">📅</div>Укажите обе даты диапазона и нажмите «Применить»</div>`;
+    return;
+  }
+
+  let eqList = (DATA.equipment||[]).filter(e => (e.site||"").trim()===site && e.type===st.type);
+  if (st.model && st.model.trim()) {
+    const needle = st.model.trim().toLowerCase();
+    eqList = eqList.filter(e => String(e.model||"").toLowerCase().indexOf(needle) >= 0);
+  }
+  eqList.sort((a,b) => String(a.equipmentId).localeCompare(String(b.equipmentId)));
+
+  if (!eqList.length) {
+    resultEl.innerHTML = `<div class="empty" style="padding:16px"><div class="empty-icon">🚛</div>Под фильтр не подошла ни одна единица техники</div>`;
+    return;
+  }
+
+  const crawler = CRAWLER_FUEL_TYPES.indexOf(st.type) >= 0;
+
+  const rows = eqList.map(eq => {
+    const recs = (DATA.fuel||[]).filter(f => String(f.equipmentId)===String(eq.equipmentId)).filter(f => {
+      const d = parseRecordDate(f.date);
+      return d && (!start || d >= start) && (!end || d < end);
+    });
+    const liters = recs.reduce((s,f)=>s+(Number(f.amountLiters)||0),0);
+    const rate = crawler ? avgShiftFuelRate(eq.equipmentId, start, end) : null;
+    return { eq, count: recs.length, liters, rate };
+  });
+
+  const totalLiters = rows.reduce((s,r)=>s+r.liters,0);
+  const totalCount = rows.reduce((s,r)=>s+r.count,0);
+  const periodNote = st.mode === "custom" ? `${st.customFrom} — ${st.customTo}` :
+    { day:"сутки", week:"неделя", month:"месяц", all:"всё время" }[st.mode];
+
+  resultEl.innerHTML = `
+    <div style="font-size:12px;color:var(--gray);margin-bottom:10px">
+      Период: <b>${periodNote}</b> · ${eqList.length} ед. техники · ${totalCount} заправок · ${totalLiters.toLocaleString("ru-RU")} л всего
+      ${!crawler ? `<div style="color:var(--gold-dark,#a15c00);margin-top:4px">⚠️ Для типа «${st.type}» расход л/ч не считается — нет объективного метода без данных хронометража (заправка не 2 раза за смену, как у гусеничной техники).</div>` : ""}
+    </div>
+    <div class="tbl-wrap">
+      <table style="font-size:13px">
+        <thead><tr><th>Техника</th><th>Заправок</th><th>Литров</th>${crawler ? "<th>л/ч</th>" : ""}</tr></thead>
+        <tbody>${rows.map(r => `
+          <tr style="cursor:pointer" onclick="selectFuelHistoryEquipment('${site}','${r.eq.equipmentId}')" title="Открыть историю по этой машине">
+            <td><b>${r.eq.equipmentId}</b> — ${r.eq.model||""}</td>
+            <td>${r.count}</td>
+            <td>${r.liters.toLocaleString("ru-RU")}</td>
+            ${crawler ? `<td>${r.rate ? `<b>${r.rate.avg}</b> <span style="color:var(--gray);font-size:11px">(${r.rate.days} см.)</span>` : "—"}</td>` : ""}
+          </tr>
+        `).join("")}</tbody>
+      </table>
+    </div>
+  `;
 }
 
 function renderFuelRecordsList(site) {
@@ -5745,6 +6033,214 @@ function renderFuelRecordsList(site) {
       </div>
     `;
   }).join("");
+}
+
+// ══════════════════════════════════════════════════════
+// ИСТОРИЯ ЗАПРАВОК ПО КОНКРЕТНОЙ МАШИНЕ (любой день, вся история)
+// ══════════════════════════════════════════════════════
+function populateFuelHistorySelect(site) {
+  const suffix = site === "Ашыктас" ? "Ashyktas" : "Almaty";
+  const sel = document.getElementById("fuelHistoryEquipment"+suffix);
+  if (!sel) return;
+  const prevVal = sel.value;
+  const eqList = (DATA.equipment||[]).filter(e => (e.site||"").trim() === site)
+    .sort((a,b) => String(a.equipmentId).localeCompare(String(b.equipmentId)));
+  sel.innerHTML = `<option value="">— выберите технику —</option>` +
+    eqList.map(e => `<option value="${e.equipmentId}">${e.equipmentId} — ${e.model||""}</option>`).join("");
+  if (prevVal && eqList.some(e => String(e.equipmentId)===prevVal)) sel.value = prevVal;
+}
+
+function selectFuelHistoryEquipment(site, equipmentId) {
+  const suffix = site === "Ашыктас" ? "Ashyktas" : "Almaty";
+  const sel = document.getElementById("fuelHistoryEquipment"+suffix);
+  if (!sel) return;
+  sel.value = equipmentId;
+  renderFuelEquipmentHistory(site);
+  sel.scrollIntoView({ behavior:"smooth", block:"center" });
+}
+
+// Полная история заправок одной машины за всё время — не зависит от кнопок
+// периода (сутки/неделя/...) наверху вкладки, чтобы можно было найти любой день.
+function fuelHistoryRecords(equipmentId) {
+  return (DATA.fuel||[]).filter(f => String(f.equipmentId)===String(equipmentId))
+    .slice()
+    .sort((a,b) => (parseRecordDate(b.date)||0) - (parseRecordDate(a.date)||0));
+}
+
+function renderFuelEquipmentHistory(site) {
+  const suffix = site === "Ашыктас" ? "Ashyktas" : "Almaty";
+  const sel = document.getElementById("fuelHistoryEquipment"+suffix);
+  const tableEl = document.getElementById("fuelHistoryTable"+suffix);
+  if (!sel || !tableEl) return;
+  const equipmentId = sel.value;
+  if (!equipmentId) { tableEl.innerHTML = ""; return; }
+
+  const list = fuelHistoryRecords(equipmentId);
+  if (!list.length) {
+    tableEl.innerHTML = `<div class="empty" style="padding:16px"><div class="empty-icon">⛽</div>Заправок по этой машине пока нет</div>`;
+    return;
+  }
+  const total = list.reduce((s,f)=>s+(Number(f.amountLiters)||0),0);
+
+  // Расход л/ч — только для гусеничной техники, синхронизирован с переключателем
+  // периода наверху вкладки (Сутки/Неделя/Месяц/Всё время), чтобы это число
+  // совпадало со сводкой в списке «По технике» — раньше здесь всегда считалось
+  // «за всё время», независимо от периода, и цифры расходились.
+  let rateBlock = "";
+  if (isCrawlerEquipment(equipmentId)) {
+    const period = FUEL_PERIOD[site];
+    const periodLabels = { day: "сутки", week: "неделю", month: "месяц", all: "всё время" };
+    const periodLabel = periodLabels[period] || "выбранный период";
+    const start = fuelPeriodStart(period);
+    let pairs = dayShiftFuelPairs(equipmentId, start, null);
+    // Фолбэк: если в выбранном периоде подходящих дней нет, но они есть в
+    // принципе за всё время — показываем их, но ЧЕСТНО помечаем, что это не
+    // за выбранный период (чтобы число не терялось молча, но и не выдавалось
+    // за то, чем оно не является).
+    let fallbackUsed = false;
+    if (!pairs.length && period !== "all") {
+      const allPairs = dayShiftFuelPairs(equipmentId, null, null);
+      if (allPairs.length) { pairs = allPairs; fallbackUsed = true; }
+    }
+    const fmtDay = d => `${String(d.getDate()).padStart(2,"0")}.${String(d.getMonth()+1).padStart(2,"0")}.${d.getFullYear()}`;
+    const fmtTime = d => `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
+    if (pairs.length) {
+      const avgAll = +(pairs.reduce((s,p)=>s+p.rate,0) / pairs.length).toFixed(2);
+      const headerText = fallbackUsed
+        ? `⚠️ За ${periodLabel} подходящих дней нет — показан расход за всё время (последняя пара: ${fmtDay(pairs[0].date)}): <span style="color:var(--navy)">${avgAll} л/ч</span> по ${pairs.length} см.`
+        : `⛽➜⏱ Расход по сменам (утро+вечер) — в среднем <span style="color:var(--navy)">${avgAll} л/ч</span> по ${pairs.length} см. за ${periodLabel}`;
+      rateBlock = `
+        <div style="font-size:13px;font-weight:700;color:${fallbackUsed ? "var(--gold-dark, #a15c00)" : "var(--navy2)"};margin:14px 0 8px">
+          ${headerText}
+        </div>
+        <div class="tbl-wrap" style="margin-bottom:14px">
+          <table style="font-size:13px">
+            <thead><tr><th>День</th><th>Утро</th><th>Вечер</th><th>Часов</th><th>Расход</th><th>л/ч</th></tr></thead>
+            <tbody>${pairs.map(p => `<tr>
+              <td>${fmtDay(p.date)}</td>
+              <td>${fmtTime(p.startTime)} · ${p.startLiters} л</td>
+              <td>${fmtTime(p.endTime)} · ${p.endLiters} л</td>
+              <td>${p.hours}</td>
+              <td>${p.endLiters} л</td>
+              <td><b>${p.rate}</b></td>
+            </tr>`).join("")}</tbody>
+          </table>
+        </div>
+        <div style="font-size:11px;color:var(--gray);margin-bottom:8px">
+          Расход = объём вечерней заправки (бак снова полный) ÷ часы между заправками. Дни с заправкой не 2 раза за смену сюда не попадают.
+          ${fallbackUsed ? "Ниже — данные за всё время, а не за выбранный период (в нём таких дней не нашлось)." : "Период — как в переключателе Сутки/Неделя/Месяц/Всё время наверху вкладки."}
+        </div>
+      `;
+    } else {
+      rateBlock = `<div style="font-size:12px;color:var(--gray);margin:14px 0 8px">
+        Гусеничная техника — расход л/ч считается по дням с ровно двумя дневными заправками (утро+вечер). За ${periodLabel} таких дней нет.
+      </div>`;
+    }
+  }
+
+  tableEl.innerHTML = `
+    <div style="font-size:12px;color:var(--gray);margin-bottom:8px">
+      Всего заправок: <b>${list.length}</b> · Литров всего: <b>${total.toLocaleString("ru-RU")}</b>
+    </div>
+    ${rateBlock}
+    <div class="tbl-wrap">
+      <table style="font-size:13px">
+        <thead><tr><th>Дата и время</th><th>Смена</th><th>Сотрудник</th><th>Литры</th></tr></thead>
+        <tbody>${list.map(f => {
+          const d = parseRecordDate(f.date);
+          const shift = d ? fuelShiftOf(d) : "—";
+          return `<tr>
+            <td>${fmtRecordDateTime(f.date)}</td>
+            <td>${shift === "День" ? "☀ день" : shift === "Ночь" ? "🌙 ночь" : "—"}</td>
+            <td>${f.empName||"—"}</td>
+            <td><b>${Number(f.amountLiters)||0} л</b></td>
+          </tr>`;
+        }).join("")}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+// ══════════════════════════════════════════════════════
+// ЭКСПОРТ EXCEL (SheetJS) — топливо
+// ══════════════════════════════════════════════════════
+function fuelRowsToExcel(rows, filename, sheetName) {
+  if (typeof XLSX === "undefined") {
+    alert("Библиотека Excel не загрузилась (нужен интернет) — попробуй ещё раз.");
+    return;
+  }
+  if (!rows.length) { alert("Нет данных для выгрузки."); return; }
+  const aoa = [["Дата и время","Техника","Модель","Сотрудник","Смена","Литры"], ...rows];
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws["!cols"] = [{wch:18},{wch:12},{wch:22},{wch:22},{wch:8},{wch:10}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, sheetName || "Заправки");
+  XLSX.writeFile(wb, filename);
+}
+
+// Второй лист "Расход по сменам" — только для гусеничной техники, где
+// заправка дважды за смену позволяет посчитать л/ч (см. dayShiftFuelPairs).
+function addFuelRateSheet(wb, equipmentId) {
+  const pairs = dayShiftFuelPairs(equipmentId);
+  if (!pairs.length) return;
+  const fmtDay = d => `${String(d.getDate()).padStart(2,"0")}.${String(d.getMonth()+1).padStart(2,"0")}.${d.getFullYear()}`;
+  const fmtTime = d => `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
+  const aoa = [["День","Утро, время","Утро, л","Вечер, время","Вечер, л","Часов","Расход, л","л/ч"]];
+  pairs.forEach(p => aoa.push([
+    fmtDay(p.date), fmtTime(p.startTime), p.startLiters, fmtTime(p.endTime), p.endLiters, p.hours, p.endLiters, p.rate,
+  ]));
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws["!cols"] = [{wch:12},{wch:10},{wch:8},{wch:10},{wch:8},{wch:8},{wch:10},{wch:8}];
+  XLSX.utils.book_append_sheet(wb, ws, "Расход по сменам");
+}
+
+function exportFuelExcel(site) {
+  const eqIds = new Set((DATA.equipment||[]).filter(e => (e.site||"").trim() === site).map(e => String(e.equipmentId)));
+  const rows = (DATA.fuel || []).filter(f => eqIds.has(String(f.equipmentId))).map(f => {
+    const eq = (DATA.equipment||[]).find(e => String(e.equipmentId)===String(f.equipmentId));
+    const d = parseRecordDate(f.date);
+    return [
+      fmtRecordDateTime(f.date),
+      f.equipmentId || "",
+      eq ? eq.model : "",
+      f.empName || "",
+      d ? fuelShiftOf(d) : "",
+      Number(f.amountLiters) || 0,
+    ];
+  });
+  fuelRowsToExcel(rows, `Заправки_${site}_${today()}.xlsx`, "Заправки");
+}
+
+function exportFuelEquipmentExcel(site) {
+  const suffix = site === "Ашыктас" ? "Ashyktas" : "Almaty";
+  const sel = document.getElementById("fuelHistoryEquipment"+suffix);
+  const equipmentId = sel ? sel.value : "";
+  if (!equipmentId) { alert("Сначала выберите технику."); return; }
+  if (typeof XLSX === "undefined") {
+    alert("Библиотека Excel не загрузилась (нужен интернет) — попробуй ещё раз.");
+    return;
+  }
+  const list = fuelHistoryRecords(equipmentId);
+  if (!list.length) { alert("Нет данных для выгрузки."); return; }
+  const rows = list.map(f => {
+    const eq = (DATA.equipment||[]).find(e => String(e.equipmentId)===String(f.equipmentId));
+    const d = parseRecordDate(f.date);
+    return [
+      fmtRecordDateTime(f.date),
+      f.equipmentId || "",
+      eq ? eq.model : "",
+      f.empName || "",
+      d ? fuelShiftOf(d) : "",
+      Number(f.amountLiters) || 0,
+    ];
+  });
+  const aoa = [["Дата и время","Техника","Модель","Сотрудник","Смена","Литры"], ...rows];
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws["!cols"] = [{wch:18},{wch:12},{wch:22},{wch:22},{wch:8},{wch:10}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Заправки");
+  if (isCrawlerEquipment(equipmentId)) addFuelRateSheet(wb, equipmentId);
+  XLSX.writeFile(wb, `Заправки_${equipmentId}_${today()}.xlsx`);
 }
 
 // ══════════════════════════════════════════════════════
