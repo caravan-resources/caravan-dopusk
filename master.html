@@ -145,11 +145,45 @@ td { padding:8px; border-bottom:1px solid var(--border); }
       <div style="display:flex;gap:8px;margin-bottom:14px;align-items:center;flex-wrap:wrap">
         <span style="font-size:13px;color:var(--gray);font-weight:600">Период:</span>
         <div id="fuelPeriodSwitch" style="display:flex;gap:8px"></div>
+        <button class="btn btn-ghost" style="margin-left:auto" onclick="exportFuelExcelM()">⬇️ Excel</button>
       </div>
       <div class="stats-grid" id="fuelStats"></div>
       <div class="panel">
         <div class="panel-title">⛽ Заправки — <span id="fuelSiteLabel"></span></div>
         <div id="fuelList"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">Расход по типу техники</div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+          <select id="fuelTypeFilterTypeM" style="max-width:200px" onchange="onFuelTypeFilterTypeChangeM(this.value)">
+            <option value="">— выберите тип —</option>
+          </select>
+          <input type="text" id="fuelTypeFilterModelM" placeholder="Модель, напр. TONLY"
+            style="max-width:180px" oninput="onFuelTypeFilterModelInputM(this.value)">
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+          <div id="fuelTypeFilterPeriodButtonsM" style="display:flex;gap:6px"></div>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+          <span style="font-size:11px;color:var(--gray)">или свой диапазон:</span>
+          <input type="date" id="fuelTypeFromM" style="max-width:140px">
+          <span style="font-size:11px;color:var(--gray)">—</span>
+          <input type="date" id="fuelTypeToM" style="max-width:140px">
+          <button class="btn btn-ghost" style="width:auto;padding:6px 10px;font-size:11px" onclick="applyFuelTypeCustomRangeM()">Применить</button>
+        </div>
+        <div id="fuelTypeFilterResultM"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">
+          История заправок по машине
+          <button class="btn btn-ghost" onclick="exportFuelEquipmentExcelM()">⬇️ Excel по машине</button>
+        </div>
+        <select id="fuelHistoryEquipmentM" style="width:100%;margin:8px 0" onchange="renderFuelEquipmentHistoryM()">
+          <option value="">— выберите технику —</option>
+        </select>
+        <div id="fuelHistoryTableM"></div>
       </div>
     </div>
 
@@ -454,6 +488,7 @@ function renderAll() {
   renderSwapDayNightButton();
   renderShift();
   renderFuelPeriodSwitch();
+  renderFuelTypeFilterButtonsM();
   renderFuel();
   renderPersonnelList();
   renderAnalytics();
@@ -470,6 +505,7 @@ function setSite(site) {
   if (site === CURRENT_SITE) return;
   CURRENT_SITE = site;
   FUEL_PERIOD = 1; FUEL_LOADED_DAYS = 1; // новый участок — снова качаем заправки по минимуму
+  FUEL_TYPE_FILTER_M = { type: "", model: "", mode: 1, customFrom: "", customTo: "" }; // и фильтр по типу — сбрасываем, техника другая
   if (ACTIVE_VAHTAS[CURRENT_SITE] === "Вахта-1" || ACTIVE_VAHTAS[CURRENT_SITE] === "Вахта-2") {
     CURRENT_VAHTA = ACTIVE_VAHTAS[CURRENT_SITE]; // у каждого участка своя активная вахта
   }
@@ -869,8 +905,411 @@ function renderFuel() {
         <td style="text-align:right;font-weight:700">${f.amountLiters}</td></tr>`;
     }).join("")}</tbody>
   </table></div>` + (records.length>80 ? `<div style="text-align:center;color:var(--gray);font-size:12px;padding-top:10px">Показаны последние 80 из ${records.length}</div>` : "");
+
+  renderFuelTypeFilterM();
+  renderFuelHistorySelectM();
 }
 
+// ══════════════════════════════════════════════════════
+// РАСХОД Л/Ч ДЛЯ ГУСЕНИЧНОЙ ТЕХНИКИ (метод «дозаправка до полного бака»)
+// ──────────────────────────────────────────────────────
+// Экскаваторы, бульдозеры и буровые станки заправляются дважды за дневную
+// смену — утром (бак полный) и вечером (снова до полного). Объём вечерней
+// заправки = фактически сожжённое топливо, часы между заправками — реальное
+// время работы. Для остальной техники (самосвалы и т.д.) объективного
+// способа без данных хронометража нет — л/ч для них не считаем.
+const CRAWLER_FUEL_TYPES = ["Экскаватор", "Бульдозер", "Буровой станок"];
+
+function isCrawlerEquipment(equipmentId) {
+  const eq = (DATA.equipment||[]).find(e => String(e.equipmentId)===String(equipmentId));
+  return !!eq && CRAWLER_FUEL_TYPES.indexOf(eq.type) >= 0;
+}
+
+function fuelShiftOf(date) {
+  const h = date.getHours();
+  return (h >= 7 && h < 19) ? "День" : "Ночь";
+}
+
+// start/end (необязательные Date) — фильтр по периоду, применяется к дню
+// смены целиком, а не к отдельным записям, чтобы не разваливать пару
+// «утро+вечер» на границе периода.
+function dayShiftFuelPairs(equipmentId, start, end) {
+  const byDay = {};
+  (DATA.fuel||[]).filter(f => String(f.equipmentId)===String(equipmentId)).forEach(f => {
+    const d = new Date(f.date);
+    if (isNaN(d) || fuelShiftOf(d) !== "День") return;
+    const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+    (byDay[key] = byDay[key] || []).push({ date: d, liters: Number(f.amountLiters)||0 });
+  });
+  const pairs = [];
+  Object.values(byDay).forEach(recs => {
+    if (recs.length !== 2) return;
+    recs.sort((a,b) => a.date - b.date);
+    const [s, e] = recs;
+    const hours = (e.date - s.date) / 3600000;
+    if (hours <= 0) return;
+    pairs.push({
+      date: s.date, startTime: s.date, endTime: e.date,
+      startLiters: s.liters, endLiters: e.liters,
+      hours: +hours.toFixed(2), rate: +(e.liters / hours).toFixed(2),
+    });
+  });
+  const filtered = pairs.filter(p => (!start || p.date >= start) && (!end || p.date < end));
+  filtered.sort((a,b) => b.date - a.date);
+  return filtered;
+}
+
+function avgShiftFuelRate(equipmentId, start, end) {
+  const pairs = dayShiftFuelPairs(equipmentId, start, end);
+  if (!pairs.length) return null;
+  const avg = pairs.reduce((s,p)=>s+p.rate,0) / pairs.length;
+  return { avg: +avg.toFixed(2), days: pairs.length };
+}
+
+// На слабой связи по умолчанию грузится только выбранный период (см.
+// FUEL_LOADED_DAYS). История по машине и фильтр по типу технике за «весь
+// период»/произвольный диапазон могут требовать данных больше, чем сейчас
+// загружено — тогда точечно дозапрашиваем, не трогая основной список сверху.
+async function ensureFuelDataCoverage(days) {
+  const haveEnough = FUEL_LOADED_DAYS === 0 || (days !== 0 && days <= FUEL_LOADED_DAYS);
+  if (haveEnough) return true;
+  try {
+    const url = `${CFG.SHEET_URL}?action=getFuelRecords&site=${encodeURIComponent(CURRENT_SITE)}&days=${days}`;
+    const val = await fetchWithRetry(url, 90000, 3);
+    if (Array.isArray(val)) { DATA.fuel = val; FUEL_LOADED_DAYS = days; return true; }
+  } catch (e) { console.error("ensureFuelDataCoverage:", e); }
+  return false;
+}
+
+// ══════════════════════════════════════════════════════
+// ЭКСПОРТ EXCEL (SheetJS уже подключён — используется для наряда)
+// ══════════════════════════════════════════════════════
+function fuelRowsToExcelM(rows, filename, sheetName) {
+  if (typeof XLSX === "undefined") {
+    alert("Библиотека Excel не загрузилась (нужен интернет) — попробуй ещё раз.");
+    return;
+  }
+  if (!rows.length) { alert("Нет данных для выгрузки."); return; }
+  const aoa = [["Дата и время","Техника","Модель","Сотрудник","Смена","Литры"], ...rows];
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws["!cols"] = [{wch:18},{wch:12},{wch:22},{wch:22},{wch:8},{wch:10}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, sheetName || "Заправки");
+  XLSX.writeFile(wb, filename);
+}
+
+function addFuelRateSheetM(wb, equipmentId) {
+  const pairs = dayShiftFuelPairs(equipmentId);
+  if (!pairs.length) return;
+  const fmtDay = d => `${String(d.getDate()).padStart(2,"0")}.${String(d.getMonth()+1).padStart(2,"0")}.${d.getFullYear()}`;
+  const fmtTime = d => `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
+  const aoa = [["День","Утро, время","Утро, л","Вечер, время","Вечер, л","Часов","Расход, л","л/ч"]];
+  pairs.forEach(p => aoa.push([
+    fmtDay(p.date), fmtTime(p.startTime), p.startLiters, fmtTime(p.endTime), p.endLiters, p.hours, p.endLiters, p.rate,
+  ]));
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws["!cols"] = [{wch:12},{wch:10},{wch:8},{wch:10},{wch:8},{wch:8},{wch:10},{wch:8}];
+  XLSX.utils.book_append_sheet(wb, ws, "Расход по сменам");
+}
+
+// Экспортирует то, что сейчас реально показано в списке «Заправки» сверху
+// (тот же CURRENT_SITE + FUEL_PERIOD, без похода в сеть).
+function exportFuelExcelM() {
+  const eqIds = new Set((DATA.equipment||[]).filter(e => (e.site||"").trim()===CURRENT_SITE).map(e=>String(e.equipmentId)));
+  const eqById = {};
+  (DATA.equipment||[]).forEach(e => eqById[String(e.equipmentId)] = e);
+  let records = (DATA.fuel||[]).filter(f => eqIds.has(String(f.equipmentId)));
+  if (FUEL_PERIOD > 0) {
+    const since = new Date(); since.setDate(since.getDate()-FUEL_PERIOD); since.setHours(0,0,0,0);
+    records = records.filter(f => { const d = new Date(f.date); return !isNaN(d) && d >= since; });
+  }
+  const rows = records.map(f => {
+    const eq = eqById[String(f.equipmentId)];
+    const d = new Date(f.date);
+    return [
+      isNaN(d) ? f.date : d.toLocaleString("ru-RU",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"}),
+      f.equipmentId || "",
+      eq ? eq.model : "",
+      f.empName || "",
+      !isNaN(d) ? fuelShiftOf(d) : "",
+      Number(f.amountLiters) || 0,
+    ];
+  });
+  fuelRowsToExcelM(rows, `Заправки_${CURRENT_SITE}_${periodNoun(FUEL_PERIOD)}_${todayIso()}.xlsx`, "Заправки");
+}
+
+// ══════════════════════════════════════════════════════
+// ИСТОРИЯ ЗАПРАВОК ПО КОНКРЕТНОЙ МАШИНЕ (вся история, не зависит от FUEL_PERIOD)
+// ══════════════════════════════════════════════════════
+function renderFuelHistorySelectM() {
+  const sel = document.getElementById("fuelHistoryEquipmentM");
+  if (!sel) return;
+  const prevVal = sel.value;
+  const eqList = (DATA.equipment||[]).filter(e => (e.site||"").trim()===CURRENT_SITE)
+    .sort((a,b) => String(a.equipmentId).localeCompare(String(b.equipmentId)));
+  sel.innerHTML = `<option value="">— выберите технику —</option>` +
+    eqList.map(e => `<option value="${e.equipmentId}">${e.equipmentId} — ${e.model||""}</option>`).join("");
+  if (prevVal && eqList.some(e => String(e.equipmentId)===prevVal)) sel.value = prevVal;
+}
+
+function fuelHistoryRecordsM(equipmentId) {
+  return (DATA.fuel||[]).filter(f => String(f.equipmentId)===String(equipmentId))
+    .slice()
+    .sort((a,b) => new Date(b.date) - new Date(a.date));
+}
+
+async function renderFuelEquipmentHistoryM() {
+  const sel = document.getElementById("fuelHistoryEquipmentM");
+  const tableEl = document.getElementById("fuelHistoryTableM");
+  if (!sel || !tableEl) return;
+  const equipmentId = sel.value;
+  if (!equipmentId) { tableEl.innerHTML = ""; return; }
+
+  tableEl.innerHTML = `<div class="empty" style="padding:16px"><div class="empty-icon">⏳</div>Загружаю историю...</div>`;
+  const ok = await ensureFuelDataCoverage(0); // история по машине — всегда за всё время
+  if (!ok) {
+    tableEl.innerHTML = `<div class="empty"><div class="empty-icon">⚠</div>Не удалось загрузить — попробуйте ещё раз</div>`;
+    return;
+  }
+
+  const list = fuelHistoryRecordsM(equipmentId);
+  if (!list.length) {
+    tableEl.innerHTML = `<div class="empty" style="padding:16px"><div class="empty-icon">⛽</div>Заправок по этой машине пока нет</div>`;
+    return;
+  }
+  const total = list.reduce((s,f)=>s+(Number(f.amountLiters)||0),0);
+
+  let rateBlock = "";
+  if (isCrawlerEquipment(equipmentId)) {
+    const pairs = dayShiftFuelPairs(equipmentId, null, null);
+    const fmtDay = d => `${String(d.getDate()).padStart(2,"0")}.${String(d.getMonth()+1).padStart(2,"0")}.${d.getFullYear()}`;
+    const fmtTime = d => `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
+    if (pairs.length) {
+      const avgAll = +(pairs.reduce((s,p)=>s+p.rate,0) / pairs.length).toFixed(2);
+      rateBlock = `
+        <div style="font-size:13px;font-weight:700;color:var(--navy2);margin:14px 0 8px">
+          ⛽➜⏱ Расход по сменам (утро+вечер) — в среднем <span style="color:var(--navy)">${avgAll} л/ч</span> по ${pairs.length} см. за всё время
+        </div>
+        <div style="overflow-x:auto;margin-bottom:14px"><table style="font-size:13px">
+          <thead><tr><th>День</th><th>Утро</th><th>Вечер</th><th>Часов</th><th>л/ч</th></tr></thead>
+          <tbody>${pairs.map(p => `<tr>
+            <td>${fmtDay(p.date)}</td>
+            <td>${fmtTime(p.startTime)} · ${p.startLiters} л</td>
+            <td>${fmtTime(p.endTime)} · ${p.endLiters} л</td>
+            <td>${p.hours}</td>
+            <td><b>${p.rate}</b></td>
+          </tr>`).join("")}</tbody>
+        </table></div>
+        <div style="font-size:11px;color:var(--gray);margin-bottom:8px">
+          Расход = объём вечерней заправки (бак снова полный) ÷ часы между заправками. Дни с заправкой не 2 раза за смену сюда не попадают.
+        </div>
+      `;
+    } else {
+      rateBlock = `<div style="font-size:12px;color:var(--gray);margin:14px 0 8px">
+        Гусеничная техника — расход л/ч считается по дням с ровно двумя дневными заправками (утро+вечер). Таких дней нет.
+      </div>`;
+    }
+  }
+
+  tableEl.innerHTML = `
+    <div style="font-size:12px;color:var(--gray);margin-bottom:8px">
+      Всего заправок: <b>${list.length}</b> · Литров всего: <b>${total.toLocaleString("ru-RU")}</b>
+    </div>
+    ${rateBlock}
+    <div style="overflow-x:auto"><table style="font-size:13px">
+      <thead><tr><th>Дата и время</th><th>Смена</th><th>Сотрудник</th><th>Литры</th></tr></thead>
+      <tbody>${list.map(f => {
+        const d = new Date(f.date);
+        const shift = !isNaN(d) ? fuelShiftOf(d) : "—";
+        const dateStr = isNaN(d) ? f.date : d.toLocaleString("ru-RU",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
+        return `<tr>
+          <td>${dateStr}</td>
+          <td>${shift === "День" ? "☀ день" : shift === "Ночь" ? "🌙 ночь" : "—"}</td>
+          <td>${f.empName||"—"}</td>
+          <td><b>${Number(f.amountLiters)||0} л</b></td>
+        </tr>`;
+      }).join("")}</tbody>
+    </table></div>
+  `;
+}
+
+async function exportFuelEquipmentExcelM() {
+  const sel = document.getElementById("fuelHistoryEquipmentM");
+  const equipmentId = sel ? sel.value : "";
+  if (!equipmentId) { alert("Сначала выберите технику."); return; }
+  if (typeof XLSX === "undefined") {
+    alert("Библиотека Excel не загрузилась (нужен интернет) — попробуй ещё раз.");
+    return;
+  }
+  const ok = await ensureFuelDataCoverage(0);
+  if (!ok) { alert("Не удалось загрузить полную историю — попробуйте ещё раз."); return; }
+  const eqById = {};
+  (DATA.equipment||[]).forEach(e => eqById[String(e.equipmentId)] = e);
+  const list = fuelHistoryRecordsM(equipmentId);
+  if (!list.length) { alert("Нет данных для выгрузки."); return; }
+  const rows = list.map(f => {
+    const eq = eqById[String(f.equipmentId)];
+    const d = new Date(f.date);
+    return [
+      isNaN(d) ? f.date : d.toLocaleString("ru-RU",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"}),
+      f.equipmentId || "",
+      eq ? eq.model : "",
+      f.empName || "",
+      !isNaN(d) ? fuelShiftOf(d) : "",
+      Number(f.amountLiters) || 0,
+    ];
+  });
+  const aoa = [["Дата и время","Техника","Модель","Сотрудник","Смена","Литры"], ...rows];
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws["!cols"] = [{wch:18},{wch:12},{wch:22},{wch:22},{wch:8},{wch:10}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Заправки");
+  if (isCrawlerEquipment(equipmentId)) addFuelRateSheetM(wb, equipmentId);
+  XLSX.writeFile(wb, `Заправки_${equipmentId}_${todayIso()}.xlsx`);
+}
+
+// ══════════════════════════════════════════════════════
+// РАСХОД ПО ТИПУ ТЕХНИКИ — фильтр по типу + модели, период или свой диапазон
+// ══════════════════════════════════════════════════════
+let FUEL_TYPE_FILTER_M = { type: "", model: "", mode: 1, customFrom: "", customTo: "" }; // mode: 1|7|0|'custom'
+
+function parseDateInputM(val) {
+  if (!val) return null;
+  const parts = String(val).split("-").map(Number);
+  if (parts.length !== 3 || parts.some(isNaN)) return null;
+  const [y,m,d] = parts;
+  const dt = new Date(y, m-1, d);
+  dt.setHours(0,0,0,0);
+  return dt;
+}
+
+function fuelTypeFilterRangeM() {
+  const st = FUEL_TYPE_FILTER_M;
+  if (st.mode === "custom") {
+    if (!st.customFrom || !st.customTo) return [null, null];
+    const start = parseDateInputM(st.customFrom);
+    let end = parseDateInputM(st.customTo);
+    if (end) { end = new Date(end); end.setDate(end.getDate() + 1); } // включаем весь день "по"
+    return [start, end];
+  }
+  if (st.mode === 0) return [null, null]; // весь период
+  const start = new Date(); start.setDate(start.getDate() - st.mode); start.setHours(0,0,0,0);
+  return [start, null];
+}
+
+function renderFuelTypeFilterButtonsM() {
+  const el = document.getElementById("fuelTypeFilterPeriodButtonsM");
+  if (!el) return;
+  const st = FUEL_TYPE_FILTER_M;
+  el.innerHTML = FUEL_PERIOD_OPTIONS.map(o => `
+    <button class="${st.mode===o.d?'btn-gold':'btn-ghost'}" style="width:auto;padding:6px 10px;font-size:11px"
+      onclick="setFuelTypeFilterModeM(${o.d})">${o.label}</button>
+  `).join("");
+}
+
+async function setFuelTypeFilterModeM(days) {
+  FUEL_TYPE_FILTER_M.mode = days;
+  const fromEl = document.getElementById("fuelTypeFromM");
+  const toEl = document.getElementById("fuelTypeToM");
+  if (fromEl) fromEl.value = "";
+  if (toEl) toEl.value = "";
+  renderFuelTypeFilterButtonsM();
+  await ensureFuelDataCoverage(days);
+  renderFuelTypeFilterM();
+}
+
+async function applyFuelTypeCustomRangeM() {
+  const fromEl = document.getElementById("fuelTypeFromM");
+  const toEl = document.getElementById("fuelTypeToM");
+  const from = fromEl ? fromEl.value : "";
+  const to = toEl ? toEl.value : "";
+  if (!from || !to) { alert("Укажите обе даты — «с» и «по»."); return; }
+  if (from > to) { alert("Дата «с» позже даты «по» — проверьте диапазон."); return; }
+  FUEL_TYPE_FILTER_M.mode = "custom";
+  FUEL_TYPE_FILTER_M.customFrom = from;
+  FUEL_TYPE_FILTER_M.customTo = to;
+  renderFuelTypeFilterButtonsM();
+  await ensureFuelDataCoverage(0); // произвольный диапазон может выходить за уже загруженное — берём весь период
+  renderFuelTypeFilterM();
+}
+
+function onFuelTypeFilterTypeChangeM(val) {
+  FUEL_TYPE_FILTER_M.type = val;
+  renderFuelTypeFilterM();
+}
+
+function onFuelTypeFilterModelInputM(val) {
+  FUEL_TYPE_FILTER_M.model = val;
+  renderFuelTypeFilterM();
+}
+
+function renderFuelTypeFilterM() {
+  const typeSelEl = document.getElementById("fuelTypeFilterTypeM");
+  const resultEl = document.getElementById("fuelTypeFilterResultM");
+  if (!typeSelEl || !resultEl) return;
+  const st = FUEL_TYPE_FILTER_M;
+
+  const types = Array.from(new Set((DATA.equipment||[]).filter(e => (e.site||"").trim()===CURRENT_SITE).map(e=>e.type).filter(Boolean))).sort();
+  const prevVal = typeSelEl.value || st.type;
+  typeSelEl.innerHTML = `<option value="">— выберите тип —</option>` + types.map(t=>`<option value="${t}">${t}</option>`).join("");
+  if (prevVal && types.indexOf(prevVal) >= 0) typeSelEl.value = prevVal;
+
+  if (!st.type) {
+    resultEl.innerHTML = `<div class="empty" style="padding:16px"><div class="empty-icon">🚛</div>Выберите тип техники</div>`;
+    return;
+  }
+
+  const [start, end] = fuelTypeFilterRangeM();
+  if (st.mode === "custom" && (!start || !end)) {
+    resultEl.innerHTML = `<div class="empty" style="padding:16px"><div class="empty-icon">📅</div>Укажите обе даты и нажмите «Применить»</div>`;
+    return;
+  }
+
+  let eqList = (DATA.equipment||[]).filter(e => (e.site||"").trim()===CURRENT_SITE && e.type===st.type);
+  if (st.model && st.model.trim()) {
+    const needle = st.model.trim().toLowerCase();
+    eqList = eqList.filter(e => String(e.model||"").toLowerCase().indexOf(needle) >= 0);
+  }
+  eqList.sort((a,b) => String(a.equipmentId).localeCompare(String(b.equipmentId)));
+
+  if (!eqList.length) {
+    resultEl.innerHTML = `<div class="empty" style="padding:16px"><div class="empty-icon">🚛</div>Под фильтр не подошла ни одна единица техники</div>`;
+    return;
+  }
+
+  const crawler = CRAWLER_FUEL_TYPES.indexOf(st.type) >= 0;
+  const rows = eqList.map(eq => {
+    const recs = (DATA.fuel||[]).filter(f => String(f.equipmentId)===String(eq.equipmentId)).filter(f => {
+      const d = new Date(f.date);
+      return !isNaN(d) && (!start || d >= start) && (!end || d < end);
+    });
+    const liters = recs.reduce((s,f)=>s+(Number(f.amountLiters)||0),0);
+    const rate = crawler ? avgShiftFuelRate(eq.equipmentId, start, end) : null;
+    return { eq, count: recs.length, liters, rate };
+  });
+
+  const totalLiters = rows.reduce((s,r)=>s+r.liters,0);
+  const totalCount = rows.reduce((s,r)=>s+r.count,0);
+  const periodNote = st.mode === "custom" ? `${st.customFrom} — ${st.customTo}` : periodNoun(st.mode);
+
+  resultEl.innerHTML = `
+    <div style="font-size:12px;color:var(--gray);margin-bottom:10px">
+      Период: <b>${periodNote}</b> · ${eqList.length} ед. · ${totalCount} заправок · ${totalLiters.toLocaleString("ru-RU")} л
+      ${!crawler ? `<div style="color:var(--gold-dark,#a15c00);margin-top:4px">⚠️ Для типа «${st.type}» л/ч не считается — нет объективного метода без данных хронометража.</div>` : ""}
+    </div>
+    <div style="overflow-x:auto"><table style="font-size:13px">
+      <thead><tr><th>Техника</th><th>Заправок</th><th>Литров</th>${crawler ? "<th>л/ч</th>" : ""}</tr></thead>
+      <tbody>${rows.map(r => `
+        <tr style="cursor:pointer" onclick="document.getElementById('fuelHistoryEquipmentM').value='${r.eq.equipmentId}'; renderFuelEquipmentHistoryM(); document.getElementById('fuelHistoryEquipmentM').scrollIntoView({behavior:'smooth',block:'center'});">
+          <td><b>${r.eq.equipmentId}</b> — ${r.eq.model||""}</td>
+          <td>${r.count}</td>
+          <td>${r.liters.toLocaleString("ru-RU")}</td>
+          ${crawler ? `<td>${r.rate ? `<b>${r.rate.avg}</b> <span style="color:var(--gray);font-size:11px">(${r.rate.days} см.)</span>` : "—"}</td>` : ""}
+        </tr>
+      `).join("")}</tbody>
+    </table></div>
+  `;
+}
 
 function daysLeft(v) {
   if (!v) return null;
