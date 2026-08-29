@@ -1558,6 +1558,19 @@ function naryadSmenaOfTime(d) {
   const h = d.getHours();
   return (h >= 7 && h < 19) ? 1 : 2;
 }
+// 29.08.2026: предсменные осмотры/заправки сдаются ДО начала смены, а не после —
+// это нормально и ожидаемо. Жёсткая граница 07:00/19:00 такие записи «резала»
+// в прошлую смену (18:52 у ночного оператора считалось днём), из-за чего наряд
+// показывал прочерк по чек-листу у людей, которые реально его сдали. Час до
+// каждой границы — грейс-период: запись считается ОБЕИХ смен сразу, чтобы
+// попасть в строку того, кто реально заступает.
+function naryadSmenaKeysOfTime(d) {
+  const h = d.getHours();
+  const primary = naryadSmenaOfTime(d);
+  if (h === 18) return [1, 2];   // 18:00–18:59 — грейс перед ночной (19:00)
+  if (h === 6)  return [2, 1];   // 06:00–06:59 — грейс перед дневной (07:00)
+  return [primary];
+}
 function naryadFmtTime(d) {
   if (!d) return "";
   return String(d.getHours()).padStart(2,"0") + ":" + String(d.getMinutes()).padStart(2,"0");
@@ -1672,10 +1685,12 @@ async function openNaryadModal(dateStr) {
     (DATA.fuel||[]).forEach(f => {
       const d = new Date(f.date);
       if (isNaN(d.getTime()) || d < dayStart || d >= dayEnd) return;
-      const key = `${f.equipmentId}|${naryadSmenaOfTime(d)}`;
-      if (!fuelByKey[key]) fuelByKey[key] = { liters: 0, lastTime: null };
-      fuelByKey[key].liters += Number(f.amountLiters) || 0;
-      if (!fuelByKey[key].lastTime || d > fuelByKey[key].lastTime) fuelByKey[key].lastTime = d;
+      naryadSmenaKeysOfTime(d).forEach(sm => {
+        const key = `${f.equipmentId}|${sm}`;
+        if (!fuelByKey[key]) fuelByKey[key] = { liters: 0, lastTime: null };
+        fuelByKey[key].liters += Number(f.amountLiters) || 0;
+        if (!fuelByKey[key].lastTime || d > fuelByKey[key].lastTime) fuelByKey[key].lastTime = d;
+      });
     });
 
     const checklistByKey = {};
@@ -1683,7 +1698,9 @@ async function openNaryadModal(dateStr) {
       if (!eqIds.has(String(r.equipmentId))) return; // чужой участок — не наш
       const d = new Date(r.date);
       if (isNaN(d.getTime()) || d < dayStart || d >= dayEnd) return;
-      checklistByKey[`${r.equipmentId}|${naryadSmenaOfTime(d)}`] = true;
+      naryadSmenaKeysOfTime(d).forEach(sm => {
+        checklistByKey[`${r.equipmentId}|${sm}`] = true;
+      });
     });
 
     rowsData = buildNaryadRows(fuelByKey, checklistByKey);
