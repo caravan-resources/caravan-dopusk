@@ -132,6 +132,7 @@ td { padding:8px; border-bottom:1px solid var(--border); }
       <button id="shiftRefreshBtn" class="btn-ghost" style="margin-left:8px" title="Обновить данные по вахте" onclick="refreshShiftData(true)">🔄</button>
       <span id="shiftLastUpdatedLabel" style="font-size:11px;color:var(--gray)"></span>
     </div>
+    <div id="unassignedHint"></div>
 
     <!-- ══ ВАХТА ══ -->
     <div id="screenShift" class="screen active">
@@ -489,6 +490,20 @@ function renderVahtaSwitch() {
   el.innerHTML = VAHTA_OPTIONS.map(o => `
     <button class="${CURRENT_VAHTA===o.key?'btn-gold':'btn-ghost'}" onclick="setVahta('${o.key}')">${o.label}</button>
   `).join("");
+  renderUnassignedHint();
+}
+// Поясняет режим «Неназначенные»: это не третья вахта, а список строк без
+// привязки к Вахте 1/2 — то есть данные, которые надо доразнести вручную.
+function renderUnassignedHint() {
+  const el = document.getElementById("unassignedHint");
+  if (!el) return;
+  el.innerHTML = CURRENT_VAHTA === "unassigned"
+    ? `<div style="font-size:12px;color:var(--gray);margin:-10px 0 16px">
+         ℹ Это не отдельная вахта, а строки в базе без привязки к Вахте 1 или 2 —
+         например, после переезда техники между участками. Найдите здесь и назначьте
+         вахту вручную через ✎.
+       </div>`
+    : "";
 }
 function setVahta(v) {
   CURRENT_VAHTA = v;
@@ -620,8 +635,15 @@ function renderShiftStats() {
 // (используется для наряда за прошлую дату, см. openNaryadModal/getNaryadForDate).
 function getShiftGroups(assignmentsOverride) {
   const source = assignmentsOverride || DATA.shiftAssignments || [];
+  const isUnassigned = CURRENT_VAHTA === "unassigned";
+  // «Неназначенные» — не значение поля vahta (такого в базе не бывает), а строки,
+  // где vahta вообще пустая/не проставлена. Раньше здесь было жёсткое сравнение
+  // с CURRENT_VAHTA, которое для "unassigned" ничего не находило — и код ниже
+  // молча подставлял ВСЮ технику участка с пустыми слотами вместо реальных
+  // осиротевших строк. Исправлено 29.08.2026.
   const assignments = source.filter(a =>
-    String(a.vahta) === CURRENT_VAHTA && String(a.site||"").trim() === CURRENT_SITE
+    (isUnassigned ? !String(a.vahta||"").trim() : String(a.vahta) === CURRENT_VAHTA)
+    && String(a.site||"").trim() === CURRENT_SITE
   );
 
   const byKey = {};
@@ -630,11 +652,16 @@ function getShiftGroups(assignmentsOverride) {
     if (!byKey[key]) byKey[key] = { equipmentId: a.equipmentId, position: a.position, items: [] };
     byKey[key].items.push(a);
   });
-  (DATA.equipment||[]).forEach(eq => {
-    if ((eq.site||"").trim() === CURRENT_SITE && !byKey[eq.equipmentId]) {
-      byKey[eq.equipmentId] = { equipmentId: eq.equipmentId, position: "", items: [] };
-    }
-  });
+  // Достроить пустыми карточками технику без назначения — только для настоящих
+  // вахт. Для «Неназначенные» это не нужно: там должны быть видны только
+  // фактически осиротевшие строки, а не вся техника участка.
+  if (!isUnassigned) {
+    (DATA.equipment||[]).forEach(eq => {
+      if ((eq.site||"").trim() === CURRENT_SITE && !byKey[eq.equipmentId]) {
+        byKey[eq.equipmentId] = { equipmentId: eq.equipmentId, position: "", items: [] };
+      }
+    });
+  }
 
   function typeOf(group) {
     if (group.equipmentId) {
@@ -670,6 +697,8 @@ function renderShift() {
   if (!usedTypes.length) {
     if (!DATA.equipment.length) {
       container.innerHTML = `<div class="panel"><div class="empty"><div class="empty-icon">⏳</div>Загружаю данные...</div></div>`;
+    } else if (CURRENT_VAHTA === "unassigned") {
+      container.innerHTML = `<div class="panel"><div class="empty"><div class="empty-icon">✓</div>Осиротевших записей нет — все строки корректно привязаны к вахте.</div></div>`;
     } else {
       container.innerHTML = `<div class="panel"><div class="empty"><div class="empty-icon">👷</div>Данных по этой вахте пока нет.</div></div>`;
     }
