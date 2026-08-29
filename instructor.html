@@ -57,18 +57,31 @@ header {
 .hdr-right { display:flex; align-items:center; gap:10px; }
 .hdr-date { font-size:11px; color:rgba(255,255,255,.4); }
 
-/* ── НАВИГАЦИЯ ── */
-nav {
+/* ── НАВИГАЦИЯ: 1-й уровень (группы) ── */
+.nav-groups {
+  background:var(--navy2); padding:0 20px; display:flex; gap:0; overflow-x:auto;
+}
+.nav-groups button {
+  padding:14px 20px; border:none; background:none;
+  color:rgba(255,255,255,.65); font-weight:700; font-size:13px;
+  cursor:pointer; font-family:inherit; white-space:nowrap;
+  border-bottom:3px solid transparent; letter-spacing:.02em;
+}
+.nav-groups button.active { color:var(--gold); border-bottom-color:var(--gold); }
+.nav-groups button:hover:not(.active) { color:#fff; }
+
+/* ── НАВИГАЦИЯ: 2-й уровень (вкладки внутри группы) ── */
+.nav-sub {
   background:#fff; border-bottom:1px solid var(--border);
   padding:0 20px; display:flex; gap:0; overflow-x:auto;
 }
-nav button {
-  padding:14px 18px; border:none; background:none;
-  color:var(--gray); font-weight:600; font-size:13px;
+.nav-sub button {
+  padding:11px 16px; border:none; background:none;
+  color:var(--gray); font-weight:600; font-size:12px;
   cursor:pointer; font-family:inherit; white-space:nowrap;
   border-bottom:3px solid transparent;
 }
-nav button.active { color:var(--gold); font-weight:800; border-bottom-color:var(--gold); }
+.nav-sub button.active { color:var(--gold); font-weight:800; border-bottom-color:var(--gold); }
 
 /* ── КОНТЕНТ ── */
 main { padding:20px; max-width:1200px; margin:0 auto; }
@@ -218,29 +231,41 @@ tr:hover td { background:#FAFBFD; }
     </div>
   </header>
 
-  <nav>
-    <button class="active" id="navDash"    onclick="showTab('dash')">📊 Дашборд</button>
+  <nav class="nav-groups">
+    <button class="active" id="grpDash"     onclick="showGroup('dash')">📊 Дашборд</button>
+    <button id="grpTraining" onclick="showGroup('training')">🎓 Обучение</button>
+    <button id="grpAdmin"    onclick="showGroup('admin')">👤 Администрирование</button>
+    <button id="grpPerf"     onclick="showGroup('perf')">📈 Производительность</button>
+  </nav>
+
+  <nav class="nav-sub" id="subTraining" style="display:none">
     <button id="navTests"   onclick="showTab('tests')">📋 Результаты тестов</button>
+    <button id="navTraining" onclick="showTab('training')">🎓 Обучение</button>
+    <button id="navCertPrintProfession" onclick="showTab('certPrintProfession')">🎓 Обучение по профессии</button>
+    <button id="navTrainingPlan" onclick="showTab('trainingPlan')">📚 График обучения</button>
+    <button id="navImport"   onclick="showTab('import')">➕ Импорт теста</button>
     <button id="navAccess"  onclick="showTab('access')">🪪 Сроки допусков</button>
     <button id="navPrint"    onclick="showTab('print')">🖨 Печать карточек</button>
-    <button id="navCertPrintProfession" onclick="showTab('certPrintProfession')">🎓 Обучение по профессии</button>
-    <button id="navTraining" onclick="showTab('training')">🎓 Обучение</button>
+  </nav>
+
+  <nav class="nav-sub" id="subAdmin" style="display:none">
     <button id="navPersonnel" onclick="showTab('personnel')">👥 Сотрудники</button>
     <button id="navSurveys" onclick="showTab('surveys')">📋 Анкеты <span id="surveyBadge" style="display:none;background:var(--red);color:#fff;border-radius:99px;padding:1px 7px;font-size:11px;margin-left:4px"></span></button>
     <button id="navEquipmentAlmaty"  onclick="showTab('equipmentAlmaty')">🚜 Техника (Алмалы)</button>
     <button id="navEquipmentAshyktas" onclick="showTab('equipmentAshyktas')">🚜 Техника (Ашыктас)</button>
     <button id="navChecklistTemplates" onclick="showTab('checklistTemplates')">🔧 Шаблоны чек-листов</button>
+  </nav>
+
+  <nav class="nav-sub" id="subPerf" style="display:none">
     <button id="navFuelAlmaty"   onclick="showTab('fuelAlmaty')">⛽ Топливо (Алмалы)</button>
     <button id="navFuelAshyktas" onclick="showTab('fuelAshyktas')">⛽ Топливо (Ашыктас)</button>
     <button id="navReportsAlmaty"   onclick="showTab('reportsAlmaty')">📄 Отчёты (Алмалы)</button>
     <button id="navReportsAshyktas" onclick="showTab('reportsAshyktas')">📄 Отчёты (Ашыктас)</button>
     <button id="navOperatorRating" onclick="showTab('operatorRating')">🏅 Рейтинг операторов</button>
-    <button id="navTrainingPlan" onclick="showTab('trainingPlan')">📚 График обучения</button>
     <button id="navShift1"   onclick="showTab('shift1')">👷 Вахта 1 (Алмалы)</button>
     <button id="navShift2"   onclick="showTab('shift2')">👷 Вахта 2 (Алмалы)</button>
     <button id="navShift1a"  onclick="showTab('shift1a')">👷 Вахта 1 (Ашыктас)</button>
     <button id="navShift2a"  onclick="showTab('shift2a')">👷 Вахта 2 (Ашыктас)</button>
-    <button id="navImport"   onclick="showTab('import')">➕ Импорт теста</button>
   </nav>
 
   <div id="criticalErrorBanner" style="display:none;background:var(--red);color:#fff;
@@ -1662,13 +1687,42 @@ function renderAll() {
 // ══════════════════════════════════════════════════════
 // НАВИГАЦИЯ
 // ══════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════
+// НАВИГАЦИЯ (2 уровня: группы вверху, вкладки внутри группы)
+// ══════════════════════════════════════════════════════
+const NAV_GROUPS = {
+  dash:     ["dash"],
+  training: ["tests","training","certPrintProfession","trainingPlan","import","access","print"],
+  admin:    ["personnel","surveys","equipmentAlmaty","equipmentAshyktas","checklistTemplates"],
+  perf:     ["fuelAlmaty","fuelAshyktas","reportsAlmaty","reportsAshyktas","operatorRating","shift1","shift2","shift1a","shift2a"],
+};
+function groupOf(tabName) {
+  return Object.keys(NAV_GROUPS).find(g => NAV_GROUPS[g].includes(tabName));
+}
 function showTab(name) {
   ["dash","tests","access","print","certPrintProfession","training","personnel","surveys","equipmentAlmaty","equipmentAshyktas","checklistTemplates","fuelAlmaty","fuelAshyktas","reportsAlmaty","reportsAshyktas","operatorRating","trainingPlan","shift1","shift2","shift1a","shift2a","import"].forEach(t => {
     document.getElementById("tab"+cap(t)).classList.remove("active");
-    document.getElementById("nav"+cap(t)).classList.remove("active");
+    document.getElementById("nav"+cap(t))?.classList.remove("active");
   });
   document.getElementById("tab"+cap(name)).classList.add("active");
-  document.getElementById("nav"+cap(name)).classList.add("active");
+  document.getElementById("nav"+cap(name))?.classList.add("active");
+
+  // Синхронизируем группу верхнего уровня — сама showTab это единая точка
+  // входа (её вызывают и showGroup, и прямые ссылки типа "Полная аналитика →"),
+  // поэтому группа всегда обновляется корректно независимо от того, откуда пришли.
+  const g = groupOf(name);
+  Object.keys(NAV_GROUPS).forEach(gr => {
+    document.getElementById("grp"+cap(gr))?.classList.toggle("active", gr === g);
+    const subEl = document.getElementById("sub"+cap(gr));
+    if (subEl) subEl.style.display = (gr === g && NAV_GROUPS[gr].length > 1) ? "flex" : "none";
+  });
+}
+// Клик по кнопке группы — открываем последнюю активную вкладку внутри нее,
+// а если такой ещё не было (первый заход) — первую по списку.
+function showGroup(group) {
+  const tabs = NAV_GROUPS[group];
+  const lastActive = tabs.find(t => document.getElementById("tab"+cap(t))?.classList.contains("active"));
+  showTab(lastActive || tabs[0]);
 }
 function cap(s) { return s.charAt(0).toUpperCase()+s.slice(1); }
 
