@@ -424,6 +424,20 @@ tr:hover td { background:#FAFBFD; }
         </div>
       </div>
 
+      <div id="dashGroupTiming" class="dash-group">
+        <div style="font-size:15px;font-weight:800;color:var(--navy);margin-bottom:12px">⏱ Хронометраж погрузки</div>
+        <div class="hint" style="margin-bottom:10px">
+          Замеры без привязанной оценки за день — те, что уже видны внутри карточки
+          своей оценки, здесь не повторяются.
+        </div>
+        <div class="stats-grid" id="statsGridDashTiming"></div>
+        <div class="panel">
+          <div class="panel-title">🕐 Недавние замеры</div>
+          <div id="dashTimingList"></div>
+          <div class="hint" style="margin-top:10px">Ввод и полная история замеров — вкладка «⏱ Хронометраж» в приложении обучения (training.html).</div>
+        </div>
+      </div>
+
     </div>
 
     <!-- ══ РЕЗУЛЬТАТЫ ТЕСТОВ ══ -->
@@ -1790,6 +1804,7 @@ function renderAll() {
   renderReportPeriodButtons("Алмалы");
   renderReportPeriodButtons("Ашыктас");
   renderOperatorRating();
+  loadTimingDashboard();
   renderTrainingPlan();
   renderShiftFormation(1, "shift1Formation", "Алмалы");
   renderShiftFormation(2, "shift2Formation", "Алмалы");
@@ -2326,7 +2341,7 @@ let DASH_ACTIVE_CAT = null; // null = всё свёрнуто
 
 function toggleDashCategory(name) {
   DASH_ACTIVE_CAT = (DASH_ACTIVE_CAT === name) ? null : name;
-  ["Inspections","Training","Fuel","Evaluations"].forEach(g => {
+  ["Inspections","Training","Fuel","Evaluations","Timing"].forEach(g => {
     const el = document.getElementById("dashGroup"+g);
     if (el) el.classList.toggle("active", DASH_ACTIVE_CAT === g);
   });
@@ -2394,6 +2409,18 @@ function evalStatsForDashboard() {
   return { count: list.length, avg, low };
 }
 
+// getTimingRecordsList отдаёт группы (оператор+дата → массив замеров) и уже
+// сам исключает те, что попали в карточку своей оценки (см. Код.gs) — здесь
+// просто разворачиваем группы в плоский список для подсчёта статистики.
+function timingStatsForDashboard() {
+  const groups = (typeof LAST_TIMING_GROUPS !== "undefined" ? LAST_TIMING_GROUPS : []) || [];
+  const allRecords = groups.flatMap(g => g.records || []);
+  const cycles = allRecords.map(t => Number(t.cycleTimeSec)).filter(n => !isNaN(n));
+  const avgCycle = cycles.length ? cycles.reduce((a,b)=>a+b,0) / cycles.length : null;
+  const badLoading = allRecords.filter(t => String(t.properLoading||"").trim() === "нет").length;
+  return { count: allRecords.length, avgCycle, badLoading };
+}
+
 function renderDashCatRow() {
   const el = document.getElementById("dashCatRow");
   if (!el) return;
@@ -2404,6 +2431,7 @@ function renderDashCatRow() {
   const fuelRecords = fuel["Алмалы"].records + fuel["Ашыктас"].records;
   const fuelLiters = fuel["Алмалы"].liters + fuel["Ашыктас"].liters;
   const ev = evalStatsForDashboard();
+  const tm = timingStatsForDashboard();
 
   const cats = [
     { key:"Inspections", icon:"🔧", title:"Осмотры техники",
@@ -2429,6 +2457,12 @@ function renderDashCatRow() {
       nums: [
         { val: ev.avg!==null ? ev.avg.toFixed(1) : "—", lbl:"средний балл", color: ev.avg!==null ? evalScoreColor(ev.avg) : "var(--gray)" },
         { val: ev.count, lbl:"оценок", color:"var(--navy)" },
+      ] },
+    { key:"Timing", icon:"⏱", title:"Хронометраж погрузки",
+      dot: tm.count===0 ? "var(--gray)" : (tm.badLoading ? "var(--red)" : "var(--green)"),
+      nums: [
+        { val: tm.avgCycle!==null ? tm.avgCycle.toFixed(1)+"с" : "—", lbl:"средний цикл", color:"var(--navy)" },
+        { val: tm.count, lbl:"замеров", color:"var(--navy)" },
       ] },
   ];
 
@@ -2518,26 +2552,61 @@ function renderDashEvalDetail() {
 
   const el = document.getElementById("dashEvalList");
   if (!el) return;
+  // Полные карточки (та же renderEvalJournalCard, что и в развёрнутом журнале)
+  // — оценки должны быть видны на дашборде вместе с хронометражем (когда он
+  // есть), не просто строкой с баллом. Ограничиваем тремя последними, а не
+  // восемью, чтобы дашборд не превращался обратно в портянку.
   const list = ((typeof LAST_EVALUATIONS !== "undefined" ? LAST_EVALUATIONS : []) || [])
-    .slice().sort((a,b) => parseRuDate(b.date) - parseRuDate(a.date)).slice(0,8);
-  el.innerHTML = list.length ? list.map(e => `
+    .slice().sort((a,b) => parseRuDate(b.date) - parseRuDate(a.date)).slice(0,3);
+  el.innerHTML = list.length
+    ? list.map(e => renderEvalJournalCard(e, evalScoreColor, true)).join("")
+    : `<div class="empty" style="padding:16px"><div class="empty-icon">🎯</div>Оценок работы за период нет</div>`;
+}
+
+// Хронометраж без привязанной оценки за тот же день (getTimingRecordsList
+// сам исключает те, что уже видны внутри карточки оценки выше — см.
+// evalKeys в Код.gs). Группы разворачиваем в плоский список записей для
+// компактного отображения — на дашборде не нужна вложенная структура.
+function renderDashTimingDetail() {
+  const gridEl = document.getElementById("statsGridDashTiming");
+  if (!gridEl) return;
+  const tm = timingStatsForDashboard();
+
+  gridEl.innerHTML = [
+    { lbl:"Замеров за период", val: tm.count, acc:"var(--navy2)" },
+    { lbl:"Средний цикл ковша", val: tm.avgCycle!==null ? tm.avgCycle.toFixed(1)+" с" : "—", acc:"var(--navy)" },
+    { lbl:"Нарушен паспорт загрузки", val: tm.badLoading, acc: tm.badLoading ? "var(--red)" : "var(--gray)" },
+  ].map(s => `
+    <div class="stat-card" style="border-left-color:${s.acc}">
+      <div class="stat-val" style="color:${s.acc}">${s.val}</div>
+      <div class="stat-lbl">${s.lbl}</div>
+    </div>`).join("");
+
+  const el = document.getElementById("dashTimingList");
+  if (!el) return;
+  const groups = (typeof LAST_TIMING_GROUPS !== "undefined" ? LAST_TIMING_GROUPS : []) || [];
+  const flat = groups.flatMap(g => (g.records||[]).map(r => ({ ...r, empName: g.empName, site: g.site, date: g.date })));
+  const list = flat.slice(0,5);
+  const loadColor = t => String(t.properLoading||"").trim()==="да" ? "var(--green)" : (String(t.properLoading||"").trim()==="нет" ? "var(--red)" : "var(--gray)");
+  el.innerHTML = list.length ? list.map(t => `
     <div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--border)">
       <div>
-        <div style="font-size:13px;font-weight:700;color:var(--navy)">${e.empName || "—"}</div>
-        <div style="font-size:11px;color:var(--gray)">${[e.equipmentModel, e.site].filter(Boolean).join(" · ")}</div>
+        <div style="font-size:13px;font-weight:700;color:var(--navy)">${t.empName || "—"}</div>
+        <div style="font-size:11px;color:var(--gray)">${[t.truckModel, t.site].filter(Boolean).join(" · ")}</div>
       </div>
       <div style="text-align:right">
-        <div style="font-size:15px;font-weight:800;color:${evalScoreColor(e.overallAvg)}">${e.overallAvg}</div>
-        <div style="font-size:11px;color:var(--gray)">${e.date || ""}</div>
+        <div style="font-size:14px;font-weight:800;color:var(--navy)">${t.cycleTimeSec} с <span style="font-size:11px;color:${loadColor(t)}">${String(t.properLoading||"").trim()==="да"?"✓":(String(t.properLoading||"").trim()==="нет"?"✕":"")}</span></div>
+        <div style="font-size:11px;color:var(--gray)">${t.date || ""}</div>
       </div>
     </div>`).join("")
-    : `<div class="empty" style="padding:16px"><div class="empty-icon">🎯</div>Оценок работы за период нет</div>`;
+    : `<div class="empty" style="padding:16px"><div class="empty-icon">⏱</div>Замеров без привязанной оценки за период нет</div>`;
 }
 
 function renderDashCategories() {
   renderDashCatRow();
   renderDashFuelDetail();
   renderDashEvalDetail();
+  renderDashTimingDetail();
 }
 
 // ══════════════════════════════════════════════════════
@@ -2668,6 +2737,21 @@ async function loadEvaluationRatingSection() {
     renderDashCatRow();
     renderDashEvalDetail();
   }
+}
+
+// Независимая загрузка для дашборда — 7 дней по умолчанию (как и «Заправка»),
+// не завязана на фильтры вкладки «Рейтинг операторов». getTimingRecordsList
+// сам исключает замеры, уже показанные внутри карточки своей оценки — этот
+// виджет специально только про "хронометраж-сироты" без привязанной оценки.
+async function loadTimingDashboard() {
+  try {
+    const val = await jsonpFetchRetry(`${CFG.SHEET_URL}?action=getTimingRecordsList&days=7`, "cb_timing_records_list", 30000, 3);
+    LAST_TIMING_GROUPS = (val && val.ok && Array.isArray(val.groups)) ? val.groups : [];
+  } catch (e) {
+    LAST_TIMING_GROUPS = [];
+    console.error("timingRecordsList:", e);
+  }
+  renderDashCategories();
 }
 
 // «По времени»: хронологический список, сгруппированный по дате (сначала
@@ -6520,6 +6604,7 @@ let AWARD_OFFSET = 0;        // 0 — текущий период, -1 — пре
 // а сами DOM-деревья строятся лениво, при открытии соответствующей панели.
 let LAST_RATING_ROWS = [];
 let LAST_EVALUATIONS = [];
+let LAST_TIMING_GROUPS = [];
 
 function awardPeriodRange(kind, offset) {
   const now = new Date();
