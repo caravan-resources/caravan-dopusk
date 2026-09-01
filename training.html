@@ -2219,13 +2219,21 @@ function handleTimingImportFile(evt) {
       const wb = XLSX.read(e.target.result, { type: "binary", cellDates: true });
       const sheet = wb.Sheets[wb.SheetNames[0]];
       const rows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
-      TIMING_IMPORT_ROWS = rows.map(parseTimingImportRow);
+      // Пропускаем полностью пустые/служебные строки (например, если в файле
+      // ниже таблицы остались текстовые пояснения или случайно пустая
+      // строка-разделитель) — иначе они попадают в предпросмотр как
+      // «строки с ошибками», хотя это не данные вообще.
+      TIMING_IMPORT_ROWS = rows.map(parseTimingImportRow).filter(isMeaningfulTimingImportRow);
       renderTimingImportPreview();
     } catch (err) {
       document.getElementById("timingImportPreview").innerHTML = `<div class="empty">Не удалось прочитать файл: ${err.message}</div>`;
     }
   };
   reader.readAsBinaryString(file);
+}
+
+function isMeaningfulTimingImportRow(r) {
+  return Boolean(r.name || r.truckModel || r.totalTime || r.bucketCount || r.cycleTime);
 }
 
 function parseTimingImportRow(row) {
