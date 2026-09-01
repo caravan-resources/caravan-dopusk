@@ -4420,9 +4420,10 @@ function competencyGap(emp) {
 
 function personnelEventBadge(type) {
   const t = String(type||"").toLowerCase();
-  if (t === "взыскание") return `<span style="background:var(--redbg);color:var(--red);font-size:11px;font-weight:700;padding:2px 8px;border-radius:99px">⚠ Взыскание</span>`;
-  if (t === "награда")   return `<span style="background:#FFFBEB;color:#B45309;font-size:11px;font-weight:700;padding:2px 8px;border-radius:99px">🏆 Награда</span>`;
-  if (t === "оценка")    return `<span style="background:#EEF2FF;color:#4338CA;font-size:11px;font-weight:700;padding:2px 8px;border-radius:99px">🎯 Оценка</span>`;
+  if (t === "взыскание")   return `<span style="background:var(--redbg);color:var(--red);font-size:11px;font-weight:700;padding:2px 8px;border-radius:99px">⚠ Взыскание</span>`;
+  if (t === "награда")     return `<span style="background:#FFFBEB;color:#B45309;font-size:11px;font-weight:700;padding:2px 8px;border-radius:99px">🏆 Награда</span>`;
+  if (t === "оценка")      return `<span style="background:#EEF2FF;color:#4338CA;font-size:11px;font-weight:700;padding:2px 8px;border-radius:99px">🎯 Оценка</span>`;
+  if (t === "хронометраж") return `<span style="background:#F5F3FF;color:#7C3AED;font-size:11px;font-weight:700;padding:2px 8px;border-radius:99px">⏱ Хронометраж</span>`;
   return `<span style="background:var(--greenbg);color:var(--green);font-size:11px;font-weight:700;padding:2px 8px;border-radius:99px">✓ Поощрение</span>`;
 }
 
