@@ -1753,12 +1753,19 @@ function buildNaryadRows(fuelByKey, checklistByKey, assignmentsOverride) {
         const trained = (hasRealPerson && eqType)
           ? naryadIsTrainedFor(naryadCoursesOf(trainingMap, a.empId, a.empName), eqType)
           : null;
+        // Допуск в карьер — статус по карточке сотрудника (statusOf/validUntil,
+        // та же логика, что в «Личном деле»). null — нет карточки/не привязан,
+        // это не значит "нет допуска", просто неизвестно.
+        const emp = hasRealPerson ? (a.empId ? empById(a.empId) : (DATA.employees||[]).find(e => e.name === a.empName)) : null;
+        const access = emp ? statusOf(emp) : null; // "ok" | "warning" | "expired" | "nodate" | null
         out.push({
           equipmentId: g.equipmentId || g.position,
           model: eq ? eq.model : "",
           smena: SMENA_LABEL[sm],
           empName,
           empId: a ? (a.empId||"") : "",
+          linked: hasRealPerson ? !!emp : null,
+          access,
           workStatus: a ? (a.workStatus||"") : "",
           reassignNote: a ? (a.reassignNote||"") : "",
           hasEquipment: !!g.equipmentId,
@@ -1930,13 +1937,20 @@ function renderNaryadTable() {
     const trainCell = r.trained === false ? `<span style="color:var(--red);font-weight:700">✗ не обучен</span>`
       : r.trained === true ? `<span style="color:#1a7d3a;font-weight:700">✓</span>`
       : "—";
+    const accessCell = r.access ? statusBadge(r.access)
+      : (r.linked === false ? `<span style="color:var(--gray);font-size:11px">нет карточки</span>` : "—");
+    // Приоритет подсветки строки: просроченный допуск — самое критичное
+    // (человека вообще нельзя пускать в карьер), истекающий — предупреждение,
+    // необученность на технику текстом в своей колонке подсветки строки не даёт.
+    const rowBg = r.access === "expired" ? "var(--redbg)" : r.access === "warning" ? "var(--yellowbg)" : "";
     return `
-    <tr${r.trained === false ? ' style="background:var(--redbg)"' : ""}>
+    <tr${rowBg ? ` style="background:${rowBg}"` : ""}>
       <td>${r.equipmentId}${r.model ? ` <span style="color:var(--gray);font-size:11px">${r.model}</span>` : ""}</td>
       <td>${r.smena}</td>
       <td>${r.empName}</td>
       <td style="${r.workStatus ? `color:${workStatusColor(r.workStatus)};font-weight:700` : ""}">${r.workStatus || "—"}</td>
       <td>${r.reassignNote || "—"}</td>
+      <td>${accessCell}</td>
       <td>${fuelCell}</td>
       <td>${chkCell}</td>
       <td>${trainCell}</td>
@@ -1944,6 +1958,8 @@ function renderNaryadTable() {
   }).join("");
 
   const untrainedCount = rowsData.filter(r => r.trained === false).length;
+  const expiredCount   = rowsData.filter(r => r.access === "expired").length;
+  const warningCount   = rowsData.filter(r => r.access === "warning").length;
 
   document.getElementById("naryadPrintArea").innerHTML = `
     <div style="font-size:16px;font-weight:800;margin-bottom:2px">Наряд — ${CURRENT_SITE}</div>
@@ -1951,10 +1967,12 @@ function renderNaryadTable() {
     ${NARYAD_IS_PAST ? `<div style="font-size:12px;color:var(--gray);margin-bottom:10px">ℹ Наряд за прошлую дату восстановлен из журнала изменений (доступно с 24.08.2026). Заправка и чек-лист по прошлым датам пока не сопоставляются.</div>` : ""}
     ${NARYAD_CHECKLIST_FAILED ? `<div style="font-size:12px;color:#c0392b;margin-bottom:6px">⚠ Чек-листы не загрузились — колонка «Чек-лист» сейчас недостоверна</div>` : ""}
     ${NARYAD_FUEL_FAILED ? `<div style="font-size:12px;color:#c0392b;margin-bottom:10px">⚠ Заправки не загрузились — колонка «Заправка» сейчас недостоверна</div>` : ""}
-    ${untrainedCount ? `<div style="font-size:12px;color:var(--red);font-weight:700;margin-bottom:10px">🔴 ${untrainedCount} чел. работают без обучения на закреплённую технику — строки подсвечены</div>` : ""}
+    ${expiredCount ? `<div style="font-size:12px;color:var(--red);font-weight:700;margin-bottom:6px">🔴 ${expiredCount} чел. без действующего допуска в карьер — строки подсвечены</div>` : ""}
+    ${warningCount ? `<div style="font-size:12px;color:var(--yellow);font-weight:700;margin-bottom:6px">🟡 ${warningCount} чел. — допуск истекает в течение 30 дней</div>` : ""}
+    ${untrainedCount ? `<div style="font-size:12px;color:var(--red);font-weight:700;margin-bottom:10px">⚠ ${untrainedCount} чел. работают без обучения на закреплённую технику (колонка «Обучение»)</div>` : ""}
     <table>
-      <thead><tr><th>Техника</th><th>Смена</th><th>Ф.И.О.</th><th>Вид работы</th><th>Привлечение</th><th>Заправка</th><th>Чек-лист</th><th>Обучение</th></tr></thead>
-      <tbody>${tableRows || `<tr><td colspan="8" style="text-align:center;color:var(--gray)">Нет данных по этой смене</td></tr>`}</tbody>
+      <thead><tr><th>Техника</th><th>Смена</th><th>Ф.И.О.</th><th>Вид работы</th><th>Привлечение</th><th>Допуск</th><th>Заправка</th><th>Чек-лист</th><th>Обучение</th></tr></thead>
+      <tbody>${tableRows || `<tr><td colspan="9" style="text-align:center;color:var(--gray)">Нет данных по этой смене</td></tr>`}</tbody>
     </table>
   `;
   window.__naryadRows = rowsData;
@@ -1972,7 +1990,8 @@ function downloadNaryadExcel() {
     return;
   }
   const rowsData = window.__naryadRows || [];
-  const aoa = [["Техника","Модель","Смена","Ф.И.О.","Вид работы","Привлечение","Заправка (л)","Время заправки","Чек-лист","Обучение"]];
+  const ACCESS_XLSX_LABEL = { expired: "ПРОСРОЧЕН", warning: "истекает", ok: "действителен", nodate: "нет данных" };
+  const aoa = [["Техника","Модель","Смена","Ф.И.О.","Вид работы","Привлечение","Допуск в карьер","Заправка (л)","Время заправки","Чек-лист","Обучение"]];
   rowsData.forEach(r => {
     aoa.push([
       r.equipmentId,
@@ -1981,6 +2000,7 @@ function downloadNaryadExcel() {
       r.empName,
       r.workStatus || "",
       r.reassignNote || "",
+      r.access ? (ACCESS_XLSX_LABEL[r.access]||"") : (r.linked===false ? "нет карточки" : ""),
       !r.hasEquipment ? "" : (NARYAD_IS_PAST ? "н/д" : (r.fuelLiters || 0)),
       r.hasEquipment && !NARYAD_IS_PAST && r.fuelTime ? naryadFmtTime(r.fuelTime) : "",
       !r.hasEquipment ? "" : (NARYAD_IS_PAST ? "н/д" : (r.checklistFilled ? "заполнен" : "нет")),
@@ -1988,7 +2008,7 @@ function downloadNaryadExcel() {
     ]);
   });
   const ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws["!cols"] = [{wch:10},{wch:20},{wch:7},{wch:28},{wch:22},{wch:22},{wch:12},{wch:10},{wch:10},{wch:12}];
+  ws["!cols"] = [{wch:10},{wch:20},{wch:7},{wch:28},{wch:22},{wch:22},{wch:14},{wch:12},{wch:10},{wch:10},{wch:12}];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Наряд");
   const vahtaLabel = ((VAHTA_OPTIONS.find(o=>o.key===CURRENT_VAHTA)||{}).label || CURRENT_VAHTA).replace(/\s/g,"");
@@ -2012,6 +2032,8 @@ function copyNaryadText() {
         line += r.checklistFilled ? ` | Чек-лист: ✓` : ` | Чек-лист: —`;
       }
     }
+    if (r.access === "expired") line += ` | 🔴 ДОПУСК ПРОСРОЧЕН`;
+    else if (r.access === "warning") line += ` | 🟡 допуск истекает`;
     if (r.trained === false) line += ` | ⚠ НЕ ОБУЧЕН на технику`;
     lines.push(line);
   });
