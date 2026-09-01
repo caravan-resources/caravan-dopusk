@@ -74,6 +74,7 @@ function doGet(e) {
   else if (action === "getEvaluationAlerts") result = getEvaluationAlerts();
   else if (action === "getEvaluationStats") result = getEvaluationStats(e.parameter);
   else if (action === "getEvaluationsList") result = getEvaluationsList(e.parameter);
+  else if (action === "getTimingRecordsList") result = getTimingRecordsList(e.parameter);
   else result = json({ ok: false, error: "unknown action" });
 
   if (callback) {
@@ -3861,6 +3862,103 @@ function getEvaluationsList(p) {
   return json({ ok: true, evaluations: evaluations });
 }
 
+// ── Хронометраж без привязки к оценке ─────────────────────────
+// getEvaluationsList присоединяет хронометраж только к дням, где есть
+// «Оценка работы» того же оператора — так исторически задумывался джойн.
+// Но на практике мастер иногда меряет хронометраж отдельно, без отдельной
+// формальной оценки в тот же день — такие замеры раньше нигде не были видны
+// в отчёте инструктора, только в самой форме ввода. Эта функция отдаёт
+// именно такие «осиротевшие» группы замеров (empId+дата, на которые нет
+// оценки), сгруппированные так же, как хронометраж внутри карточки оценки —
+// чтобы фронт мог отрисовать их тем же renderTimingSummary(). Группы, у
+// которых оценка есть, сюда не попадают — они и так видны внутри своей
+// карточки, дублировать не нужно.
+function getTimingRecordsList(p) {
+  const siteFilter = (p && p.site && p.site !== "all") ? String(p.site).trim() : "";
+  const days = Number((p && p.days) || 0);
+  const fromParam = p && p.from ? new Date(p.from) : null;
+  const toParam   = p && p.to   ? new Date(p.to)   : null;
+
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const timingSheet = ss.getSheetByName(SHEET_TIMING);
+  if (!timingSheet) return json({ ok: true, groups: [] });
+  const tRows = timingSheet.getDataRange().getValues();
+  if (tRows.length < 2) return json({ ok: true, groups: [] });
+  const tHeaders = tRows[0];
+  const tIdx = {};
+  tHeaders.forEach((h,i) => tIdx[h] = i);
+
+  let since = null, until = null;
+  if (fromParam && !isNaN(fromParam.getTime())) {
+    since = fromParam;
+    until = (toParam && !isNaN(toParam.getTime())) ? toParam : new Date();
+  } else if (days > 0) {
+    since = new Date();
+    since.setDate(since.getDate() - days);
+    since.setHours(0,0,0,0);
+  }
+
+  // Ключи "empId|дата", у которых уже есть оценка — такие группы замеров
+  // пропускаем, они и так видны внутри карточки своей оценки.
+  const evalKeys = {};
+  const evalSheet = ss.getSheetByName(SHEET_EVALUATIONS);
+  if (evalSheet) {
+    const eRows = evalSheet.getDataRange().getValues();
+    if (eRows.length > 1) {
+      const eHeaders = eRows[0];
+      const eIdx = {};
+      eHeaders.forEach((h,i) => eIdx[h] = i);
+      eRows.slice(1).forEach(r => {
+        if (!r[eIdx["evalId"]]) return;
+        const empId = String(r[eIdx["empId"]] || "").trim();
+        const rawDate = r[eIdx["date"]];
+        const dateStr = rawDate instanceof Date ? Utilities.formatDate(rawDate, "Asia/Almaty", "dd.MM.yyyy") : String(rawDate||"");
+        evalKeys[empId + "|" + dateStr] = true;
+      });
+    }
+  }
+
+  const groups = {};
+  const order = [];
+  tRows.slice(1).forEach(r => {
+    if (!r[tIdx["recordId"]]) return;
+    const site = String(r[tIdx["site"]] || "").trim();
+    if (siteFilter && site !== siteFilter) return;
+
+    const rawDate = r[tIdx["date"]];
+    const d = rawDate instanceof Date ? rawDate : new Date(rawDate);
+    if (since && (isNaN(d) || d < since)) return;
+    if (until && !isNaN(d) && d >= until) return;
+    const dateStr = !isNaN(d) ? Utilities.formatDate(d, "Asia/Almaty", "dd.MM.yyyy") : String(rawDate || "");
+
+    const empId = String(r[tIdx["empId"]] || "").trim();
+    const key = empId + "|" + dateStr;
+    if (evalKeys[key]) return;
+
+    if (!groups[key]) {
+      groups[key] = {
+        empId: empId, empName: r[tIdx["empName"]] || "", position: r[tIdx["position"]] || "",
+        date: dateStr, __sortDate: !isNaN(d) ? d.getTime() : 0,
+        site: site, equipmentType: r[tIdx["equipmentType"]] || "", equipmentModel: r[tIdx["equipmentModel"]] || "",
+        records: [],
+      };
+      order.push(key);
+    }
+    const o = {};
+    tHeaders.forEach((h,j) => {
+      const v = r[j];
+      o[h] = (h === "date" && v instanceof Date) ? dateStr : v;
+    });
+    groups[key].records.push(o);
+  });
+
+  const result = order.map(k => groups[k]);
+  result.sort((a,b) => b.__sortDate - a.__sortDate);
+  result.forEach(g => delete g.__sortDate);
+
+  return json({ ok: true, groups: result });
+}
+
 // ── Резюме оценки через Claude API ────────────────────────────
 // Тот же ключ и модель, что и recognizeRoster (Script Properties,
 // ANTHROPIC_API_KEY). Резюме объективное — без обязательного баланса
@@ -3970,7 +4068,30 @@ function saveTimingRecord(p) {
     properLoading || "", site || "", instructorName || "", summary || "", createdAt,
   ]);
 
+  // Личное дело — та же запись видна в истории сотрудника рядом с оценками,
+  // взысканиями/поощрениями. evalId-колонка используется как общий FK на
+  // источник события (для оценок — evalId, здесь — recordId хронометража).
+  savePersonnelEvent(
+    empId || "", empName, "Оценка",
+    dateStr,
+    timingPersonnelEventText(totalLoadTimeSec, bucketCount, cycleTimeSec, bucketFillPercent, properLoading, truckModel, summary),
+    instructorName || "",
+    recordId
+  );
+
   return json({ ok: true, recordId });
+}
+
+// Текст события в личном деле для хронометража — общий для saveTimingRecord
+// и updateTimingRecord, чтобы формат не разъезжался между созданием и
+// редактированием одной и той же записи.
+function timingPersonnelEventText(totalLoadTimeSec, bucketCount, cycleTimeSec, bucketFillPercent, properLoading, truckModel, summary) {
+  let text = "Время погрузки: " + totalLoadTimeSec + " с, ковшей: " + bucketCount + ", цикл: " + cycleTimeSec + " с";
+  if (bucketFillPercent) text += ", наполнение: " + bucketFillPercent + "%";
+  if (properLoading) text += ", паспорт: " + properLoading;
+  if (truckModel) text += " (" + truckModel + ")";
+  if (summary) text += ". " + summary;
+  return text;
 }
 
 function updateTimingRecord(p) {
@@ -4015,6 +4136,38 @@ function updateTimingRecord(p) {
   sheet.getRange(rowNum, col("site")).setValue(site || "");
   sheet.getRange(rowNum, col("instructorName")).setValue(instructorName || "");
   sheet.getRange(rowNum, col("summary")).setValue(summary || "");
+
+  // Личное дело: обновляем связанную запись (по evalId = recordId
+  // хронометража), а не создаём новую — тот же паттерн, что у оценок.
+  // Для замеров, сохранённых до появления этой связки, записи нет —
+  // тогда создаём, как при первом сохранении.
+  const peText = timingPersonnelEventText(totalLoadTimeSec, bucketCount, cycleTimeSec, bucketFillPercent, properLoading, truckModel, summary);
+  const peSheet = ss.getSheetByName(SHEET_PERSONNEL_EVENTS);
+  let peUpdated = false;
+  if (peSheet) {
+    const peRows = peSheet.getDataRange().getValues();
+    const peHeaders = peRows[0];
+    const peEvalIdCol = peHeaders.indexOf("evalId");
+    if (peEvalIdCol >= 0) {
+      for (let i = 1; i < peRows.length; i++) {
+        if (String(peRows[i][peEvalIdCol]).trim() === String(recordId).trim()) {
+          const dateColNum = peHeaders.indexOf("date") + 1;
+          const typeColNum = peHeaders.indexOf("type") + 1;
+          const descColNum = peHeaders.indexOf("description") + 1;
+          const issColNum  = peHeaders.indexOf("issuedBy") + 1;
+          peSheet.getRange(i + 1, dateColNum).setValue(dateStr);
+          if (typeColNum > 0) peSheet.getRange(i + 1, typeColNum).setValue("Оценка");
+          peSheet.getRange(i + 1, descColNum).setValue(peText);
+          if (issColNum > 0) peSheet.getRange(i + 1, issColNum).setValue(instructorName || "");
+          peUpdated = true;
+          break;
+        }
+      }
+    }
+  }
+  if (!peUpdated) {
+    savePersonnelEvent(empId || "", empName, "Оценка", dateStr, peText, instructorName || "", recordId);
+  }
 
   return json({ ok: true, recordId });
 }
