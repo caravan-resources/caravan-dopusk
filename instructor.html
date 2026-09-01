@@ -4497,6 +4497,48 @@ function competencyGap(emp) {
   return { testsRequired, testsDone, testsMissing, coursesRequired, coursesDone, coursesMissing };
 }
 
+// Заполненность личного дела — критичные поля весят больше (60% на 4),
+// второстепенные — меньше (40% на 8). Пороги: 🟢≥80 / 🟡40-79 / 🔴<40.
+const PROFILE_CRITICAL_FIELDS  = ["photoUrl","phone","hireDate","tooPrimary"];
+const PROFILE_SECONDARY_FIELDS = ["address","education","experienceYears","specialties","additionalSkills","email","certificates","courses"];
+const PROFILE_FIELD_LABELS = {
+  photoUrl: "фото", phone: "телефон", hireDate: "дата приёма", tooPrimary: "ТОО",
+  address: "адрес", education: "образование", experienceYears: "стаж",
+  specialties: "специальности", additionalSkills: "доп. компетенции",
+  email: "почта", certificates: "сертификаты", courses: "курсы"
+};
+const PERSONNEL_TIER_META = {
+  red:    { icon: "🔴", label: "Плохо заполнено" },
+  yellow: { icon: "🟡", label: "Частично заполнено" },
+  green:  { icon: "🟢", label: "Заполнено" }
+};
+
+function profileCompleteness(emp) {
+  const critW = 60 / PROFILE_CRITICAL_FIELDS.length;
+  const secW  = 40 / PROFILE_SECONDARY_FIELDS.length;
+  let score = 0;
+  const missing = [];
+  PROFILE_CRITICAL_FIELDS.forEach(f => {
+    if (String(emp[f]||"").trim()) score += critW; else missing.push(f);
+  });
+  PROFILE_SECONDARY_FIELDS.forEach(f => {
+    if (String(emp[f]||"").trim()) score += secW; else missing.push(f);
+  });
+  score = Math.round(score);
+  let tier = "red";
+  if (score >= 80) tier = "green";
+  else if (score >= 40) tier = "yellow";
+  return { score, tier, missing };
+}
+
+// Свёрнуто/развёрнуто по умолчанию: 🔴 сразу на виду, остальное скрыто —
+// чтобы проблемные карточки не терялись среди тех, где и так всё хорошо.
+let PERSONNEL_GROUP_OPEN = { red: true, yellow: false, green: false };
+function togglePersonnelGroup(tier) {
+  PERSONNEL_GROUP_OPEN[tier] = !PERSONNEL_GROUP_OPEN[tier];
+  renderPersonnelList();
+}
+
 function personnelEventBadge(type) {
   const t = String(type||"").toLowerCase();
   if (t === "взыскание")   return `<span style="background:var(--redbg);color:var(--red);font-size:11px;font-weight:700;padding:2px 8px;border-radius:99px">⚠ Взыскание</span>`;
@@ -4516,7 +4558,19 @@ function renderPersonnelList() {
   const el = document.getElementById("personnelList");
   if (!el) return;
 
-  el.innerHTML = list.length ? list.map(e => `
+  if (!list.length) {
+    el.innerHTML = `<div class="empty"><div class="empty-icon">🔍</div>Никого не нашлось</div>`;
+    return;
+  }
+
+  const groups = { red: [], yellow: [], green: [] };
+  list.forEach(e => {
+    const pc = profileCompleteness(e);
+    e.__completeness = pc;
+    groups[pc.tier].push(e);
+  });
+
+  const renderItem = e => `
     <div onclick="selectPersonnelEmployee('${String(e.id).replace(/'/g,"\\'")}')"
       style="cursor:pointer;padding:10px 12px;border:1px solid var(--border);border-radius:10px;
         display:flex;justify-content:space-between;align-items:center;background:#fff"
@@ -4525,9 +4579,33 @@ function renderPersonnelList() {
         <div style="font-weight:700;color:var(--navy);font-size:13px">${e.name||"—"}</div>
         <div style="font-size:11px;color:var(--gray)">${e.position||"—"} · ${e.site||""}</div>
       </div>
-      <div style="font-size:11px;color:var(--gray);font-family:monospace">${e.id||""}</div>
+      <div style="text-align:right">
+        <div style="font-size:11px;color:var(--gray);font-family:monospace">${e.id||""}</div>
+        <div style="font-size:10px;color:var(--gray)">${e.__completeness.score}%</div>
+      </div>
     </div>
-  `).join("") : `<div class="empty"><div class="empty-icon">🔍</div>Никого не нашлось</div>`;
+  `;
+
+  // При активном поиске разворачиваем все группы, чтобы совпадения
+  // не прятались в свёрнутой секции — но сохранённое состояние сворачивания
+  // (PERSONNEL_GROUP_OPEN) при этом не трогаем, оно вернётся после поиска.
+  el.innerHTML = ["red","yellow","green"].map(tier => {
+    const items = groups[tier];
+    if (!items.length) return "";
+    const meta = PERSONNEL_TIER_META[tier];
+    const open = q ? true : PERSONNEL_GROUP_OPEN[tier];
+    return `
+      <div style="margin-bottom:10px">
+        <div onclick="togglePersonnelGroup('${tier}')"
+          style="cursor:pointer;display:flex;justify-content:space-between;align-items:center;
+            padding:8px 10px;background:var(--light);border-radius:8px;font-size:12px;font-weight:700;color:var(--navy)">
+          <span>${meta.icon} ${meta.label} (${items.length})</span>
+          <span style="color:var(--gray)">${open ? "▾" : "▸"}</span>
+        </div>
+        ${open ? `<div style="display:flex;flex-direction:column;gap:6px;margin-top:6px">${items.map(renderItem).join("")}</div>` : ""}
+      </div>
+    `;
+  }).join("");
 }
 
 let CURRENT_PROFILE_ID = null;
@@ -4539,6 +4617,7 @@ function selectPersonnelEmployee(id) {
   if (!emp || !el) return;
 
   const gap = competencyGap(emp);
+  const pc = profileCompleteness(emp);
   const events = (DATA.personnelEvents||[]).filter(ev => String(ev.empId)===String(emp.id) || ev.empName===emp.name)
     .sort((a,b) => new Date(b.date)-new Date(a.date));
   // Оценки работы — отдельная сущность, не взыскание/поощрение. Выводим их
@@ -4577,6 +4656,12 @@ function selectPersonnelEmployee(id) {
           <button class="btn btn-ghost" onclick="openEventModal('${emp.id}','${(emp.name||"").replace(/'/g,"\\'")}')">+ Событие в личное дело</button>
           <button class="btn btn-ghost" style="color:var(--red);font-size:12px" onclick="deleteEmployeeProfile('${emp.id}','${(emp.name||"").replace(/'/g,"\\'")}')">🗑 Удалить профиль</button>
         </div>
+      </div>
+
+      <div style="display:flex;justify-content:space-between;align-items:center;background:var(--light);
+        border-radius:8px;padding:8px 12px;margin-bottom:12px;font-size:12px">
+        <span style="font-weight:700;color:var(--navy)">${PERSONNEL_TIER_META[pc.tier].icon} Личное дело заполнено на ${pc.score}%</span>
+        ${pc.missing.length ? `<span style="color:var(--gray)">не хватает: ${pc.missing.map(f=>PROFILE_FIELD_LABELS[f]).join(", ")}</span>` : `<span style="color:var(--green)">всё заполнено</span>`}
       </div>
 
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;font-size:12px">
