@@ -5108,6 +5108,7 @@ function openEditEmployeeModal(id) {
         value="${!isPreset ? esc(emp.position) : ""}"
         style="display:${!isPreset && emp.position ? "block" : "none"};padding:10px;border:1px solid var(--border);border-radius:8px">
       <select id="editSite" style="padding:10px;border:1px solid var(--border);border-radius:8px">
+        <option value="" ${!(emp.site||"").trim()?"selected":""}>Участок — не указан</option>
         <option value="Алмалы" ${(emp.site||"").trim()==="Алмалы"?"selected":""}>Алмалы</option>
         <option value="Ашыктас" ${(emp.site||"").trim()==="Ашыктас"?"selected":""}>Ашыктас</option>
       </select>
