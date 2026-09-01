@@ -5134,7 +5134,9 @@ function openEditEmployeeModal(id) {
         <option value="Высшее техническое" ${emp.education==="Высшее техническое"?"selected":""}>Высшее техническое</option>
         <option value="Высшее нетехническое" ${emp.education==="Высшее нетехническое"?"selected":""}>Высшее нетехническое</option>
       </select>
-      <input id="editExperience" type="number" min="0" max="60" placeholder="Стаж по профессии (лет)" value="${esc(emp.experienceYears)}" style="padding:10px;border:1px solid var(--border);border-radius:8px">
+      <input id="editExperience" type="number" min="0" max="60" step="0.01" placeholder="Стаж по профессии (лет)"
+        value="${esc(String(emp.experienceYears||"").trim().replace(",","."))}"
+        style="padding:10px;border:1px solid var(--border);border-radius:8px">
       <div style="font-size:11px;color:var(--gray);margin-top:4px">Имеющиеся специальности:</div>
       <div id="editSpecialtiesBox" style="border:1px solid var(--border);border-radius:8px;padding:10px;max-height:180px;overflow-y:auto">
         ${EDIT_POSITIONS.map(s => `
