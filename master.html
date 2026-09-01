@@ -1361,6 +1361,49 @@ function statusBadge(st) {
 }
 
 // ══ РАБОТНИКИ — поиск + личное дело по клику ══
+
+// Заполненность личного дела — критичные поля весят больше (60% на 4),
+// второстепенные — меньше (40% на 8). Пороги: 🟢≥80 / 🟡40-79 / 🔴<40.
+// Логика идентична instructor.html — при изменении менять в обоих файлах.
+const PROFILE_CRITICAL_FIELDS  = ["photoUrl","phone","hireDate","tooPrimary"];
+const PROFILE_SECONDARY_FIELDS = ["address","education","experienceYears","specialties","additionalSkills","email","certificates","courses"];
+const PROFILE_FIELD_LABELS = {
+  photoUrl: "фото", phone: "телефон", hireDate: "дата приёма", tooPrimary: "ТОО",
+  address: "адрес", education: "образование", experienceYears: "стаж",
+  specialties: "специальности", additionalSkills: "доп. компетенции",
+  email: "почта", certificates: "сертификаты", courses: "курсы"
+};
+const PERSONNEL_TIER_META = {
+  red:    { icon: "🔴", label: "Плохо заполнено" },
+  yellow: { icon: "🟡", label: "Частично заполнено" },
+  green:  { icon: "🟢", label: "Заполнено" }
+};
+
+function profileCompleteness(emp) {
+  const critW = 60 / PROFILE_CRITICAL_FIELDS.length;
+  const secW  = 40 / PROFILE_SECONDARY_FIELDS.length;
+  let score = 0;
+  const missing = [];
+  PROFILE_CRITICAL_FIELDS.forEach(f => {
+    if (String(emp[f]||"").trim()) score += critW; else missing.push(f);
+  });
+  PROFILE_SECONDARY_FIELDS.forEach(f => {
+    if (String(emp[f]||"").trim()) score += secW; else missing.push(f);
+  });
+  score = Math.round(score);
+  let tier = "red";
+  if (score >= 80) tier = "green";
+  else if (score >= 40) tier = "yellow";
+  return { score, tier, missing };
+}
+
+// Свёрнуто/развёрнуто по умолчанию: 🔴 сразу на виду, остальное скрыто.
+let PERSONNEL_GROUP_OPEN = { red: true, yellow: false, green: false };
+function togglePersonnelGroup(tier) {
+  PERSONNEL_GROUP_OPEN[tier] = !PERSONNEL_GROUP_OPEN[tier];
+  renderPersonnelList();
+}
+
 function renderPersonnelList() {
   const el = document.getElementById("personnelList");
   if (!el) return;
@@ -1385,16 +1428,44 @@ function renderPersonnelList() {
     return;
   }
 
-  const shown = list.slice(0, 40);
-  el.innerHTML = `<div style="overflow-x:auto"><table>
-    <thead><tr><th>Сотрудник</th><th>Должность</th><th>Допуск</th></tr></thead>
-    <tbody>${shown.map(e => `
+  const groups = { red: [], yellow: [], green: [] };
+  list.forEach(e => {
+    const pc = profileCompleteness(e);
+    e.__completeness = pc;
+    groups[pc.tier].push(e);
+  });
+
+  const LIMIT = 40;
+  let shownCount = 0;
+  // При поиске разворачиваем все группы, чтобы совпадение не пряталось
+  // в свёрнутой секции; сохранённое состояние (PERSONNEL_GROUP_OPEN) не трогаем.
+  const rowsHtml = ["red","yellow","green"].map(tier => {
+    const items = groups[tier];
+    if (!items.length) return "";
+    const meta = PERSONNEL_TIER_META[tier];
+    const open = q ? true : PERSONNEL_GROUP_OPEN[tier];
+    const headerRow = `<tr onclick="togglePersonnelGroup('${tier}')" style="cursor:pointer;background:var(--light)">
+      <td colspan="3" style="font-weight:700;color:var(--navy);font-size:12px">
+        ${meta.icon} ${meta.label} (${items.length}) <span style="color:var(--gray);float:right">${open ? "▾" : "▸"}</span>
+      </td>
+    </tr>`;
+    if (!open) return headerRow;
+    const remaining = LIMIT - shownCount;
+    const toShow = remaining > 0 ? items.slice(0, remaining) : [];
+    shownCount += toShow.length;
+    const bodyRows = toShow.map(e => `
       <tr style="cursor:pointer" onclick="openEmployeeCard('${String(e.id).replace(/'/g,"\\'")}')">
         <td><b>${e.name}</b></td>
         <td style="color:var(--gray)">${e.position||"—"}</td>
-        <td>${statusBadge(statusOf(e))}</td>
-      </tr>`).join("")}</tbody>
-  </table></div>` + (list.length>40 ? `<div style="text-align:center;color:var(--gray);font-size:12px;padding-top:10px">Показаны первые 40 из ${list.length} — уточните поиск</div>` : "");
+        <td>${statusBadge(statusOf(e))} <span style="color:var(--gray);font-size:10px">· ${e.__completeness.score}%</span></td>
+      </tr>`).join("");
+    return headerRow + bodyRows;
+  }).join("");
+
+  el.innerHTML = `<div style="overflow-x:auto"><table>
+    <thead><tr><th>Сотрудник</th><th>Должность</th><th>Допуск</th></tr></thead>
+    <tbody>${rowsHtml}</tbody>
+  </table></div>` + (list.length>shownCount ? `<div style="text-align:center;color:var(--gray);font-size:12px;padding-top:10px">Показаны первые ${shownCount} из ${list.length} — уточните поиск или разверните нужную группу</div>` : "");
 }
 
 // Личное дело — карточка сотрудника + история наград/взысканий
@@ -1411,6 +1482,8 @@ function openEmployeeCard(empId) {
     : `<div style="width:64px;height:64px;border-radius:50%;background:var(--light);display:flex;
          align-items:center;justify-content:center;font-size:24px">👤</div>`;
 
+  const pc = profileCompleteness(e);
+
   document.getElementById("modalBox").innerHTML = `
     <div style="display:flex;gap:14px;align-items:center;margin-bottom:16px">
       ${photo}
@@ -1418,6 +1491,11 @@ function openEmployeeCard(empId) {
         <div style="font-size:17px;font-weight:800;color:var(--navy)">${e.name}</div>
         <div style="font-size:13px;color:var(--gray)">${e.position||""} · ${e.site||""}</div>
       </div>
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;background:var(--light);
+      border-radius:8px;padding:6px 10px;margin-bottom:12px;font-size:12px">
+      <span style="font-weight:700;color:var(--navy)">${PERSONNEL_TIER_META[pc.tier].icon} Личное дело заполнено на ${pc.score}%</span>
+      ${pc.missing.length ? `<span style="color:var(--gray)">не хватает: ${pc.missing.map(f=>PROFILE_FIELD_LABELS[f]).join(", ")}</span>` : `<span style="color:var(--green)">всё заполнено</span>`}
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:13px;margin-bottom:16px">
       <div><span style="color:var(--gray)">Допуск:</span> ${statusBadge(statusOf(e))}</div>
