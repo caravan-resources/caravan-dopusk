@@ -2565,8 +2565,10 @@ function renderDashEvalDetail() {
 
 // Хронометраж без привязанной оценки за тот же день (getTimingRecordsList
 // сам исключает те, что уже видны внутри карточки оценки выше — см.
-// evalKeys в Код.gs). Группы разворачиваем в плоский список записей для
-// компактного отображения — на дашборде не нужна вложенная структура.
+// evalKeys в Код.gs). Каждая группа (оператор+дата) выводится той же
+// таблицей со средними, что и внутри карточки оценки (renderTimingSummary)
+// — для единообразия, а не urезанной строкой. Ограничено 2 группами, иначе
+// таблицы сами по себе достаточно объёмные для дашборда.
 function renderDashTimingDetail() {
   const gridEl = document.getElementById("statsGridDashTiming");
   if (!gridEl) return;
@@ -2585,19 +2587,12 @@ function renderDashTimingDetail() {
   const el = document.getElementById("dashTimingList");
   if (!el) return;
   const groups = (typeof LAST_TIMING_GROUPS !== "undefined" ? LAST_TIMING_GROUPS : []) || [];
-  const flat = groups.flatMap(g => (g.records||[]).map(r => ({ ...r, empName: g.empName, site: g.site, date: g.date })));
-  const list = flat.slice(0,5);
-  const loadColor = t => String(t.properLoading||"").trim()==="да" ? "var(--green)" : (String(t.properLoading||"").trim()==="нет" ? "var(--red)" : "var(--gray)");
-  el.innerHTML = list.length ? list.map(t => `
-    <div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--border)">
-      <div>
-        <div style="font-size:13px;font-weight:700;color:var(--navy)">${t.empName || "—"}</div>
-        <div style="font-size:11px;color:var(--gray)">${[t.truckModel, t.site].filter(Boolean).join(" · ")}</div>
-      </div>
-      <div style="text-align:right">
-        <div style="font-size:14px;font-weight:800;color:var(--navy)">${t.cycleTimeSec} с <span style="font-size:11px;color:${loadColor(t)}">${String(t.properLoading||"").trim()==="да"?"✓":(String(t.properLoading||"").trim()==="нет"?"✕":"")}</span></div>
-        <div style="font-size:11px;color:var(--gray)">${t.date || ""}</div>
-      </div>
+  const list = groups.slice(0,2);
+  el.innerHTML = list.length ? list.map(g => `
+    <div style="margin-bottom:14px">
+      <div style="font-size:13px;font-weight:700;color:var(--navy)">${g.empName || "—"}</div>
+      <div style="font-size:11px;color:var(--gray);margin-bottom:8px">${[g.equipmentModel, g.site, g.date].filter(Boolean).join(" · ")}</div>
+      ${renderTimingSummary(g.records||[])}
     </div>`).join("")
     : `<div class="empty" style="padding:16px"><div class="empty-icon">⏱</div>Замеров без привязанной оценки за период нет</div>`;
 }
