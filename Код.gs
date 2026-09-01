@@ -4072,7 +4072,7 @@ function saveTimingRecord(p) {
   // взысканиями/поощрениями. evalId-колонка используется как общий FK на
   // источник события (для оценок — evalId, здесь — recordId хронометража).
   savePersonnelEvent(
-    empId || "", empName, "Оценка",
+    empId || "", empName, "Хронометраж",
     dateStr,
     timingPersonnelEventText(totalLoadTimeSec, bucketCount, cycleTimeSec, bucketFillPercent, properLoading, truckModel, summary),
     instructorName || "",
@@ -4156,7 +4156,7 @@ function updateTimingRecord(p) {
           const descColNum = peHeaders.indexOf("description") + 1;
           const issColNum  = peHeaders.indexOf("issuedBy") + 1;
           peSheet.getRange(i + 1, dateColNum).setValue(dateStr);
-          if (typeColNum > 0) peSheet.getRange(i + 1, typeColNum).setValue("Оценка");
+          if (typeColNum > 0) peSheet.getRange(i + 1, typeColNum).setValue("Хронометраж");
           peSheet.getRange(i + 1, descColNum).setValue(peText);
           if (issColNum > 0) peSheet.getRange(i + 1, issColNum).setValue(instructorName || "");
           peUpdated = true;
@@ -4166,7 +4166,7 @@ function updateTimingRecord(p) {
     }
   }
   if (!peUpdated) {
-    savePersonnelEvent(empId || "", empName, "Оценка", dateStr, peText, instructorName || "", recordId);
+    savePersonnelEvent(empId || "", empName, "Хронометраж", dateStr, peText, instructorName || "", recordId);
   }
 
   return json({ ok: true, recordId });
