@@ -228,7 +228,7 @@ const CFG = {
   SHEET_URL: "https://script.google.com/macros/s/AKfycbwhdMV20k8US2BXUz1Xk2XCXE9MEwpHpQaadTF9xEfzbU1--dHL-Zuj06K2qXW-rFtKGw/exec",
 };
 
-let DATA = { equipment: [], employees: [], shiftAssignments: [], fuel: [], checklistStats: null, personnelEvents: [] };
+let DATA = { equipment: [], employees: [], shiftAssignments: [], fuel: [], checklistStats: null, personnelEvents: [], training: [] };
 let CURRENT_SITE = "Алмалы";
 let CURRENT_VAHTA = "Вахта-1";
 // Какая вахта реально сейчас на площадке — по участку. Раньше выбор
@@ -391,6 +391,10 @@ const FETCH_DEFS = [
   // за весь период каждый раз, даже если нужен только последний день.
   { key: "fuel",             label: "Заправки",             action: "getFuelRecords",      siteScoped: true,  heavy: true, extraQuery: () => `&days=${FUEL_LOADED_DAYS}` },
   { key: "personnelEvents",  label: "Личные дела",          action: "getPersonnelEvents",  siteScoped: false, heavy: false },
+  // Не привязано к участку (как и в instructor.html) — нужно для подсветки
+  // в наряде тех, кто не обучен на закреплённую за ним технику. Добавлено
+  // при добавлении подсветки необученных в Наряде.
+  { key: "training",         label: "Обучение",             action: "getTraining",         siteScoped: false, heavy: true },
 ];
 let LAST_FAILED_KEYS = [];
 let FUEL_PERIOD = 1;       // что сейчас выбрано в переключателе: 1 (сутки) | 7 (неделя) | 0 (весь период)
@@ -1680,7 +1684,52 @@ function naryadFmtTime(d) {
   return String(d.getHours()).padStart(2,"0") + ":" + String(d.getMinutes()).padStart(2,"0");
 }
 
+// ══ ОБУЧЕНИЕ В НАРЯДЕ — подсветка тех, кто не обучен на закреплённую за
+// ним технику. Логика сопоставления (какой курс относится к какому типу
+// техники) идентична instructor.html/buildTrainingPlan — при изменении
+// менять в обоих файлах. ══
+const NARYAD_TRAINING_MATCH = {
+  "Самосвал":          [/самосвал/i],
+  "Экскаватор":        [/экскаватор/i],
+  "Бульдозер":         [/бульдозер/i],
+  "Грейдер":           [/грейдер/i],
+  "Каток":             [/каток|виброкат/i],
+  "Буровой станок":    [/буров/i],
+  "Погрузчик":         [/погрузчик/i],
+  "Водовоз":           [/водовоз|полив/i],
+  "Легковой транспорт":[/вождени/i],
+};
+function naryadNormEqType(t) {
+  const s = String(t||"").trim();
+  return s.toLowerCase() === "каток" ? "Каток" : s;
+}
+function naryadTrainingByEmployee() {
+  const map = {};
+  (DATA.training||[]).forEach(r => {
+    const id = String(r.empId||"");
+    const nm = String(r.empName||"").trim().toLowerCase();
+    const course = String(r.course||"").split(":")[0].trim();
+    if (id) (map["id:"+id] = map["id:"+id] || new Set()).add(course);
+    if (nm) (map["nm:"+nm] = map["nm:"+nm] || new Set()).add(course);
+  });
+  return map;
+}
+function naryadCoursesOf(map, empId, empName) {
+  const a = map["id:"+String(empId||"")] || new Set();
+  const b = map["nm:"+String(empName||"").trim().toLowerCase()] || new Set();
+  return new Set([...a, ...b]);
+}
+// null — для этого типа техники профильное обучение не задано (не считаем
+// ни обученным, ни необученным, просто "нет данных").
+function naryadIsTrainedFor(courses, eqType) {
+  const pats = NARYAD_TRAINING_MATCH[naryadNormEqType(eqType)];
+  if (!pats) return null;
+  for (const c of courses) if (pats.some(p => p.test(c))) return true;
+  return false;
+}
+
 function buildNaryadRows(fuelByKey, checklistByKey, assignmentsOverride) {
+  const trainingMap = naryadTrainingByEmployee();
   const { usedTypes, rows } = getShiftGroups(assignmentsOverride);
   const out = [];
   usedTypes.forEach(type => {
@@ -1697,17 +1746,26 @@ function buildNaryadRows(fuelByKey, checklistByKey, assignmentsOverride) {
           : "—";
         const key = `${g.equipmentId}|${sm}`;
         const fuelInfo = (g.equipmentId && fuelByKey) ? fuelByKey[key] : null;
+        // Обучение считаем только для реально закреплённого человека (не для
+        // вакансий/пустых слотов) на технике, для которой задан профиль обучения.
+        const eqType = eq ? naryadNormEqType(eq.type) : null;
+        const hasRealPerson = !!(a && a.empName && a.status !== "вакансия" && a.status !== "оптимизация");
+        const trained = (hasRealPerson && eqType)
+          ? naryadIsTrainedFor(naryadCoursesOf(trainingMap, a.empId, a.empName), eqType)
+          : null;
         out.push({
           equipmentId: g.equipmentId || g.position,
           model: eq ? eq.model : "",
           smena: SMENA_LABEL[sm],
           empName,
+          empId: a ? (a.empId||"") : "",
           workStatus: a ? (a.workStatus||"") : "",
           reassignNote: a ? (a.reassignNote||"") : "",
           hasEquipment: !!g.equipmentId,
           fuelLiters: fuelInfo ? fuelInfo.liters : 0,
           fuelTime: fuelInfo ? fuelInfo.lastTime : null,
           checklistFilled: !!(g.equipmentId && checklistByKey && checklistByKey[key]),
+          trained, // true / false / null(нет данных или тип без профиля)
         });
       });
     });
@@ -1869,8 +1927,11 @@ function renderNaryadTable() {
       : (NARYAD_CHECKLIST_FAILED
           ? `<span style="color:var(--gray)" title="Не удалось загрузить чек-листы">нет данных</span>`
           : (r.checklistFilled ? `<span style="color:#1a7d3a;font-weight:700">✓</span>` : `<span style="color:#c0392b;font-weight:700">—</span>`));
+    const trainCell = r.trained === false ? `<span style="color:var(--red);font-weight:700">✗ не обучен</span>`
+      : r.trained === true ? `<span style="color:#1a7d3a;font-weight:700">✓</span>`
+      : "—";
     return `
-    <tr>
+    <tr${r.trained === false ? ' style="background:var(--redbg)"' : ""}>
       <td>${r.equipmentId}${r.model ? ` <span style="color:var(--gray);font-size:11px">${r.model}</span>` : ""}</td>
       <td>${r.smena}</td>
       <td>${r.empName}</td>
@@ -1878,8 +1939,11 @@ function renderNaryadTable() {
       <td>${r.reassignNote || "—"}</td>
       <td>${fuelCell}</td>
       <td>${chkCell}</td>
+      <td>${trainCell}</td>
     </tr>`;
   }).join("");
+
+  const untrainedCount = rowsData.filter(r => r.trained === false).length;
 
   document.getElementById("naryadPrintArea").innerHTML = `
     <div style="font-size:16px;font-weight:800;margin-bottom:2px">Наряд — ${CURRENT_SITE}</div>
@@ -1887,9 +1951,10 @@ function renderNaryadTable() {
     ${NARYAD_IS_PAST ? `<div style="font-size:12px;color:var(--gray);margin-bottom:10px">ℹ Наряд за прошлую дату восстановлен из журнала изменений (доступно с 24.08.2026). Заправка и чек-лист по прошлым датам пока не сопоставляются.</div>` : ""}
     ${NARYAD_CHECKLIST_FAILED ? `<div style="font-size:12px;color:#c0392b;margin-bottom:6px">⚠ Чек-листы не загрузились — колонка «Чек-лист» сейчас недостоверна</div>` : ""}
     ${NARYAD_FUEL_FAILED ? `<div style="font-size:12px;color:#c0392b;margin-bottom:10px">⚠ Заправки не загрузились — колонка «Заправка» сейчас недостоверна</div>` : ""}
+    ${untrainedCount ? `<div style="font-size:12px;color:var(--red);font-weight:700;margin-bottom:10px">🔴 ${untrainedCount} чел. работают без обучения на закреплённую технику — строки подсвечены</div>` : ""}
     <table>
-      <thead><tr><th>Техника</th><th>Смена</th><th>Ф.И.О.</th><th>Вид работы</th><th>Привлечение</th><th>Заправка</th><th>Чек-лист</th></tr></thead>
-      <tbody>${tableRows || `<tr><td colspan="7" style="text-align:center;color:var(--gray)">Нет данных по этой смене</td></tr>`}</tbody>
+      <thead><tr><th>Техника</th><th>Смена</th><th>Ф.И.О.</th><th>Вид работы</th><th>Привлечение</th><th>Заправка</th><th>Чек-лист</th><th>Обучение</th></tr></thead>
+      <tbody>${tableRows || `<tr><td colspan="8" style="text-align:center;color:var(--gray)">Нет данных по этой смене</td></tr>`}</tbody>
     </table>
   `;
   window.__naryadRows = rowsData;
@@ -1907,7 +1972,7 @@ function downloadNaryadExcel() {
     return;
   }
   const rowsData = window.__naryadRows || [];
-  const aoa = [["Техника","Модель","Смена","Ф.И.О.","Вид работы","Привлечение","Заправка (л)","Время заправки","Чек-лист"]];
+  const aoa = [["Техника","Модель","Смена","Ф.И.О.","Вид работы","Привлечение","Заправка (л)","Время заправки","Чек-лист","Обучение"]];
   rowsData.forEach(r => {
     aoa.push([
       r.equipmentId,
@@ -1919,10 +1984,11 @@ function downloadNaryadExcel() {
       !r.hasEquipment ? "" : (NARYAD_IS_PAST ? "н/д" : (r.fuelLiters || 0)),
       r.hasEquipment && !NARYAD_IS_PAST && r.fuelTime ? naryadFmtTime(r.fuelTime) : "",
       !r.hasEquipment ? "" : (NARYAD_IS_PAST ? "н/д" : (r.checklistFilled ? "заполнен" : "нет")),
+      r.trained === false ? "НЕ ОБУЧЕН" : r.trained === true ? "обучен" : "",
     ]);
   });
   const ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws["!cols"] = [{wch:10},{wch:20},{wch:7},{wch:28},{wch:22},{wch:22},{wch:12},{wch:10},{wch:10}];
+  ws["!cols"] = [{wch:10},{wch:20},{wch:7},{wch:28},{wch:22},{wch:22},{wch:12},{wch:10},{wch:10},{wch:12}];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Наряд");
   const vahtaLabel = ((VAHTA_OPTIONS.find(o=>o.key===CURRENT_VAHTA)||{}).label || CURRENT_VAHTA).replace(/\s/g,"");
@@ -1946,6 +2012,7 @@ function copyNaryadText() {
         line += r.checklistFilled ? ` | Чек-лист: ✓` : ` | Чек-лист: —`;
       }
     }
+    if (r.trained === false) line += ` | ⚠ НЕ ОБУЧЕН на технику`;
     lines.push(line);
   });
   const text = lines.join("\n");
