@@ -1697,6 +1697,23 @@ function naryadDayBounds() {
   const end = new Date(start); end.setDate(end.getDate()+1);
   return [start, end];
 }
+// Границы суток для ПРОИЗВОЛЬНОЙ даты (не только "сегодня") — нужны, чтобы
+// сопоставлять заправку/чек-лист с нарядом за прошлую дату. Ручной разбор
+// year/month/day вместо new Date("yyyy-mm-dd") — та же UTC-сдвиг проблема,
+// что и в parseAnchorDate (см. Оперативная база). Добавлено 02.09.2026.
+function naryadDayBoundsFor(dateStr) {
+  const [y, m, d] = String(dateStr).split("-").map(Number);
+  const start = new Date(y, m - 1, d, 0, 0, 0, 0);
+  const end = new Date(start); end.setDate(end.getDate() + 1);
+  return [start, end];
+}
+function naryadDaysBetween(dateStrA, dateStrB) {
+  const [ay, am, ad] = String(dateStrA).split("-").map(Number);
+  const [by, bm, bd] = String(dateStrB).split("-").map(Number);
+  const a = new Date(ay, am - 1, ad);
+  const b = new Date(by, bm - 1, bd);
+  return Math.round((a - b) / 86400000);
+}
 function naryadSmenaOfTime(d) {
   const h = d.getHours();
   return (h >= 7 && h < 19) ? 1 : 2;
@@ -1836,11 +1853,10 @@ let NARYAD_IS_PAST = false;
 // раньше, живой снимок DATA.shiftAssignments (топливо/чек-листы за сегодня
 // подтягиваются как обычно). Если дата в прошлом — состав слотов
 // реконструируется на сервере из журнала "ИсторияСмен" (getNaryadForDate,
-// добавлено 27.08.2026). Заправка/чек-лист для прошлых дат пока НЕ
-// сопоставляются (нужна отдельная задача — историческая выборка по датам,
-// текущие getFuelRecords/getChecklistRecords берут только последние N дней
-// от сегодня) — колонки в этом случае показывают "—" с пояснением, а не
-// молчат как будто данных нет.
+// добавлено 27.08.2026), а заправка/чек-лист за эту же дату — отдельными
+// запросами getFuelRecords/getChecklistRecords с days=разница+2 и
+// клиентской фильтрацией точно по суткам targetDate (добавлено 02.09.2026,
+// см. naryadDayBoundsFor).
 async function openNaryadModal(dateStr) {
   const targetDate = dateStr || NARYAD_SELECTED_DATE || todayIso();
   NARYAD_SELECTED_DATE = targetDate;
@@ -1865,9 +1881,64 @@ async function openNaryadModal(dateStr) {
     } catch (e) {
       alert("Ошибка сети при загрузке наряда за прошлую дату: " + e.message);
     }
-    // fuelByKey/checklistByKey пустые — колонки для прошлых дат неприменимы
-    // (см. комментарий у функции), buildNaryadRows это отражает через hasEquipment.
-    rowsData = buildNaryadRows({}, {}, slots);
+
+    // Заправка/чек-лист за конкретную прошлую дату — раньше эти колонки
+    // не сопоставлялись вообще (getFuelRecords/getChecklistRecords брали
+    // окно "последние N дней от сегодня", а не диапазон вокруг targetDate).
+    // Теперь запрашиваем с запасом (+2 дня на грейс-период у границ суток,
+    // см. naryadSmenaKeysOfTime) и фильтруем на клиенте точно по суткам
+    // targetDate — та же логика ключей "техника|смена", что и для "сегодня"
+    // ниже. Добавлено 02.09.2026 (запрошено Иваном — отчёт за любой день
+    // должен скачиваться полным).
+    const [dayStart, dayEnd] = naryadDayBoundsFor(targetDate);
+    const daysBack = naryadDaysBetween(todayIso(), targetDate) + 2;
+    const eqIds = new Set((DATA.equipment||[]).map(e => String(e.equipmentId)));
+
+    const fuelByKey = {};
+    let fuelFailed = false;
+    try {
+      const fuelUrl = `${CFG.SHEET_URL}?action=getFuelRecords&site=${encodeURIComponent(CURRENT_SITE)}&days=${daysBack}`;
+      const fuelVal = await fetchWithRetry(fuelUrl, 40000, 3);
+      if (Array.isArray(fuelVal)) {
+        fuelVal.forEach(f => {
+          const d = new Date(f.date);
+          if (isNaN(d.getTime()) || d < dayStart || d >= dayEnd) return;
+          naryadSmenaKeysOfTime(d).forEach(sm => {
+            const key = `${f.equipmentId}|${sm}`;
+            if (!fuelByKey[key]) fuelByKey[key] = { liters: 0, lastTime: null };
+            fuelByKey[key].liters += Number(f.amountLiters) || 0;
+            if (!fuelByKey[key].lastTime || d > fuelByKey[key].lastTime) fuelByKey[key].lastTime = d;
+          });
+        });
+      } else fuelFailed = true;
+    } catch (e) {
+      fuelFailed = true;
+      console.error("не удалось загрузить заправки для наряда за прошлую дату:", e);
+    }
+
+    const checklistByKey = {};
+    let checklistFailed = false;
+    try {
+      const chkUrl = `${CFG.SHEET_URL}?action=getChecklistRecords&days=${daysBack}`;
+      const chkVal = await fetchWithRetry(chkUrl, 40000, 3);
+      if (Array.isArray(chkVal)) {
+        chkVal.forEach(r => {
+          if (!eqIds.has(String(r.equipmentId))) return; // чужой участок — не наш
+          const d = new Date(r.date);
+          if (isNaN(d.getTime()) || d < dayStart || d >= dayEnd) return;
+          naryadSmenaKeysOfTime(d).forEach(sm => {
+            checklistByKey[`${r.equipmentId}|${sm}`] = true;
+          });
+        });
+      } else checklistFailed = true;
+    } catch (e) {
+      checklistFailed = true;
+      console.error("не удалось загрузить чек-листы для наряда за прошлую дату:", e);
+    }
+
+    rowsData = buildNaryadRows(fuelByKey, checklistByKey, slots);
+    NARYAD_FUEL_FAILED = fuelFailed;
+    NARYAD_CHECKLIST_FAILED = checklistFailed;
   } else {
     // Топливо уже есть в DATA.fuel (грузится при входе). Чек-листы за сегодня —
     // отдельный запрос только сейчас, по требованию: эти сырые записи не нужны
@@ -1960,12 +2031,10 @@ function renderNaryadTable() {
 
   const tableRows = rowsData.map(r => {
     const fuelCell = !r.hasEquipment ? "—"
-      : NARYAD_IS_PAST ? `<span style="color:var(--gray)" title="За прошлые даты заправка пока не сопоставляется">н/д</span>`
       : (r.fuelLiters > 0
           ? `${r.fuelLiters} л <span style="color:var(--gray);font-size:11px">${naryadFmtTime(r.fuelTime)}</span>`
           : (NARYAD_FUEL_FAILED ? `<span style="color:var(--gray)" title="Не удалось загрузить заправки">нет данных</span>` : `<span style="color:#c0392b">нет</span>`));
     const chkCell = !r.hasEquipment ? "—"
-      : NARYAD_IS_PAST ? `<span style="color:var(--gray)" title="За прошлые даты чек-лист пока не сопоставляется">н/д</span>`
       : (NARYAD_CHECKLIST_FAILED
           ? `<span style="color:var(--gray)" title="Не удалось загрузить чек-листы">нет данных</span>`
           : (r.checklistFilled ? `<span style="color:#1a7d3a;font-weight:700">✓</span>` : `<span style="color:#c0392b;font-weight:700">—</span>`));
@@ -1999,7 +2068,7 @@ function renderNaryadTable() {
   document.getElementById("naryadPrintArea").innerHTML = `
     <div style="font-size:16px;font-weight:800;margin-bottom:2px">Наряд — ${CURRENT_SITE}</div>
     <div style="font-size:13px;color:var(--gray);margin-bottom:14px">${vahtaLabel}${shiftSuffix} · ${naryadDateLabel(NARYAD_SELECTED_DATE)}</div>
-    ${NARYAD_IS_PAST ? `<div style="font-size:12px;color:var(--gray);margin-bottom:10px">ℹ Наряд за прошлую дату восстановлен из журнала изменений (доступно с 24.08.2026). Заправка и чек-лист по прошлым датам пока не сопоставляются.</div>` : ""}
+    ${NARYAD_IS_PAST ? `<div style="font-size:12px;color:var(--gray);margin-bottom:10px">ℹ Наряд за прошлую дату восстановлен из журнала изменений (доступно с 24.08.2026).</div>` : ""}
     ${NARYAD_CHECKLIST_FAILED ? `<div style="font-size:12px;color:#c0392b;margin-bottom:6px">⚠ Чек-листы не загрузились — колонка «Чек-лист» сейчас недостоверна</div>` : ""}
     ${NARYAD_FUEL_FAILED ? `<div style="font-size:12px;color:#c0392b;margin-bottom:10px">⚠ Заправки не загрузились — колонка «Заправка» сейчас недостоверна</div>` : ""}
     ${expiredCount ? `<div style="font-size:12px;color:var(--red);font-weight:700;margin-bottom:6px">🔴 ${expiredCount} чел. без действующего допуска в карьер — строки подсвечены</div>` : ""}
@@ -2036,9 +2105,9 @@ function downloadNaryadExcel() {
       r.workStatus || "",
       r.reassignNote || "",
       r.access ? (ACCESS_XLSX_LABEL[r.access]||"") : (r.linked===false ? "нет карточки" : ""),
-      !r.hasEquipment ? "" : (NARYAD_IS_PAST ? "н/д" : (r.fuelLiters || 0)),
-      r.hasEquipment && !NARYAD_IS_PAST && r.fuelTime ? naryadFmtTime(r.fuelTime) : "",
-      !r.hasEquipment ? "" : (NARYAD_IS_PAST ? "н/д" : (r.checklistFilled ? "заполнен" : "нет")),
+      !r.hasEquipment ? "" : (r.fuelLiters || 0),
+      r.hasEquipment && r.fuelTime ? naryadFmtTime(r.fuelTime) : "",
+      !r.hasEquipment ? "" : (r.checklistFilled ? "заполнен" : "нет"),
       r.trained === false ? "НЕ ОБУЧЕН" : r.trained === true ? "обучен" : "",
     ]);
   });
@@ -2060,12 +2129,8 @@ function copyNaryadText() {
     if (r.workStatus) line += ` — ${r.workStatus}`;
     if (r.reassignNote) line += ` (${r.reassignNote})`;
     if (r.hasEquipment) {
-      if (NARYAD_IS_PAST) {
-        line += ` | Заправка/Чек-лист: н/д (только для сегодня)`;
-      } else {
-        line += r.fuelLiters > 0 ? ` | Заправка: ${r.fuelLiters}л ${naryadFmtTime(r.fuelTime)}` : ` | Заправка: нет`;
-        line += r.checklistFilled ? ` | Чек-лист: ✓` : ` | Чек-лист: —`;
-      }
+      line += r.fuelLiters > 0 ? ` | Заправка: ${r.fuelLiters}л ${naryadFmtTime(r.fuelTime)}` : ` | Заправка: нет`;
+      line += r.checklistFilled ? ` | Чек-лист: ✓` : ` | Чек-лист: —`;
     }
     if (r.access === "expired") line += ` | 🔴 ДОПУСК ПРОСРОЧЕН`;
     else if (r.access === "warning") line += ` | 🟡 допуск истекает`;
