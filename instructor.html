@@ -1172,6 +1172,32 @@ tr:hover td { background:#FAFBFD; }
         </div>
         <div id="planTable"></div>
       </div>
+
+      <div class="panel">
+        <div class="panel-title">
+          🎯 Очередь на оценку
+          <div style="display:flex;gap:6px;align-items:center;font-weight:400">
+            <label style="font-size:12px;color:var(--gray)">На эту неделю:</label>
+            <input type="number" id="evalQueueTopN" value="4" min="1" max="20"
+              style="width:56px;padding:6px;border:1px solid var(--border);border-radius:6px" onchange="renderEvaluationQueue()">
+            <span style="font-size:12px;color:var(--gray)">чел.</span>
+          </div>
+        </div>
+        <div class="hint" style="margin-bottom:10px">
+          Использует те же фильтры «Участок» и «Вахта» выше. Порог — 6 месяцев без оценки (или ни разу).
+          Помесячного плана здесь нет — вместо этого живая очередь по приоритету: сначала кто не оценивался
+          ни разу, затем кто дольше всех без оценки. Переключил участок/вахту наверху — очередь обновилась под то место, где ты сейчас.
+        </div>
+        <div id="evalQueueSummary"></div>
+        <div style="margin-top:14px">
+          <div style="font-size:13px;font-weight:700;color:var(--navy);margin-bottom:8px">На эту неделю</div>
+          <div id="evalQueueTop"></div>
+        </div>
+        <div style="margin-top:18px">
+          <div style="font-size:13px;font-weight:700;color:var(--navy);margin-bottom:8px">Полная очередь</div>
+          <div id="evalQueueFull"></div>
+        </div>
+      </div>
     </div>
 
     <!-- ══ СМЕНА 1 / СМЕНА 2 — формация техники с закреплёнными операторами ══ -->
@@ -7345,7 +7371,7 @@ function renderTrainingPlan() {
       ⏳ Данные по сменам ещё не загрузились. Если сообщение осталось после
       полной загрузки — нажмите «Обновить» вверху страницы.
     </div>`;
-    ["planNoTraining","planByMonth","planTable"].forEach(id => {
+    ["planNoTraining","planByMonth","planTable","evalQueueSummary","evalQueueTop","evalQueueFull"].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.innerHTML = "";
     });
@@ -7469,6 +7495,148 @@ function renderTrainingPlan() {
       </tr>`;
     }).join("")}</tbody></table></div>`
     : `<div class="empty"><div class="empty-icon">📚</div>Нет данных по выбранным фильтрам</div>`;
+
+  renderEvaluationQueue();
+}
+
+// ══════════════════════════════════════════════════════
+// ОЧЕРЕДЬ НА ОЦЕНКУ — коррелируется с графиком обучения выше:
+// те же фильтры (planSite/planVahta), тот же источник состава (наряд по
+// сменам). Вместо помесячного плана — живая приоритетная очередь без
+// привязки к календарю (инструктор физически не бывает на обоих участках
+// одновременно, помесячное распределение как в обучении тут не работает).
+// Порог "давно не оценивался" — 6 месяцев; "На эту неделю" — top-N,
+// N задаётся полем (по умолчанию 4).
+// ══════════════════════════════════════════════════════
+let ALL_EVALUATIONS = null;   // кэш на сессию — не перезапрашиваем при каждой смене фильтра
+
+async function loadEvalQueueDataIfNeeded() {
+  if (ALL_EVALUATIONS !== null) return;
+  try {
+    const val = await jsonpFetchRetry(`${CFG.SHEET_URL}?action=getEvaluationsList`, "cb_eval_queue_all", 40000, 3);
+    ALL_EVALUATIONS = (val && val.ok && Array.isArray(val.evaluations)) ? val.evaluations : [];
+  } catch(e) {
+    console.error("Оценки (очередь):", e);
+    ALL_EVALUATIONS = [];
+  }
+}
+
+// "dd.MM.yyyy" -> timestamp, ручной разбор (не new Date(str) — ловили UTC-сдвиг на этом раньше)
+function evalDateToTs(d) {
+  const m = String(d||"").match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})/);
+  if (!m) return null;
+  return new Date(Number(m[3]), Number(m[2])-1, Number(m[1])).getTime();
+}
+
+// empId/empName -> дата последней оценки (мс), берём самую свежую по обоим ключам
+function lastEvalByEmployee() {
+  const map = {};
+  (ALL_EVALUATIONS||[]).forEach(e => {
+    const ts = evalDateToTs(e.date);
+    if (ts == null) return;
+    const id = String(e.empId||"");
+    const nm = String(e.empName||"").trim().toLowerCase();
+    if (id) { const k="id:"+id; if (!map[k] || ts>map[k]) map[k]=ts; }
+    if (nm) { const k="nm:"+nm; if (!map[k] || ts>map[k]) map[k]=ts; }
+  });
+  return map;
+}
+
+function lastEvalOf(map, empId, empName) {
+  const a = map["id:"+String(empId||"")];
+  const b = map["nm:"+String(empName||"").trim().toLowerCase()];
+  const vals = [a,b].filter(v => v != null);
+  return vals.length ? Math.max(...vals) : null;
+}
+
+const EVAL_OVERDUE_MS = 183 * 24 * 60 * 60 * 1000;   // 6 месяцев
+
+function buildEvaluationQueue() {
+  const site  = document.getElementById("planSite")?.value  || "all";
+  const vahta = document.getElementById("planVahta")?.value || "all";
+  const map = lastEvalByEmployee();
+  const now = Date.now();
+  const rows = [];
+
+  (DATA.shiftAssignments||[]).forEach(a => {
+    if (a.status !== "активен") return;
+    if (!a.empName || String(a.empName).toLowerCase() === "вакансия") return;
+    if (site  !== "all" && String(a.site||"").trim() !== site) return;
+    if (vahta !== "all" && a.vahta !== vahta) return;
+
+    const ts = lastEvalOf(map, a.empId, a.empName);
+    const overdue = ts === null || (now - ts) >= EVAL_OVERDUE_MS;
+    if (!overdue) return;
+
+    rows.push({
+      empId: a.empId || "", empName: a.empName,
+      site: (a.site||"").trim(), vahta: a.vahta, smena: String(a.smena),
+      equipmentId: a.equipmentId || "",
+      lastEvalTs: ts, daysSince: ts !== null ? Math.floor((now-ts)/86400000) : null,
+    });
+  });
+
+  // Сначала кто вообще ни разу не оценивался, затем — по возрастанию даты (самые старые первые)
+  rows.sort((x,y) => {
+    if (x.lastEvalTs === null && y.lastEvalTs === null) return x.empName.localeCompare(y.empName);
+    if (x.lastEvalTs === null) return -1;
+    if (y.lastEvalTs === null) return 1;
+    return x.lastEvalTs - y.lastEvalTs;
+  });
+  return rows;
+}
+
+function renderEvaluationQueue() {
+  const topEl  = document.getElementById("evalQueueTop");
+  const fullEl = document.getElementById("evalQueueFull");
+  const sumEl  = document.getElementById("evalQueueSummary");
+  if (!topEl || !fullEl) return;
+
+  if (ALL_EVALUATIONS === null) {
+    topEl.innerHTML = fullEl.innerHTML = `<div class="empty"><div class="empty-icon">⏳</div>Загружаю историю оценок...</div>`;
+    loadEvalQueueDataIfNeeded().then(renderEvaluationQueue);
+    return;
+  }
+
+  const topN = Math.max(1, Number(document.getElementById("evalQueueTopN")?.value) || 4);
+  const rows = buildEvaluationQueue();
+  const neverCount = rows.filter(r => r.lastEvalTs === null).length;
+
+  if (sumEl) sumEl.innerHTML = `<div class="stats-grid" style="margin-bottom:4px">
+    ${[
+      {lbl:"В очереди (6+ мес. без оценки или ни разу)", val: rows.length, acc: rows.length ? "var(--red)" : "var(--green,#2E7D32)"},
+      {lbl:"Из них — ни разу не оценивались", val: neverCount, acc: neverCount ? "var(--red)" : "var(--gray)"},
+    ].map(s=>`<div class="stat-card" style="border-left-color:${s.acc}">
+      <div class="stat-val" style="color:${s.acc}">${s.val}</div>
+      <div class="stat-lbl">${s.lbl}</div></div>`).join("")}
+  </div>`;
+
+  const link = (r, txt) => r.empId
+    ? `<span style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted"
+         onclick="goToEmployeeProfile('${String(r.empId).replace(/'/g,"\\'")}')">${txt}</span>` : txt;
+
+  const rowHtml = r => {
+    const eq = (DATA.equipment||[]).find(e => String(e.equipmentId)===String(r.equipmentId));
+    const lastLabel = r.lastEvalTs === null
+      ? `<span style="color:var(--red);font-weight:700">ни разу</span>`
+      : `<span style="color:${r.daysSince>=365?'var(--red)':'var(--gray)'}">${Math.floor(r.daysSince/30)} мес. назад</span>`;
+    return `<tr>
+      <td><b>${link(r, r.empName)}</b></td>
+      <td>${r.equipmentId||"—"} <span style="color:var(--gray);font-size:11px">${eq?eq.model:""}</span></td>
+      <td>${r.site}</td>
+      <td style="font-size:12px;color:var(--gray)">${r.vahta} · ${r.smena==="1"?"день":"ночь"}</td>
+      <td>${lastLabel}</td>
+    </tr>`;
+  };
+  const thead = `<thead><tr><th>Сотрудник</th><th>Техника</th><th>Участок</th><th>Вахта / смена</th><th>Последняя оценка</th></tr></thead>`;
+
+  topEl.innerHTML = rows.length
+    ? `<div class="tbl-wrap"><table style="font-size:13px">${thead}<tbody>${rows.slice(0,topN).map(rowHtml).join("")}</tbody></table></div>`
+    : `<div style="padding:10px 12px;background:var(--greenbg,#EAF7ED);border-radius:8px;font-size:13px;color:var(--green,#2E7D32);font-weight:700">✓ По выбранному фильтру все оценены в срок</div>`;
+
+  fullEl.innerHTML = rows.length
+    ? `<div class="tbl-wrap"><table style="font-size:13px">${thead}<tbody>${rows.map(rowHtml).join("")}</tbody></table></div>`
+    : `<div style="font-size:12px;color:var(--gray)">Очередь пуста.</div>`;
 }
 
 function exportTrainingPlanCSV() {
