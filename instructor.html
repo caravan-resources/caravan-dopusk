@@ -4488,6 +4488,15 @@ function findEmpByAnyKey(idOrName) {
   );
 }
 
+// В листе «Результаты» (тесты) нет поля empId — сверка результата с карточкой
+// идёт только по имени. Люди вводят имя сами при сдаче теста (index.html) —
+// регистр и пробелы могут отличаться от карточки. Точное сравнение строк
+// из-за этого теряло реально сданные тесты (см. кейс Сеитов Х.Р. — тест сдан
+// как "СЕИТОВ ..." заглавными, карточка "Сеитов ..." обычным регистром).
+function nameEq(a, b) {
+  return String(a||"").trim().toLowerCase() === String(b||"").trim().toLowerCase();
+}
+
 // Сверка «Требования» (по должности) с тем, что реально закрыто.
 // Тест считается закрытым: сдан («Результаты», passed).
 // Курс считается закрытым: есть запись в «Обучение» с тем же названием
@@ -4502,7 +4511,7 @@ function competencyGap(emp) {
 
   const passedTestIds = new Set(
     (DATA.results||[])
-      .filter(r => (r.empName===emp.name) && isPassed(r))
+      .filter(r => nameEq(r.empName, emp.name) && isPassed(r))
       .map(r => r.testId)
       .filter(Boolean)
   );
@@ -4653,7 +4662,7 @@ function selectPersonnelEmployee(id) {
   const evaluationEvents = events.filter(ev => String(ev.type||"").toLowerCase() === "оценка");
   const trainings = (DATA.training||[]).filter(t => String(t.empId)===String(emp.id) || t.empName===emp.name)
     .sort((a,b) => new Date(b.date)-new Date(a.date));
-  const tests = (DATA.results||[]).filter(r => r.empName===emp.name)
+  const tests = (DATA.results||[]).filter(r => nameEq(r.empName, emp.name))
     .sort((a,b) => new Date(b.date)-new Date(a.date));
 
   const accessStatus = statusOf(emp);
