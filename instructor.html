@@ -3197,39 +3197,48 @@ function renderTimingRatingDowntime() {
 // Целевой цикл — редактируемое поле (200-210 сек по разговору с Иваном,
 // 03.09.2026, по умолчанию 205 — середина диапазона), пересчёт мгновенный,
 // без повторного запроса к серверу (все данные уже на клиенте).
+// Список конкретных критичных простоев (≥1 мин, порог зашит в бэкенде —
+// см. CRITICAL_PAUSE_SEC в getTimingRatingList) и калькулятор «потерянных»
+// самосвалов — ОТДЕЛЬНО по каждому оператору (не суммарно по компании: у
+// операторов разное среднее время погрузки, значит и целевой цикл, и число
+// потерянных самосвалов у каждого свои — по просьбе Ивана, 03.09.2026).
+// Время на подъезд — общее редактируемое поле (60 сек по умолчанию, цель —
+// 30), применяется к каждому оператору поверх его личного среднего времени
+// погрузки. Пересчёт мгновенный, без повторного запроса к серверу.
 function renderCriticalPauses() {
   const summaryEl = document.getElementById("lostTrucksSummary");
   const listEl = document.getElementById("criticalPausesList");
   const formulaEl = document.getElementById("targetCycleFormula");
   if (!summaryEl || !listEl) return;
 
-  const s = LAST_TIMING_COMPANY_STATS;
   const approachSec = Number(document.getElementById("approachTimeSec")?.value) || 0;
-  const avgLoadSec = s?.avgLoadSec ?? null;
-  const targetSec = avgLoadSec !== null ? avgLoadSec + approachSec : null;
+  const withCritical = LAST_TIMING_DOWNTIME.filter(o => o.criticalCount);
 
   if (formulaEl) {
-    formulaEl.innerHTML = targetSec !== null
-      ? `Целевой цикл = ${avgLoadSec} с (ср. погрузка) + ${approachSec} с (подъезд) = <b>${Math.round(targetSec)} с</b>`
-      : "Недостаточно данных для расчёта среднего времени погрузки";
+    formulaEl.innerHTML = `Целевой цикл считается персонально для каждого оператора: его собственное среднее время погрузки + ${approachSec} с на подъезд.`;
   }
 
-  if (!s || !s.criticalCount || !targetSec) {
+  if (!withCritical.length) {
     summaryEl.innerHTML = "";
-    listEl.innerHTML = !s || !s.criticalCount
-      ? `<div class="empty" style="padding:16px"><div class="empty-icon">✓</div>Критичных простоев за период нет</div>`
-      : "";
+    listEl.innerHTML = `<div class="empty" style="padding:16px"><div class="empty-icon">✓</div>Критичных простоев за период нет</div>`;
     return;
   }
 
-  const lostTrucks = Math.floor(s.criticalTotalSec / targetSec);
-  summaryEl.innerHTML = `
-    <div style="display:flex;gap:24px;flex-wrap:wrap">
-      <div><div style="font-size:22px;font-weight:800;color:#B45309">${s.criticalCount}</div><div style="font-size:11px;color:var(--gray)">критичных простоев</div></div>
-      <div><div style="font-size:22px;font-weight:800;color:#B45309">${formatPauseSec(s.criticalTotalSec)}</div><div style="font-size:11px;color:var(--gray)">суммарно потеряно времени</div></div>
-      <div><div style="font-size:22px;font-weight:800;color:var(--red)">~${lostTrucks}</div><div style="font-size:11px;color:var(--gray)">недогруженных самосвалов за период</div></div>
-    </div>
-  `;
+  summaryEl.innerHTML = withCritical.map(o => {
+    const targetSec = o.avgLoadSec !== null ? o.avgLoadSec + approachSec : null;
+    const lostTrucks = targetSec ? Math.floor(o.criticalSec / targetSec) : null;
+    return `
+      <div style="padding:10px 12px;background:#fff;border:1px solid #FDE68A;border-radius:8px;margin-bottom:8px">
+        <div style="font-size:13px;font-weight:800;color:var(--navy);margin-bottom:6px">${o.empName||"—"}</div>
+        <div style="display:flex;gap:20px;flex-wrap:wrap;align-items:baseline">
+          <div><span style="font-size:18px;font-weight:800;color:#B45309">${o.criticalCount}</span> <span style="font-size:11px;color:var(--gray)">простоев</span></div>
+          <div><span style="font-size:18px;font-weight:800;color:#B45309">${formatPauseSec(o.criticalSec)}</span> <span style="font-size:11px;color:var(--gray)">потеряно</span></div>
+          <div><span style="font-size:18px;font-weight:800;color:var(--red)">~${lostTrucks ?? "—"}</span> <span style="font-size:11px;color:var(--gray)">недогруженных самосвалов</span></div>
+          <div style="font-size:11px;color:var(--gray)">целевой цикл: ${o.avgLoadSec ?? "—"} с + ${approachSec} с = ${targetSec ? Math.round(targetSec) : "—"} с</div>
+        </div>
+      </div>
+    `;
+  }).join("");
 
   listEl.innerHTML = LAST_CRITICAL_PAUSES.map(c => `
     <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid #FDE68A;font-size:12px">
