@@ -3980,7 +3980,7 @@ function getTimingRatingList(p) {
 
   const ss = SpreadsheetApp.openById(SHEET_ID);
   const timingSheet = ss.getSheetByName(SHEET_TIMING);
-  const empty = { ok: true, operators: [], companyStats: null, trend: [], downtime: [] };
+  const empty = { ok: true, operators: [], companyStats: null, trend: [], downtime: [], criticalPauses: [] };
   if (!timingSheet) return json(empty);
   const tRows = timingSheet.getDataRange().getValues();
   if (tRows.length < 2) return json(empty);
@@ -4028,7 +4028,7 @@ function getTimingRatingList(p) {
     if (!byOp[key]) {
       byOp[key] = {
         empId: empId, empName: empName, sizeClass: cls, models: {}, count: 0,
-        sumTotal: 0, sumCycle: 0, sumFill: 0, fillCount: 0, properYes: 0, properNo: 0,
+        sumTotal: 0, sumCycle: 0, sumFill: 0, fillCount: 0, sumBuckets: 0, bucketCount: 0, properYes: 0, properNo: 0,
       };
     }
     const o = byOp[key];
@@ -4037,9 +4037,11 @@ function getTimingRatingList(p) {
     const total = Number(r[tIdx["totalLoadTimeSec"]]);
     const cycle = Number(r[tIdx["cycleTimeSec"]]);
     const fill = Number(r[tIdx["bucketFillPercent"]]);
+    const buckets = Number(r[tIdx["bucketCount"]]);
     if (!isNaN(total)) o.sumTotal += total;
     if (!isNaN(cycle)) o.sumCycle += cycle;
     if (!isNaN(fill)) { o.sumFill += fill; o.fillCount++; }
+    if (!isNaN(buckets)) { o.sumBuckets += buckets; o.bucketCount++; }
     const proper = String(r[tIdx["properLoading"]] || "").trim();
     if (proper === "да") o.properYes++;
     else if (proper === "нет") o.properNo++;
@@ -4054,6 +4056,7 @@ function getTimingRatingList(p) {
       count: o.count,
       avgTotal: o.count ? Math.round((o.sumTotal / o.count) * 10) / 10 : null,
       avgCycle: o.count ? Math.round((o.sumCycle / o.count) * 10) / 10 : null,
+      avgBuckets: o.bucketCount ? Math.round((o.sumBuckets / o.bucketCount) * 10) / 10 : null,
       avgFill: o.fillCount ? Math.round((o.sumFill / o.fillCount) * 10) / 10 : null,
       properYes: o.properYes, properNo: o.properNo,
       passportRate: passportTotal ? Math.round((o.properYes / passportTotal) * 1000) / 10 : null,
@@ -4070,6 +4073,7 @@ function getTimingRatingList(p) {
 
   // ── Сводка по компании ──────────────────────────────────────
   const allCycles = filtered.map(({r}) => Number(r[tIdx["cycleTimeSec"]])).filter(v => !isNaN(v));
+  const allTotals = filtered.map(({r}) => Number(r[tIdx["totalLoadTimeSec"]])).filter(v => !isNaN(v));
   const allProperYes = filtered.filter(({r}) => String(r[tIdx["properLoading"]]).trim() === "да").length;
   const allProperNo  = filtered.filter(({r}) => String(r[tIdx["properLoading"]]).trim() === "нет").length;
   const allPassportTotal = allProperYes + allProperNo;
@@ -4088,10 +4092,17 @@ function getTimingRatingList(p) {
     const empName = r[tIdx["empName"]] || "";
     const dateStr = !isNaN(d) ? Utilities.formatDate(d, "Asia/Almaty", "dd.MM.yyyy") : String(r[tIdx["date"]] || "");
     const key = empId + "|" + dateStr;
-    if (!dayGroups[key]) dayGroups[key] = { empId: empId, empName: empName, items: [] };
+    if (!dayGroups[key]) dayGroups[key] = { empId: empId, empName: empName, dateStr: dateStr, items: [] };
     const total = Number(r[tIdx["totalLoadTimeSec"]]) || 0;
-    dayGroups[key].items.push({ startMin: startMin, endMin: startMin + total / 60 });
+    dayGroups[key].items.push({ startMin: startMin, endMin: startMin + total / 60, startRaw: startRaw });
   });
+
+  // Критичные простои — от минуты и больше (по договорённости с Иваном,
+  // 03.09.2026): собираем каждый такой разрыв отдельным пунктом списка, а не
+  // только агрегатом, чтобы можно было увидеть, где именно и когда он
+  // случился, и постепенно с ними бороться.
+  const CRITICAL_PAUSE_SEC = 60;
+  const criticalPauses = [];
 
   const downtimeByOp = {};
   Object.keys(dayGroups).forEach(key => {
@@ -4099,31 +4110,66 @@ function getTimingRatingList(p) {
     const items = g.items.slice().sort((a,b) => a.startMin - b.startMin);
     for (let i = 1; i < items.length; i++) {
       const pauseMin = items[i].startMin - items[i-1].endMin;
-      if (pauseMin <= 0) continue;
-      if (!downtimeByOp[g.empId]) downtimeByOp[g.empId] = { empId: g.empId, empName: g.empName, totalPauseSec: 0, gaps: 0 };
-      downtimeByOp[g.empId].totalPauseSec += pauseMin * 60;
-      downtimeByOp[g.empId].gaps += 1;
+      // Полный цикл на самосвал — интервал между стартами соседних замеров
+      // (погрузка + простой вместе), считаем всегда, даже если простоя нет
+      // (pauseMin <= 0 — самосвалы шли впритык). Именно этот интервал даёт
+      // реальную пропускную способность (3600/интервал), а не одна погрузка.
+      const intervalMin = items[i].startMin - items[i-1].startMin;
+      if (!downtimeByOp[g.empId]) downtimeByOp[g.empId] = { empId: g.empId, empName: g.empName, totalPauseSec: 0, gaps: 0, totalIntervalSec: 0, intervals: 0, criticalSec: 0, criticalCount: 0 };
+      downtimeByOp[g.empId].totalIntervalSec += intervalMin * 60;
+      downtimeByOp[g.empId].intervals += 1;
+      if (pauseMin > 0) {
+        const pauseSec = Math.round(pauseMin * 60);
+        downtimeByOp[g.empId].totalPauseSec += pauseSec;
+        downtimeByOp[g.empId].gaps += 1;
+        if (pauseSec >= CRITICAL_PAUSE_SEC) {
+          downtimeByOp[g.empId].criticalSec += pauseSec;
+          downtimeByOp[g.empId].criticalCount += 1;
+          criticalPauses.push({
+            empId: g.empId, empName: g.empName, date: g.dateStr,
+            pauseSec: pauseSec,
+            beforeStartTime: items[i-1].startRaw,
+            afterStartTime: items[i].startRaw,
+          });
+        }
+      }
     }
   });
 
   const downtime = Object.keys(downtimeByOp).map(id => {
     const o = downtimeByOp[id];
+    const avgIntervalSec = o.intervals ? Math.round(o.totalIntervalSec / o.intervals) : null;
     return {
       empId: o.empId, empName: o.empName, gaps: o.gaps,
       totalPauseSec: Math.round(o.totalPauseSec),
       avgPauseSec: o.gaps ? Math.round(o.totalPauseSec / o.gaps) : null,
+      avgFullCycleSec: avgIntervalSec,
+      maxTrucksPerHour: avgIntervalSec ? Math.floor(3600 / avgIntervalSec) : null,
+      criticalSec: o.criticalSec, criticalCount: o.criticalCount,
     };
-  }).sort((a,b) => b.avgPauseSec - a.avgPauseSec); // худший (самый долгий средний простой) — первый
+  }).sort((a,b) => (b.avgPauseSec||0) - (a.avgPauseSec||0)); // худший (самый долгий средний простой) — первый
+
+  criticalPauses.sort((a,b) => b.pauseSec - a.pauseSec); // самый долгий простой — первый
 
   const allPauseSec = downtime.reduce((s,o) => s + o.totalPauseSec, 0);
   const allGaps = downtime.reduce((s,o) => s + o.gaps, 0);
+  const allIntervalSec = Object.keys(downtimeByOp).reduce((s,id) => s + downtimeByOp[id].totalIntervalSec, 0);
+  const allIntervals = Object.keys(downtimeByOp).reduce((s,id) => s + downtimeByOp[id].intervals, 0);
+  const companyAvgFullCycle = allIntervals ? Math.round(allIntervalSec / allIntervals) : null;
+  const allCriticalSec = criticalPauses.reduce((s,c) => s + c.pauseSec, 0);
 
   const companyStats = {
     count: filtered.length,
     avgCycle: allCycles.length ? Math.round((allCycles.reduce((a,b)=>a+b,0)/allCycles.length) * 10) / 10 : null,
+    avgLoadSec: allTotals.length ? Math.round((allTotals.reduce((a,b)=>a+b,0)/allTotals.length) * 10) / 10 : null,
     passportRate: allPassportTotal ? Math.round((allProperYes / allPassportTotal) * 1000) / 10 : null,
     avgPauseSec: allGaps ? Math.round(allPauseSec / allGaps) : null,
     pauseDataGaps: allGaps,
+    avgFullCycleSec: companyAvgFullCycle,
+    maxTrucksPerHour: companyAvgFullCycle ? Math.floor(3600 / companyAvgFullCycle) : null,
+    fullCycleDataPoints: allIntervals,
+    criticalCount: criticalPauses.length,
+    criticalTotalSec: allCriticalSec,
   };
 
   // ── Динамика по неделям (ISO-подобная неделя года) ──────────
@@ -4140,7 +4186,7 @@ function getTimingRatingList(p) {
     return { period: week, count: t.count, avgCycle: t.count ? Math.round((t.sumCycle/t.count)*10)/10 : null };
   });
 
-  return json({ ok: true, operators: operators, companyStats: companyStats, trend: trend, downtime: downtime });
+  return json({ ok: true, operators: operators, companyStats: companyStats, trend: trend, downtime: downtime, criticalPauses: criticalPauses });
 }
 
 // ── Резюме оценки через Claude API ────────────────────────────
