@@ -3856,7 +3856,20 @@ function getEvaluationsList(p) {
     });
   });
 
-  evaluations.sort((a,b) => b.__sortDate - a.__sortDate);
+  // Сортировка по свежести: дата хранится без времени суток («02.09.2026»),
+  // поэтому несколько оценок за один день при сортировке только по дате
+  // оставались в порядке строк таблицы (обычно — порядке ввода, т.е. более
+  // ранняя оценка дня оказывалась выше более поздней). evalId — это всегда
+  // "eval" + миллисекунды создания (Date.now()), уже точная метка времени,
+  // просто раньше не использовалась для тай-брейка. Используем её только как
+  // вторичный ключ внутри одной даты — сама дата остаётся главным критерием,
+  // так что более старая (но введённая позже) запись не обгонит новую дату.
+  evaluations.sort((a,b) => {
+    if (b.__sortDate !== a.__sortDate) return b.__sortDate - a.__sortDate;
+    const at = Number(String(a.evalId).replace(/^eval/, "")) || 0;
+    const bt = Number(String(b.evalId).replace(/^eval/, "")) || 0;
+    return bt - at;
+  });
   evaluations.forEach(e => delete e.__sortDate);
 
   return json({ ok: true, evaluations: evaluations });
