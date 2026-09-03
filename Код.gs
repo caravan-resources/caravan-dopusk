@@ -4067,8 +4067,16 @@ function saveTimingRecord(p) {
   sheet.appendRow([
     recordId, empId || "", empName, position || "", dateStr, equipmentType || "", equipmentModel || "",
     truckModel || "", totalLoadTimeSec, bucketCount, bucketFillPercent || "", cycleTimeSec,
-    properLoading || "", site || "", instructorName || "", summary || "", createdAt, startTime || "",
+    properLoading || "", site || "", instructorName || "", summary || "", createdAt, "",
   ]);
+  // startTime — «чч:мм» текстом, а не числом. appendRow пишет всё одним
+  // вызовом без возможности задать формат по ячейке, а лист по умолчанию
+  // распознаёт «16:21» как значение времени (эпоха 1899-12-30) — тот же
+  // класс проблемы, что раньше ловили на experienceYears. Поэтому пишем
+  // startTime отдельным вызовом сразу после, с явным текстовым форматом.
+  const newRow = sheet.getLastRow();
+  const startTimeCol = sheet.getRange(1,1,1,sheet.getLastColumn()).getValues()[0].indexOf("startTime") + 1;
+  if (startTimeCol > 0) sheet.getRange(newRow, startTimeCol).setNumberFormat("@").setValue(startTime || "");
 
   // Личное дело — та же запись видна в истории сотрудника рядом с оценками,
   // взысканиями/поощрениями. evalId-колонка используется как общий FK на
@@ -4152,7 +4160,7 @@ function updateTimingRecord(p) {
   sheet.getRange(rowNum, col("site")).setValue(site || "");
   sheet.getRange(rowNum, col("instructorName")).setValue(instructorName || "");
   sheet.getRange(rowNum, col("summary")).setValue(summary || "");
-  if (col("startTime") > 0) sheet.getRange(rowNum, col("startTime")).setValue(startTime || "");
+  if (col("startTime") > 0) sheet.getRange(rowNum, col("startTime")).setNumberFormat("@").setValue(startTime || "");
 
   // Личное дело: обновляем связанную запись (по evalId = recordId
   // хронометража), а не создаём новую — тот же паттерн, что у оценок.
