@@ -976,6 +976,12 @@ function fuelShiftOf(date) {
 // start/end (необязательные Date) — фильтр по периоду, применяется к дню
 // смены целиком, а не к отдельным записям, чтобы не разваливать пару
 // «утро+вечер» на границе периода.
+// MIN_SHIFT_FUEL_PAIR_HOURS: 03.09.2026 — обнаружено (HT204, 2 заправки по
+// 499.8л с разницей в 1 минуту), что дубли/ошибки ввода проходили как валидная
+// пара и давали абсурдный л/ч (29988 л/ч). Пары с интервалом меньше порога —
+// это не «утро+вечер», а повторный/битый ввод, отбрасываем.
+const MIN_SHIFT_FUEL_PAIR_HOURS = 2;
+
 function dayShiftFuelPairs(equipmentId, start, end) {
   const byDay = {};
   (DATA.fuel||[]).filter(f => String(f.equipmentId)===String(equipmentId)).forEach(f => {
@@ -990,7 +996,7 @@ function dayShiftFuelPairs(equipmentId, start, end) {
     recs.sort((a,b) => a.date - b.date);
     const [s, e] = recs;
     const hours = (e.date - s.date) / 3600000;
-    if (hours <= 0) return;
+    if (hours < MIN_SHIFT_FUEL_PAIR_HOURS) return;
     pairs.push({
       date: s.date, startTime: s.date, endTime: e.date,
       startLiters: s.liters, endLiters: e.liters,
