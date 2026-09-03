@@ -453,6 +453,11 @@ td { padding:8px; border-bottom:1px solid var(--border); }
           </div>
         </div>
         <div class="field">
+          <label>Время начала погрузки (чч:мм) — необязательно</label>
+          <input type="time" id="timingStartTime">
+          <div class="hint">Нужно только чтобы отчёт мог посчитать простои между самосвалами. Можно оставить пустым.</div>
+        </div>
+        <div class="field">
           <label>Время погрузки самосвала (сек) *</label>
           <input type="number" id="timingTotalTime" min="1" placeholder="напр. 180">
         </div>
@@ -1534,6 +1539,12 @@ async function generateEvalSummaryClick() {
 }
 
 async function submitEvaluation() {
+  const btn = document.getElementById("evalSubmitBtn");
+  // Защита от повторной отправки: бэкенд иногда отвечает по 5-10+ секунд,
+  // и без блокировки кнопки нетерпеливый повторный клик создаёт дубликат
+  // оценки (saveEvaluation не идемпотентна — каждый клик = новая строка).
+  if (btn && btn.disabled) return;
+
   const empId = empIdFromInput(document.getElementById("evalEmpInput").value);
   const emp = empById(empId);
   if (!emp) { alert("Выберите сотрудника из списка подсказок (начните печатать имя)"); return; }
@@ -1564,6 +1575,9 @@ async function submitEvaluation() {
   };
   if (isEditing) payload.evalId = EVAL_EDITING_ID;
 
+  const prevBtnText = btn ? btn.textContent : "";
+  if (btn) { btn.disabled = true; btn.textContent = "⏳ Сохраняю..."; }
+
   try {
     const res = await fetch(CFG.SHEET_URL, { method: "POST", body: JSON.stringify(payload) });
     const val = await res.json();
@@ -1587,6 +1601,14 @@ async function submitEvaluation() {
     loadEvaluationSupervisors();
   } catch (e) {
     alert("Ошибка сети: " + e.message);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      // Если сохранение прошло успешно, текст уже переустановлен выше на
+      // "💾 Сохранить оценку" (или остаётся тем, что было при редактировании);
+      // это финальная подстраховка на случай ошибки/сети — просто снять "⏳".
+      if (btn.textContent === "⏳ Сохраняю...") btn.textContent = prevBtnText;
+    }
   }
 }
 
@@ -1969,6 +1991,9 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 async function submitTiming() {
+  const btn = document.getElementById("timingSubmitBtn");
+  if (btn && btn.disabled) return; // защита от повторной отправки — см. submitEvaluation
+
   const empId = empIdFromInput(document.getElementById("timingEmpInput").value);
   const emp = empById(empId);
   if (!emp) { alert("Выберите сотрудника из списка подсказок (начните печатать имя)"); return; }
@@ -1997,8 +2022,12 @@ async function submitTiming() {
     site: CURRENT_SITE,
     instructorName: document.getElementById("timingInstructor").value.trim(),
     summary: document.getElementById("timingSummary").value.trim(),
+    startTime: document.getElementById("timingStartTime").value,
   };
   if (isEditing) payload.recordId = TIMING_EDITING_ID;
+
+  const prevBtnText = btn ? btn.textContent : "";
+  if (btn) { btn.disabled = true; btn.textContent = "⏳ Сохраняю..."; }
 
   try {
     const res = await fetch(CFG.SHEET_URL, { method: "POST", body: JSON.stringify(payload) });
@@ -2014,6 +2043,7 @@ async function submitTiming() {
     document.getElementById("timingCycleTime").value = "";
     document.getElementById("timingTruckModel").value = "";
     document.getElementById("timingSummary").value = "";
+    document.getElementById("timingStartTime").value = "";
     setProperLoading("");
     document.querySelectorAll("#timingProperLoadingBtns .eval-opt-btn").forEach(b => b.classList.remove("active","high","low"));
     resetLapCalc();
@@ -2021,6 +2051,11 @@ async function submitTiming() {
     loadTimingTruckModels(); // новая модель самосвала (если впервые) сразу попадёт в подсказки
   } catch (e) {
     alert("Ошибка сети: " + e.message);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      if (btn.textContent === "⏳ Сохраняю...") btn.textContent = prevBtnText;
+    }
   }
 }
 
@@ -2056,6 +2091,30 @@ async function loadTimingHistoryFor(empId) {
 // отдельные замеры сразу — это исходные данные, они должны быть видны, а не
 // спрятаны за раскрытием. Резюме дня (средние значения) — производная от
 // них, поэтому идёт ниже, а не вместо них.
+//
+// Если у замеров указано время начала — сортируем карточки по нему и
+// вставляем между ними индикатор простоя (разрыв между «уехал» и «встал
+// следующий»). От минуты и больше — подсвечивается как реальный простой
+// техники. Замеры без времени начала остаются в конце, без сортировки
+// между собой (старые записи, до появления этого поля).
+function parseHHMM(v) {
+  const m = String(v||"").trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  return Number(m[1]) * 60 + Number(m[2]);
+}
+
+function renderTimingPauseIndicator(pauseMin) {
+  const isLong = pauseMin >= 1;
+  const mm = Math.floor(pauseMin);
+  const ss = Math.round((pauseMin - mm) * 60);
+  const label = mm > 0 ? `${mm} мин${ss ? " " + ss + " с" : ""}` : `${ss} с`;
+  return `
+    <div style="font-size:11px;margin:-4px 0 12px 4px;color:${isLong ? '#B45309' : 'var(--gray)'}">
+      ⏸ простой ${label}${isLong ? " — техника не работала" : ""}
+    </div>
+  `;
+}
+
 function renderTimingDateGroup(date, records) {
   const first = records[0];
   const header = `
@@ -2063,7 +2122,26 @@ function renderTimingDateGroup(date, records) {
       📅 ${date} · ${first.equipmentType||""}${first.equipmentModel?" ("+first.equipmentModel+")":""}
     </div>
   `;
-  const cards = records.map(renderTimingRecordCard).join("");
+
+  const withStart = [];
+  const withoutStart = [];
+  records.forEach(r => {
+    const startMin = parseHHMM(r.startTime);
+    if (startMin === null) { withoutStart.push(r); return; }
+    withStart.push({ r, startMin, endMin: startMin + (Number(r.totalLoadTimeSec)||0) / 60 });
+  });
+  withStart.sort((a,b) => a.startMin - b.startMin);
+
+  let cards = "";
+  withStart.forEach((item, i) => {
+    if (i > 0) {
+      const pauseMin = item.startMin - withStart[i-1].endMin;
+      if (pauseMin > 0) cards += renderTimingPauseIndicator(pauseMin);
+    }
+    cards += renderTimingRecordCard(item.r);
+  });
+  withoutStart.forEach(r => { cards += renderTimingRecordCard(r); });
+
   if (records.length === 1) return header + cards;
 
   return header + cards + renderTimingDaySummary(records);
@@ -2104,7 +2182,7 @@ function renderTimingRecordCard(r) {
   return `
     <div style="border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:12px;background:#fff">
       <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:12px">
-        <div style="font-size:12px;color:var(--gray)">${r.truckModel ? "→ " + r.truckModel : "самосвал не указан"}</div>
+        <div style="font-size:12px;color:var(--gray)">${r.startTime ? "🕐 " + r.startTime + " · " : ""}${r.truckModel ? "→ " + r.truckModel : "самосвал не указан"}</div>
         <div style="display:flex;align-items:flex-start;gap:8px">
           <span style="font-size:12px;color:var(--gray)">${r.instructorName||""}</span>
           <button type="button" class="btn-ghost" style="padding:3px 10px;font-size:12px"
@@ -2145,6 +2223,7 @@ async function editTimingRecord(recordId) {
   document.getElementById("timingCycleTime").value = r.cycleTimeSec || "";
   document.getElementById("timingInstructor").value = r.instructorName || "";
   document.getElementById("timingSummary").value = r.summary || "";
+  document.getElementById("timingStartTime").value = r.startTime || "";
   setProperLoading(r.properLoading || "");
 
   if (r.equipmentType) await loadEvalEquipmentModels(r.equipmentType);
@@ -2172,6 +2251,7 @@ function cancelTimingEdit() {
   document.getElementById("timingCycleTime").value = "";
   document.getElementById("timingTruckModel").value = "";
   document.getElementById("timingSummary").value = "";
+  document.getElementById("timingStartTime").value = "";
   setProperLoading("");
   resetLapCalc();
 }
@@ -2190,7 +2270,7 @@ function resetLapCalc() {
 // saveTimingRecord — тем же действием, что и обычная форма, так что вся
 // дальнейшая логика (джойн с оценкой, резюме дня и т.д.) работает без
 // изменений на бэкенде.
-const TIMING_IMPORT_HEADERS = ["ФИО сотрудника","Дата","Тип техники","Модель экскаватора","Модель самосвала",
+const TIMING_IMPORT_HEADERS = ["ФИО сотрудника","Дата","Начало погрузки (чч:мм)","Тип техники","Модель экскаватора","Модель самосвала",
   "Время погрузки, сек","Ковшей","Наполнение, %","Цикл, сек","Паспорт (да/нет)","Инструктор","Примечание"];
 
 function downloadTimingTemplate() {
@@ -2199,8 +2279,8 @@ function downloadTimingTemplate() {
   // Если замеряли не сегодня — просто исправить в паре ячеек, а не во всех.
   const today = new Date();
   const todayStr = `${String(today.getDate()).padStart(2,"0")}.${String(today.getMonth()+1).padStart(2,"0")}.${today.getFullYear()}`;
-  const exampleRow = ["Иванов Иван Иванович", todayStr, "Экскаватор с обратной лопатой", "Sandvik DX800", "Sany SKT 115S", 125, 6, 92, 25, "да", "Петров П.П.", "пример — замените своими данными"];
-  const blankRows = Array.from({ length: 5 }, () => ["", todayStr, "", "", "", "", "", "", "", "", "", ""]);
+  const exampleRow = ["Иванов Иван Иванович", todayStr, "16:15", "Экскаватор с обратной лопатой", "Sandvik DX800", "Sany SKT 115S", 125, 6, 92, 25, "да", "Петров П.П.", "пример — замените своими данными"];
+  const blankRows = Array.from({ length: 5 }, () => ["", todayStr, "", "", "", "", "", "", "", "", "", "", ""]);
   const ws = XLSX.utils.aoa_to_sheet([TIMING_IMPORT_HEADERS, exampleRow, ...blankRows]);
   ws['!cols'] = TIMING_IMPORT_HEADERS.map(h => ({ wch: Math.max(14, h.length) }));
   const wb = XLSX.utils.book_new();
@@ -2247,6 +2327,11 @@ function parseTimingImportRow(row) {
     ? `${String(dateRaw.getDate()).padStart(2,"0")}.${String(dateRaw.getMonth()+1).padStart(2,"0")}.${dateRaw.getFullYear()}`
     : String(dateRaw).trim();
 
+  const startTimeRaw = get("Начало погрузки (чч:мм)","Начало погрузки");
+  const startTime = (startTimeRaw instanceof Date)
+    ? `${String(startTimeRaw.getHours()).padStart(2,"0")}:${String(startTimeRaw.getMinutes()).padStart(2,"0")}`
+    : String(startTimeRaw).trim();
+
   const totalTime = Number(get("Время погрузки, сек","Время погрузки"));
   const bucketCount = Number(get("Ковшей","Количество ковшей"));
   const bucketFill = Number(get("Наполнение, %","Наполнение ковшей (%)"));
@@ -2264,7 +2349,7 @@ function parseTimingImportRow(row) {
   if (!properLoading) errors.push("паспорт: да/нет");
 
   return {
-    name, emp, dateStr,
+    name, emp, dateStr, startTime,
     equipmentType: String(get("Тип техники")).trim(),
     equipmentModel: String(get("Модель экскаватора")).trim(),
     truckModel: String(get("Модель самосвала")).trim(),
@@ -2285,6 +2370,7 @@ function renderTimingImportPreview() {
     <tr style="${r.errors.length ? 'background:var(--redbg)' : ''}">
       <td style="padding:6px 8px;font-size:12px;border-bottom:1px solid var(--border);white-space:nowrap">${r.name||"—"}</td>
       <td style="padding:6px 8px;font-size:12px;border-bottom:1px solid var(--border);white-space:nowrap">${r.dateStr||"—"}</td>
+      <td style="padding:6px 8px;font-size:12px;border-bottom:1px solid var(--border);white-space:nowrap">${r.startTime||"—"}</td>
       <td style="padding:6px 8px;font-size:12px;border-bottom:1px solid var(--border);white-space:nowrap">${r.truckModel||"—"}</td>
       <td style="padding:6px 8px;font-size:12px;border-bottom:1px solid var(--border)">${r.totalTime||"—"}</td>
       <td style="padding:6px 8px;font-size:12px;border-bottom:1px solid var(--border)">${r.bucketCount||"—"}</td>
@@ -2302,7 +2388,7 @@ function renderTimingImportPreview() {
     </div>
     <div style="overflow-x:auto">
       <table style="border-collapse:collapse;width:100%;min-width:700px">
-        <thead><tr>${th("ФИО")}${th("Дата")}${th("Самосвал")}${th("Погрузка")}${th("Ковшей")}${th("Наполн.")}${th("Цикл")}${th("Паспорт")}${th("Ошибки")}</tr></thead>
+        <thead><tr>${th("ФИО")}${th("Дата")}${th("Начало")}${th("Самосвал")}${th("Погрузка")}${th("Ковшей")}${th("Наполн.")}${th("Цикл")}${th("Паспорт")}${th("Ошибки")}</tr></thead>
         <tbody>${rowsHtml}</tbody>
       </table>
     </div>
@@ -2328,6 +2414,7 @@ async function submitTimingImport(evt) {
       totalLoadTimeSec: r.totalTime, bucketCount: r.bucketCount, bucketFillPercent: r.bucketFill,
       cycleTimeSec: r.cycleTime, properLoading: r.properLoading,
       site: CURRENT_SITE, instructorName: r.instructorName, summary: r.summary,
+      startTime: r.startTime,
     };
     try {
       const res = await fetch(CFG.SHEET_URL, { method: "POST", body: JSON.stringify(payload) });
