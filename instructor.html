@@ -2910,6 +2910,19 @@ function renderEvalByType() {
 // целиком и сразу (не прячется за раскрытием) — это исходные данные, их
 // нужно видеть в отчёте. Средние значения — отдельным блоком под таблицей,
 // как производная от неё, а не вместо неё.
+//
+// Если у замеров указано время начала погрузки — сортируем по нему и
+// вставляем между строками простой (разрыв между «уехал предыдущий» и
+// «встал следующий»). Простои от минуты и больше подсвечиваются — это
+// сигнал реального простоя оборудования, а не просто смены самосвала.
+// Замеры без времени начала (старые записи, до появления этого поля)
+// остаются в конце списка без расчёта простоя.
+function parseHHMM(v) {
+  const m = String(v||"").trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  return Number(m[1]) * 60 + Number(m[2]);
+}
+
 function renderTimingSummary(records) {
   const n = records.length;
   const avg = key => {
@@ -2933,9 +2946,22 @@ function renderTimingSummary(records) {
     </div>
   `;
 
+  // Сортировка: записи с распознанным временем начала — по времени,
+  // остальные — следом, в исходном порядке.
+  const withStart = [];
+  const withoutStart = [];
+  records.forEach(t => {
+    const startMin = parseHHMM(t.startTime);
+    if (startMin === null) { withoutStart.push(t); return; }
+    withStart.push({ t, startMin, endMin: startMin + (Number(t.totalLoadTimeSec)||0) / 60 });
+  });
+  withStart.sort((a,b) => a.startMin - b.startMin);
+
   const th = label => `<th style="text-align:left;padding:6px 10px;font-size:10.5px;color:#7C3AED;font-weight:800;border-bottom:1px solid #DDD6FE;white-space:nowrap">${label}</th>`;
-  const tableRows = records.map(t => `
+
+  const dataRow = t => `
     <tr>
+      <td style="padding:7px 10px;font-size:12px;color:var(--gray);border-bottom:1px solid #EDE9FE;white-space:nowrap">${t.startTime || "—"}</td>
       <td style="padding:7px 10px;font-size:12px;color:var(--gray);border-bottom:1px solid #EDE9FE;white-space:nowrap">${t.truckModel || "—"}</td>
       <td style="padding:7px 10px;font-size:12.5px;color:var(--navy);font-weight:700;border-bottom:1px solid #EDE9FE">${t.totalLoadTimeSec} с</td>
       <td style="padding:7px 10px;font-size:12.5px;color:var(--navy);font-weight:700;border-bottom:1px solid #EDE9FE">${t.bucketCount}</td>
@@ -2946,13 +2972,38 @@ function renderTimingSummary(records) {
         ${t.properLoading==='да'?'✓':(t.properLoading==='нет'?'✕':'—')}
       </td>
     </tr>
-  `).join("");
+  `;
+
+  const pauseRow = pauseMin => {
+    const isLong = pauseMin >= 1;
+    const mm = Math.floor(pauseMin);
+    const ss = Math.round((pauseMin - mm) * 60);
+    const label = mm > 0 ? `${mm} мин${ss ? " " + ss + " с" : ""}` : `${ss} с`;
+    return `
+      <tr>
+        <td colspan="7" style="padding:5px 10px;font-size:11px;border-bottom:1px solid #EDE9FE;
+          color:${isLong ? '#B45309' : 'var(--gray)'};background:${isLong ? '#FFFBEB' : 'transparent'}">
+          ⏸ простой ${label}${isLong ? " — техника не работала" : ""}
+        </td>
+      </tr>
+    `;
+  };
+
+  let tableRows = "";
+  withStart.forEach((item, i) => {
+    if (i > 0) {
+      const pauseMin = item.startMin - withStart[i-1].endMin;
+      if (pauseMin > 0) tableRows += pauseRow(pauseMin);
+    }
+    tableRows += dataRow(item.t);
+  });
+  withoutStart.forEach(t => { tableRows += dataRow(t); });
 
   const table = `
     <div style="overflow-x:auto">
-      <table style="border-collapse:collapse;width:100%;min-width:480px">
+      <table style="border-collapse:collapse;width:100%;min-width:540px">
         <thead><tr>
-          ${th("Самосвал")}${th("Погрузка")}${th("Ковшей")}${th("Наполн.")}${th("Цикл")}${th("Паспорт")}
+          ${th("Начало")}${th("Самосвал")}${th("Погрузка")}${th("Ковшей")}${th("Наполн.")}${th("Цикл")}${th("Паспорт")}
         </tr></thead>
         <tbody>${tableRows}</tbody>
       </table>
