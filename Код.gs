@@ -4036,7 +4036,7 @@ const SHEET_TIMING = "Хронометраж";
 function saveTimingRecord(p) {
   const { empId, empName, position, date, equipmentType, equipmentModel, truckModel,
           totalLoadTimeSec, bucketCount, bucketFillPercent, cycleTimeSec, properLoading,
-          site, instructorName, summary } = p || {};
+          site, instructorName, summary, startTime } = p || {};
 
   if (!empName || !totalLoadTimeSec || !bucketCount || !cycleTimeSec) {
     return json({ ok: false, error: "Нужны как минимум empName, totalLoadTimeSec, bucketCount и cycleTimeSec" });
@@ -4046,7 +4046,7 @@ function saveTimingRecord(p) {
   let sheet = ss.getSheetByName(SHEET_TIMING);
   const HEADER = ["recordId","empId","empName","position","date","equipmentType","equipmentModel",
                   "truckModel","totalLoadTimeSec","bucketCount","bucketFillPercent","cycleTimeSec",
-                  "properLoading","site","instructorName","summary","createdAt"];
+                  "properLoading","site","instructorName","summary","createdAt","startTime"];
   if (!sheet) {
     sheet = ss.insertSheet(SHEET_TIMING);
     sheet.appendRow(HEADER);
@@ -4055,6 +4055,8 @@ function saveTimingRecord(p) {
     sheet.setFrozenRows(1);
     sheet.setColumnWidth(3, 200);
     sheet.setColumnWidth(16, 400);
+  } else {
+    ensureTimingStartTimeColumn(sheet);
   }
 
   const recordId = "timing" + Date.now();
@@ -4065,7 +4067,7 @@ function saveTimingRecord(p) {
   sheet.appendRow([
     recordId, empId || "", empName, position || "", dateStr, equipmentType || "", equipmentModel || "",
     truckModel || "", totalLoadTimeSec, bucketCount, bucketFillPercent || "", cycleTimeSec,
-    properLoading || "", site || "", instructorName || "", summary || "", createdAt,
+    properLoading || "", site || "", instructorName || "", summary || "", createdAt, startTime || "",
   ]);
 
   // Личное дело — та же запись видна в истории сотрудника рядом с оценками,
@@ -4080,6 +4082,19 @@ function saveTimingRecord(p) {
   );
 
   return json({ ok: true, recordId });
+}
+
+// «Хронометраж» — лист, созданный ещё до появления поля startTime, у него
+// может не быть этой колонки. Дописываем её в конец существующих колонок
+// (никогда не переставляя уже существующие) — так старые записи остаются на
+// своих местах, просто с пустым startTime, а не сдвигаются.
+function ensureTimingStartTimeColumn(sheet) {
+  const lastCol = sheet.getLastColumn();
+  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  if (headers.indexOf("startTime") === -1) {
+    sheet.getRange(1, lastCol + 1).setValue("startTime")
+      .setBackground("#0D1B3E").setFontColor("#F4A52A").setFontWeight("bold");
+  }
 }
 
 // Текст события в личном деле для хронометража — общий для saveTimingRecord
@@ -4097,7 +4112,7 @@ function timingPersonnelEventText(totalLoadTimeSec, bucketCount, cycleTimeSec, b
 function updateTimingRecord(p) {
   const { recordId, empId, empName, position, date, equipmentType, equipmentModel, truckModel,
           totalLoadTimeSec, bucketCount, bucketFillPercent, cycleTimeSec, properLoading,
-          site, instructorName, summary } = p || {};
+          site, instructorName, summary, startTime } = p || {};
 
   if (!recordId) return json({ ok: false, error: "Нужен recordId" });
   if (!empName || !totalLoadTimeSec || !bucketCount || !cycleTimeSec) {
@@ -4107,6 +4122,7 @@ function updateTimingRecord(p) {
   const ss = SpreadsheetApp.openById(SHEET_ID);
   const sheet = ss.getSheetByName(SHEET_TIMING);
   if (!sheet) return json({ ok: false, error: "Лист «Хронометраж» не найден" });
+  ensureTimingStartTimeColumn(sheet);
 
   const rows = sheet.getDataRange().getValues();
   const headers = rows[0];
@@ -4136,6 +4152,7 @@ function updateTimingRecord(p) {
   sheet.getRange(rowNum, col("site")).setValue(site || "");
   sheet.getRange(rowNum, col("instructorName")).setValue(instructorName || "");
   sheet.getRange(rowNum, col("summary")).setValue(summary || "");
+  if (col("startTime") > 0) sheet.getRange(rowNum, col("startTime")).setValue(startTime || "");
 
   // Личное дело: обновляем связанную запись (по evalId = recordId
   // хронометража), а не создаём новую — тот же паттерн, что у оценок.
