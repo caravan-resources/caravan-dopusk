@@ -4097,6 +4097,21 @@ function getTimingRatingList(p) {
     dayGroups[key].items.push({ startMin: startMin, endMin: startMin + total / 60, startRaw: startRaw });
   });
 
+  // Среднее время погрузки по каждому оператору отдельно (по ВСЕМ его
+  // замерам за период, не только тем, где заполнено startTime) — нужно,
+  // чтобы у каждого оператора был свой целевой цикл и своя оценка
+  // «потерянных» самосвалов, а не одна цифра на всю компанию (по просьбе
+  // Ивана, 03.09.2026 — простои нельзя мешать в кучу между операторами).
+  const loadByOp = {};
+  filtered.forEach(({ r }) => {
+    const empId = String(r[tIdx["empId"]] || "").trim();
+    const total = Number(r[tIdx["totalLoadTimeSec"]]);
+    if (isNaN(total)) return;
+    if (!loadByOp[empId]) loadByOp[empId] = { sum: 0, count: 0 };
+    loadByOp[empId].sum += total;
+    loadByOp[empId].count += 1;
+  });
+
   // Критичные простои — от минуты и больше (по договорённости с Иваном,
   // 03.09.2026): собираем каждый такой разрыв отдельным пунктом списка, а не
   // только агрегатом, чтобы можно было увидеть, где именно и когда он
@@ -4139,6 +4154,7 @@ function getTimingRatingList(p) {
   const downtime = Object.keys(downtimeByOp).map(id => {
     const o = downtimeByOp[id];
     const avgIntervalSec = o.intervals ? Math.round(o.totalIntervalSec / o.intervals) : null;
+    const l = loadByOp[id];
     return {
       empId: o.empId, empName: o.empName, gaps: o.gaps,
       totalPauseSec: Math.round(o.totalPauseSec),
@@ -4146,6 +4162,7 @@ function getTimingRatingList(p) {
       avgFullCycleSec: avgIntervalSec,
       maxTrucksPerHour: avgIntervalSec ? Math.floor(3600 / avgIntervalSec) : null,
       criticalSec: o.criticalSec, criticalCount: o.criticalCount,
+      avgLoadSec: l && l.count ? Math.round((l.sum / l.count) * 10) / 10 : null,
     };
   }).sort((a,b) => (b.avgPauseSec||0) - (a.avgPauseSec||0)); // худший (самый долгий средний простой) — первый
 
