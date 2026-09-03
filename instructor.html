@@ -1066,6 +1066,7 @@ tr:hover td { background:#FAFBFD; }
           <button class="btn btn-ghost" id="btnFormalToggle" style="width:auto;padding:9px 14px" onclick="toggleRatingSection('formal')">⚠️ Формальный осмотр</button>
           <button class="btn btn-ghost" style="width:auto;padding:9px 14px" onclick="toggleRatingSection('evalTime')">🕐 Журнал оценок — по времени</button>
           <button class="btn btn-ghost" style="width:auto;padding:9px 14px" onclick="toggleRatingSection('evalType')">🚜 Журнал оценок — по технике</button>
+          <button class="btn btn-ghost" style="width:auto;padding:9px 14px" onclick="toggleRatingSection('timingRating')">⏱ Рейтинг по хронометражу</button>
         </div>
       </div>
 
@@ -1114,6 +1115,39 @@ tr:hover td { background:#FAFBFD; }
           хронометраж погрузки, если он делался в тот же день.
         </div>
         <div id="evalTypeList"></div>
+      </div>
+
+      <div class="panel" id="panelTimingRating" style="display:none;border-top:3px solid #7C3AED">
+        <div class="panel-title">
+          ⏱ Рейтинг по хронометражу
+          <select id="timingRatingScope" onchange="loadTimingRating()" style="max-width:200px">
+            <option value="0">За весь период</option>
+            <option value="30">Последние 30 дней</option>
+            <option value="7">Последние 7 дней</option>
+          </select>
+        </div>
+        <div class="hint" style="margin-bottom:10px">
+          Сравнение честное только внутри одного класса техники — маленький экскаватор
+          объективно медленнее большого независимо от мастерства оператора, поэтому
+          операторы сравниваются раздельно по классам. Простои считаются только по
+          замерам с заполненным временем начала — данных пока меньше, чем всего замеров.
+        </div>
+        <div class="stats-grid" id="statsGridTimingRating"></div>
+
+        <div style="margin-top:16px">
+          <div style="font-size:13px;font-weight:800;color:var(--navy);margin-bottom:8px">📈 Динамика среднего цикла по неделям</div>
+          <div id="timingRatingTrend"></div>
+        </div>
+
+        <div style="margin-top:20px">
+          <div style="font-size:13px;font-weight:800;color:var(--navy);margin-bottom:8px">⏸ Простои по операторам</div>
+          <div id="timingRatingDowntime"></div>
+        </div>
+
+        <div style="margin-top:20px">
+          <div style="font-size:13px;font-weight:800;color:var(--navy);margin-bottom:8px">🏅 Рейтинг по классам техники</div>
+          <div id="timingRatingList"></div>
+        </div>
       </div>
     </div>
 
@@ -3029,6 +3063,159 @@ function renderTimingSummary(records) {
       ` : ""}
     </div>
   `;
+}
+
+// Рейтинг операторов-экскаваторщиков по хронометражу, отдельно по классам
+// техники (маленький/большой — см. classifyExcavatorSize в Код.gs).
+// Сравнивать напрямую операторов на разной технике нечестно: маленький
+// экскаватор объективно медленнее, независимо от мастерства. Внутри
+// класса — сортировка по среднему циклу ковша (короче = быстрее = выше).
+let LAST_TIMING_RATING = [];
+let LAST_TIMING_COMPANY_STATS = null;
+let LAST_TIMING_TREND = [];
+let LAST_TIMING_DOWNTIME = [];
+
+async function loadTimingRating() {
+  const el = document.getElementById("timingRatingList");
+  if (el) el.innerHTML = `<div class="empty"><div class="empty-icon">⏳</div>Загружаю...</div>`;
+
+  const site = document.getElementById("ratingSite")?.value || "all";
+  const scope = Number(document.getElementById("timingRatingScope")?.value || "0");
+  const params = new URLSearchParams({ action: "getTimingRatingList" });
+  if (site !== "all") params.set("site", site);
+  if (scope) params.set("days", scope);
+
+  try {
+    const val = await jsonpFetchRetry(`${CFG.SHEET_URL}?${params.toString()}`, "cb_timing_rating", 30000, 3);
+    LAST_TIMING_RATING = (val && val.ok && Array.isArray(val.operators)) ? val.operators : [];
+    LAST_TIMING_COMPANY_STATS = (val && val.ok) ? val.companyStats : null;
+    LAST_TIMING_TREND = (val && val.ok && Array.isArray(val.trend)) ? val.trend : [];
+    LAST_TIMING_DOWNTIME = (val && val.ok && Array.isArray(val.downtime)) ? val.downtime : [];
+  } catch (err) {
+    LAST_TIMING_RATING = [];
+    LAST_TIMING_COMPANY_STATS = null;
+    LAST_TIMING_TREND = [];
+    LAST_TIMING_DOWNTIME = [];
+  }
+  renderTimingRatingStats();
+  renderTimingRatingTrend();
+  renderTimingRatingDowntime();
+  renderTimingRating();
+}
+
+function renderTimingRatingStats() {
+  const el = document.getElementById("statsGridTimingRating");
+  if (!el) return;
+  const s = LAST_TIMING_COMPANY_STATS;
+  if (!s) { el.innerHTML = ""; return; }
+  el.innerHTML = [
+    { lbl: "Замеров за период", val: s.count, acc: "var(--navy2)" },
+    { lbl: "Средний цикл по компании", val: s.avgCycle !== null ? s.avgCycle + " с" : "—", acc: "var(--navy)" },
+    { lbl: "Соблюдение паспорта", val: s.passportRate !== null ? s.passportRate + "%" : "—",
+      acc: s.passportRate === null ? "var(--gray)" : (s.passportRate >= 90 ? "var(--green)" : (s.passportRate >= 70 ? "var(--yellow)" : "var(--red)")) },
+    { lbl: "Средний простой" + (s.pauseDataGaps ? ` (${s.pauseDataGaps} набл.)` : ""),
+      val: s.avgPauseSec !== null ? formatPauseSec(s.avgPauseSec) : "нет данных", acc: "var(--gray)" },
+  ].map(c => `
+    <div class="stat-card" style="border-left-color:${c.acc}">
+      <div class="stat-val" style="color:${c.acc}">${c.val}</div>
+      <div class="stat-lbl">${c.lbl}</div>
+    </div>`).join("");
+}
+
+function formatPauseSec(sec) {
+  const mm = Math.floor(sec / 60), ss = Math.round(sec % 60);
+  return mm > 0 ? `${mm} мин${ss ? " " + ss + " с" : ""}` : `${ss} с`;
+}
+
+// Динамика по неделям — простые горизонтальные бары через ширину div в %,
+// без графической библиотеки (в проекте её нигде нет, заводить ради одного
+// раздела не стали — тот же приём, что и в остальной аналитике).
+function renderTimingRatingTrend() {
+  const el = document.getElementById("timingRatingTrend");
+  if (!el) return;
+  if (!LAST_TIMING_TREND.length) {
+    el.innerHTML = `<div class="empty" style="padding:16px"><div class="empty-icon">📈</div>Недостаточно данных для динамики</div>`;
+    return;
+  }
+  const maxCycle = Math.max(...LAST_TIMING_TREND.map(t => t.avgCycle || 0), 1);
+  el.innerHTML = LAST_TIMING_TREND.map(t => `
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+      <div style="width:90px;font-size:11px;color:var(--gray);flex-shrink:0">${t.period.replace("W","нед.")}</div>
+      <div style="flex:1;background:#F1F5F9;border-radius:6px;height:20px;position:relative;overflow:hidden">
+        <div style="width:${t.avgCycle ? Math.max(4,(t.avgCycle/maxCycle)*100) : 0}%;background:#7C3AED;height:100%;border-radius:6px"></div>
+      </div>
+      <div style="width:90px;font-size:12px;font-weight:700;color:var(--navy);text-align:right;flex-shrink:0">${t.avgCycle !== null ? t.avgCycle + " с" : "—"} <span style="font-weight:400;color:var(--gray)">(${t.count})</span></div>
+    </div>
+  `).join("");
+}
+
+function renderTimingRatingDowntime() {
+  const el = document.getElementById("timingRatingDowntime");
+  if (!el) return;
+  if (!LAST_TIMING_DOWNTIME.length) {
+    el.innerHTML = `<div class="empty" style="padding:16px"><div class="empty-icon">⏸</div>Нет замеров с заполненным временем начала — простои посчитать не из чего</div>`;
+    return;
+  }
+  const maxPause = Math.max(...LAST_TIMING_DOWNTIME.map(o => o.avgPauseSec || 0), 1);
+  el.innerHTML = LAST_TIMING_DOWNTIME.map((o,i) => `
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+      <div style="width:140px;font-size:12px;color:var(--navy);font-weight:700;flex-shrink:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${i+1}. ${o.empName||"—"}</div>
+      <div style="flex:1;background:#F1F5F9;border-radius:6px;height:20px;position:relative;overflow:hidden">
+        <div style="width:${o.avgPauseSec ? Math.max(4,(o.avgPauseSec/maxPause)*100) : 0}%;background:${o.avgPauseSec>=180?'#DC2626':'#F4A52A'};height:100%;border-radius:6px"></div>
+      </div>
+      <div style="width:110px;font-size:12px;font-weight:700;color:var(--navy);text-align:right;flex-shrink:0">${o.avgPauseSec !== null ? formatPauseSec(o.avgPauseSec) : "—"} <span style="font-weight:400;color:var(--gray)">(${o.gaps})</span></div>
+    </div>
+  `).join("");
+}
+
+function renderTimingRating() {
+  const el = document.getElementById("timingRatingList");
+  if (!el) return;
+  if (!LAST_TIMING_RATING.length) {
+    el.innerHTML = `<div class="empty"><div class="empty-icon">⏱</div>Нет данных хронометража за выбранный период</div>`;
+    return;
+  }
+
+  const groups = {};
+  const order = [];
+  LAST_TIMING_RATING.forEach(o => {
+    if (!groups[o.sizeClass]) { groups[o.sizeClass] = []; order.push(o.sizeClass); }
+    groups[o.sizeClass].push(o);
+  });
+
+  const th = label => `<th style="text-align:left;padding:6px 10px;font-size:10.5px;color:#7C3AED;font-weight:800;border-bottom:1px solid #DDD6FE;white-space:nowrap">${label}</th>`;
+
+  el.innerHTML = order.map(cls => {
+    const rows = groups[cls];
+    const rowsHtml = rows.map((o,i) => `
+      <tr>
+        <td style="padding:7px 10px;font-size:12px;color:var(--gray);border-bottom:1px solid #EDE9FE">${i+1}</td>
+        <td style="padding:7px 10px;font-size:13px;color:var(--navy);font-weight:700;border-bottom:1px solid #EDE9FE">${o.empName||"—"}</td>
+        <td style="padding:7px 10px;font-size:12px;color:var(--gray);border-bottom:1px solid #EDE9FE">${o.count}</td>
+        <td style="padding:7px 10px;font-size:12.5px;color:var(--navy);font-weight:700;border-bottom:1px solid #EDE9FE">${o.avgTotal ?? "—"} с</td>
+        <td style="padding:7px 10px;font-size:12.5px;color:var(--navy);font-weight:700;border-bottom:1px solid #EDE9FE">${o.avgCycle ?? "—"} с</td>
+        <td style="padding:7px 10px;font-size:12.5px;color:var(--navy);font-weight:700;border-bottom:1px solid #EDE9FE">${o.avgFill ?? "—"}%</td>
+        <td style="padding:7px 10px;font-size:12px;font-weight:700;border-bottom:1px solid #EDE9FE;
+          color:${o.passportRate===null?'var(--gray)':(o.passportRate>=90?'var(--green)':(o.passportRate>=70?'var(--yellow)':'var(--red)'))}">
+          ${o.passportRate===null?"—":o.passportRate+"%"}
+        </td>
+      </tr>
+    `).join("");
+
+    return `
+      <div style="margin-bottom:22px">
+        <div style="font-size:13px;font-weight:800;color:var(--navy);margin-bottom:8px">${cls}</div>
+        <div style="overflow-x:auto">
+          <table style="border-collapse:collapse;width:100%;min-width:600px">
+            <thead><tr>
+              ${th("#")}${th("Оператор")}${th("Замеров")}${th("Ср. время")}${th("Ср. цикл")}${th("Наполнение")}${th("Паспорт")}
+            </tr></thead>
+            <tbody>${rowsHtml}</tbody>
+          </table>
+        </div>
+      </div>
+    `;
+  }).join("");
 }
 
 // Одна карточка оценки — «акцентированное событие», не строка таблицы:
@@ -7301,7 +7488,7 @@ function renderRatingFormalFull(rows) {
 // вкладки «Рейтинг операторов». Тяжёлый DOM строится лениво, при первом
 // открытии (и далее пересчитывается вместе с фильтрами — см. вызовы выше).
 function toggleRatingSection(key) {
-  const map = { table: "panelRatingTable", formal: "panelRatingFormal", evalTime: "panelEvalTime", evalType: "panelEvalType" };
+  const map = { table: "panelRatingTable", formal: "panelRatingFormal", evalTime: "panelEvalTime", evalType: "panelEvalType", timingRating: "panelTimingRating" };
   const id = map[key];
   const panel = id && document.getElementById(id);
   if (!panel) return;
@@ -7313,6 +7500,7 @@ function toggleRatingSection(key) {
   if (key === "formal") renderRatingFormalFull(LAST_RATING_ROWS);
   if (key === "evalTime") renderEvalByTime();
   if (key === "evalType") { populateEvalTypeFilter(); renderEvalByType(); }
+  if (key === "timingRating") loadTimingRating();
 
   panel.scrollIntoView({ behavior: "smooth", block: "start" });
 }
