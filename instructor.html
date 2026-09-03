@@ -1144,6 +1144,20 @@ tr:hover td { background:#FAFBFD; }
           <div id="timingRatingDowntime"></div>
         </div>
 
+        <div style="margin-top:20px;padding:14px 16px;background:#FFFBEB;border-radius:10px;border-left:3px solid #F4A52A">
+          <div style="font-size:13px;font-weight:800;color:var(--navy);margin-bottom:8px">🚨 Критичные простои (от 1 минуты)</div>
+          <div class="hint" style="margin-bottom:10px">
+            Каждый такой разрыв — упущенное время экскаватора. Считаем, сколько самосвалов
+            теоретически могли бы быть загружены за это время: целевой цикл = среднее время
+            погрузки по компании + время на подъезд самосвала —
+            <input type="number" id="approachTimeSec" value="60" min="0" style="width:60px;display:inline-block;margin:0 4px" oninput="renderCriticalPauses()">
+            сек (цель — 30 сек).
+          </div>
+          <div id="targetCycleFormula" style="font-size:11px;color:var(--gray);margin-bottom:10px"></div>
+          <div id="lostTrucksSummary" style="margin-bottom:12px"></div>
+          <div id="criticalPausesList"></div>
+        </div>
+
         <div style="margin-top:20px">
           <div style="font-size:13px;font-weight:800;color:var(--navy);margin-bottom:8px">🏅 Рейтинг по классам техники</div>
           <div id="timingRatingList"></div>
@@ -3074,6 +3088,7 @@ let LAST_TIMING_RATING = [];
 let LAST_TIMING_COMPANY_STATS = null;
 let LAST_TIMING_TREND = [];
 let LAST_TIMING_DOWNTIME = [];
+let LAST_CRITICAL_PAUSES = [];
 
 async function loadTimingRating() {
   const el = document.getElementById("timingRatingList");
@@ -3091,15 +3106,18 @@ async function loadTimingRating() {
     LAST_TIMING_COMPANY_STATS = (val && val.ok) ? val.companyStats : null;
     LAST_TIMING_TREND = (val && val.ok && Array.isArray(val.trend)) ? val.trend : [];
     LAST_TIMING_DOWNTIME = (val && val.ok && Array.isArray(val.downtime)) ? val.downtime : [];
+    LAST_CRITICAL_PAUSES = (val && val.ok && Array.isArray(val.criticalPauses)) ? val.criticalPauses : [];
   } catch (err) {
     LAST_TIMING_RATING = [];
     LAST_TIMING_COMPANY_STATS = null;
     LAST_TIMING_TREND = [];
     LAST_TIMING_DOWNTIME = [];
+    LAST_CRITICAL_PAUSES = [];
   }
   renderTimingRatingStats();
   renderTimingRatingTrend();
   renderTimingRatingDowntime();
+  renderCriticalPauses();
   renderTimingRating();
 }
 
@@ -3115,6 +3133,10 @@ function renderTimingRatingStats() {
       acc: s.passportRate === null ? "var(--gray)" : (s.passportRate >= 90 ? "var(--green)" : (s.passportRate >= 70 ? "var(--yellow)" : "var(--red)")) },
     { lbl: "Средний простой" + (s.pauseDataGaps ? ` (${s.pauseDataGaps} набл.)` : ""),
       val: s.avgPauseSec !== null ? formatPauseSec(s.avgPauseSec) : "нет данных", acc: "var(--gray)" },
+    { lbl: "Полный цикл на самосвал (погрузка+простой)" + (s.fullCycleDataPoints ? ` (${s.fullCycleDataPoints} набл.)` : ""),
+      val: s.avgFullCycleSec !== null ? formatPauseSec(s.avgFullCycleSec) : "нет данных", acc: "var(--navy2)" },
+    { lbl: "Реальная пропускная способность",
+      val: s.maxTrucksPerHour !== null ? "~" + s.maxTrucksPerHour + " самосвалов/ч" : "нет данных", acc: "var(--gold)" },
   ].map(c => `
     <div class="stat-card" style="border-left-color:${c.acc}">
       <div class="stat-val" style="color:${c.acc}">${c.val}</div>
@@ -3164,6 +3186,58 @@ function renderTimingRatingDowntime() {
         <div style="width:${o.avgPauseSec ? Math.max(4,(o.avgPauseSec/maxPause)*100) : 0}%;background:${o.avgPauseSec>=180?'#DC2626':'#F4A52A'};height:100%;border-radius:6px"></div>
       </div>
       <div style="width:110px;font-size:12px;font-weight:700;color:var(--navy);text-align:right;flex-shrink:0">${o.avgPauseSec !== null ? formatPauseSec(o.avgPauseSec) : "—"} <span style="font-weight:400;color:var(--gray)">(${o.gaps})</span></div>
+      <div style="width:150px;font-size:11px;color:var(--gray);text-align:right;flex-shrink:0">цикл ${o.avgFullCycleSec ? formatPauseSec(o.avgFullCycleSec) : "—"} · ~${o.maxTrucksPerHour ?? "—"}/ч</div>
+    </div>
+  `).join("");
+}
+
+// Список конкретных критичных простоев (≥1 мин, порог зашит в бэкенде —
+// см. CRITICAL_PAUSE_SEC в getTimingRatingList) и калькулятор «потерянных»
+// самосвалов: сумма критичных простоев / целевой цикл на самосвал.
+// Целевой цикл — редактируемое поле (200-210 сек по разговору с Иваном,
+// 03.09.2026, по умолчанию 205 — середина диапазона), пересчёт мгновенный,
+// без повторного запроса к серверу (все данные уже на клиенте).
+function renderCriticalPauses() {
+  const summaryEl = document.getElementById("lostTrucksSummary");
+  const listEl = document.getElementById("criticalPausesList");
+  const formulaEl = document.getElementById("targetCycleFormula");
+  if (!summaryEl || !listEl) return;
+
+  const s = LAST_TIMING_COMPANY_STATS;
+  const approachSec = Number(document.getElementById("approachTimeSec")?.value) || 0;
+  const avgLoadSec = s?.avgLoadSec ?? null;
+  const targetSec = avgLoadSec !== null ? avgLoadSec + approachSec : null;
+
+  if (formulaEl) {
+    formulaEl.innerHTML = targetSec !== null
+      ? `Целевой цикл = ${avgLoadSec} с (ср. погрузка) + ${approachSec} с (подъезд) = <b>${Math.round(targetSec)} с</b>`
+      : "Недостаточно данных для расчёта среднего времени погрузки";
+  }
+
+  if (!s || !s.criticalCount || !targetSec) {
+    summaryEl.innerHTML = "";
+    listEl.innerHTML = !s || !s.criticalCount
+      ? `<div class="empty" style="padding:16px"><div class="empty-icon">✓</div>Критичных простоев за период нет</div>`
+      : "";
+    return;
+  }
+
+  const lostTrucks = Math.floor(s.criticalTotalSec / targetSec);
+  summaryEl.innerHTML = `
+    <div style="display:flex;gap:24px;flex-wrap:wrap">
+      <div><div style="font-size:22px;font-weight:800;color:#B45309">${s.criticalCount}</div><div style="font-size:11px;color:var(--gray)">критичных простоев</div></div>
+      <div><div style="font-size:22px;font-weight:800;color:#B45309">${formatPauseSec(s.criticalTotalSec)}</div><div style="font-size:11px;color:var(--gray)">суммарно потеряно времени</div></div>
+      <div><div style="font-size:22px;font-weight:800;color:var(--red)">~${lostTrucks}</div><div style="font-size:11px;color:var(--gray)">недогруженных самосвалов за период</div></div>
+    </div>
+  `;
+
+  listEl.innerHTML = LAST_CRITICAL_PAUSES.map(c => `
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid #FDE68A;font-size:12px">
+      <div>
+        <b style="color:var(--navy)">${c.empName||"—"}</b>
+        <span style="color:var(--gray)"> · ${c.date} · ${c.beforeStartTime||"?"} → ${c.afterStartTime||"?"}</span>
+      </div>
+      <b style="color:#B45309">${formatPauseSec(c.pauseSec)}</b>
     </div>
   `).join("");
 }
@@ -3193,6 +3267,7 @@ function renderTimingRating() {
         <td style="padding:7px 10px;font-size:13px;color:var(--navy);font-weight:700;border-bottom:1px solid #EDE9FE">${o.empName||"—"}</td>
         <td style="padding:7px 10px;font-size:12px;color:var(--gray);border-bottom:1px solid #EDE9FE">${o.count}</td>
         <td style="padding:7px 10px;font-size:12.5px;color:var(--navy);font-weight:700;border-bottom:1px solid #EDE9FE">${o.avgTotal ?? "—"} с</td>
+        <td style="padding:7px 10px;font-size:12.5px;color:var(--navy);font-weight:700;border-bottom:1px solid #EDE9FE">${o.avgBuckets ?? "—"}</td>
         <td style="padding:7px 10px;font-size:12.5px;color:var(--navy);font-weight:700;border-bottom:1px solid #EDE9FE">${o.avgCycle ?? "—"} с</td>
         <td style="padding:7px 10px;font-size:12.5px;color:var(--navy);font-weight:700;border-bottom:1px solid #EDE9FE">${o.avgFill ?? "—"}%</td>
         <td style="padding:7px 10px;font-size:12px;font-weight:700;border-bottom:1px solid #EDE9FE;
@@ -3208,7 +3283,7 @@ function renderTimingRating() {
         <div style="overflow-x:auto">
           <table style="border-collapse:collapse;width:100%;min-width:600px">
             <thead><tr>
-              ${th("#")}${th("Оператор")}${th("Замеров")}${th("Ср. время")}${th("Ср. цикл")}${th("Наполнение")}${th("Паспорт")}
+              ${th("#")}${th("Оператор")}${th("Замеров")}${th("Ср. время")}${th("Ковшей")}${th("Ср. цикл")}${th("Наполнение")}${th("Паспорт")}
             </tr></thead>
             <tbody>${rowsHtml}</tbody>
           </table>
