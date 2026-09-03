@@ -75,6 +75,7 @@ function doGet(e) {
   else if (action === "getEvaluationStats") result = getEvaluationStats(e.parameter);
   else if (action === "getEvaluationsList") result = getEvaluationsList(e.parameter);
   else if (action === "getTimingRecordsList") result = getTimingRecordsList(e.parameter);
+  else if (action === "getTimingRatingList") result = getTimingRatingList(e.parameter);
   else result = json({ ok: false, error: "unknown action" });
 
   if (callback) {
@@ -3911,26 +3912,10 @@ function getTimingRecordsList(p) {
     since.setHours(0,0,0,0);
   }
 
-  // Ключи "empId|дата", у которых уже есть оценка — такие группы замеров
-  // пропускаем, они и так видны внутри карточки своей оценки.
-  const evalKeys = {};
-  const evalSheet = ss.getSheetByName(SHEET_EVALUATIONS);
-  if (evalSheet) {
-    const eRows = evalSheet.getDataRange().getValues();
-    if (eRows.length > 1) {
-      const eHeaders = eRows[0];
-      const eIdx = {};
-      eHeaders.forEach((h,i) => eIdx[h] = i);
-      eRows.slice(1).forEach(r => {
-        if (!r[eIdx["evalId"]]) return;
-        const empId = String(r[eIdx["empId"]] || "").trim();
-        const rawDate = r[eIdx["date"]];
-        const dateStr = rawDate instanceof Date ? Utilities.formatDate(rawDate, "Asia/Almaty", "dd.MM.yyyy") : String(rawDate||"");
-        evalKeys[empId + "|" + dateStr] = true;
-      });
-    }
-  }
-
+  // Раньше здесь исключались группы, у которых уже есть оценка (чтобы не
+  // дублировать то, что видно внутри карточки оценки) — по просьбе убрано:
+  // дашборд должен показывать вообще весь недавний хронометраж, дублирование
+  // с карточкой оценки не мешает.
   const groups = {};
   const order = [];
   tRows.slice(1).forEach(r => {
@@ -3946,7 +3931,6 @@ function getTimingRecordsList(p) {
 
     const empId = String(r[tIdx["empId"]] || "").trim();
     const key = empId + "|" + dateStr;
-    if (evalKeys[key]) return;
 
     if (!groups[key]) {
       groups[key] = {
@@ -3970,6 +3954,193 @@ function getTimingRecordsList(p) {
   result.forEach(g => delete g.__sortDate);
 
   return json({ ok: true, groups: result });
+}
+
+// ── Рейтинг операторов-экскаваторщиков по хронометражу ────────
+// Сравнение честное только внутри одного класса техники — маленький
+// экскаватор объективно медленнее большого независимо от мастерства
+// оператора. Классы заданы вручную (по итогам разговора с Иваном,
+// 03.09.2026): ZX470 — маленький, EX1200/EX-870 — большой. Модель
+// экскаватора вводится в замерах вручную и записывается по-разному
+// ("Hitachi EX 1200", "EX-1200", "HITACHI EX1200-7" — один и тот же класс),
+// поэтому классифицируем по подстроке в номере модели, а не по точному
+// совпадению строки.
+function classifyExcavatorSize(model) {
+  const m = String(model || "").toLowerCase();
+  if (m.indexOf("470") >= 0) return "Маленький (ZX470)";
+  if (m.indexOf("1200") >= 0 || m.indexOf("870") >= 0) return "Большой (EX1200/EX-870)";
+  return "Класс не определён";
+}
+
+function getTimingRatingList(p) {
+  const siteFilter = (p && p.site && p.site !== "all") ? String(p.site).trim() : "";
+  const days = Number((p && p.days) || 0);
+  const fromParam = p && p.from ? new Date(p.from) : null;
+  const toParam   = p && p.to   ? new Date(p.to)   : null;
+
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const timingSheet = ss.getSheetByName(SHEET_TIMING);
+  const empty = { ok: true, operators: [], companyStats: null, trend: [], downtime: [] };
+  if (!timingSheet) return json(empty);
+  const tRows = timingSheet.getDataRange().getValues();
+  if (tRows.length < 2) return json(empty);
+  const tHeaders = tRows[0];
+  const tIdx = {};
+  tHeaders.forEach((h,i) => tIdx[h] = i);
+
+  let since = null, until = null;
+  if (fromParam && !isNaN(fromParam.getTime())) {
+    since = fromParam;
+    until = (toParam && !isNaN(toParam.getTime())) ? toParam : new Date();
+  } else if (days > 0) {
+    since = new Date();
+    since.setDate(since.getDate() - days);
+    since.setHours(0,0,0,0);
+  }
+
+  // Один проход по листу — дальше используем этот отфильтрованный набор и
+  // для рейтинга по операторам, и для динамики по времени, и для простоев,
+  // чтобы не перечитывать/перефильтровывать данные трижды.
+  const filtered = [];
+  tRows.slice(1).forEach(r => {
+    if (!r[tIdx["recordId"]]) return;
+    const site = String(r[tIdx["site"]] || "").trim();
+    if (siteFilter && site !== siteFilter) return;
+    const rawDate = r[tIdx["date"]];
+    const d = rawDate instanceof Date ? rawDate : new Date(rawDate);
+    if (since && (isNaN(d) || d < since)) return;
+    if (until && !isNaN(d) && d >= until) return;
+    filtered.push({ r: r, d: d });
+  });
+
+  if (!filtered.length) return json(empty);
+
+  // ── Рейтинг по операторам (по классам техники) ─────────────
+  const byOp = {}; // ключ: empId|класс — один оператор может встретиться в
+                    // обоих классах, если пересаживался на другую технику.
+  filtered.forEach(({ r }) => {
+    const empId = String(r[tIdx["empId"]] || "").trim();
+    const empName = r[tIdx["empName"]] || "";
+    const model = r[tIdx["equipmentModel"]] || "";
+    const cls = classifyExcavatorSize(model);
+    const key = empId + "|" + cls;
+
+    if (!byOp[key]) {
+      byOp[key] = {
+        empId: empId, empName: empName, sizeClass: cls, models: {}, count: 0,
+        sumTotal: 0, sumCycle: 0, sumFill: 0, fillCount: 0, properYes: 0, properNo: 0,
+      };
+    }
+    const o = byOp[key];
+    o.count++;
+    if (model) o.models[model] = true;
+    const total = Number(r[tIdx["totalLoadTimeSec"]]);
+    const cycle = Number(r[tIdx["cycleTimeSec"]]);
+    const fill = Number(r[tIdx["bucketFillPercent"]]);
+    if (!isNaN(total)) o.sumTotal += total;
+    if (!isNaN(cycle)) o.sumCycle += cycle;
+    if (!isNaN(fill)) { o.sumFill += fill; o.fillCount++; }
+    const proper = String(r[tIdx["properLoading"]] || "").trim();
+    if (proper === "да") o.properYes++;
+    else if (proper === "нет") o.properNo++;
+  });
+
+  const operators = Object.keys(byOp).map(key => {
+    const o = byOp[key];
+    const passportTotal = o.properYes + o.properNo;
+    return {
+      empId: o.empId, empName: o.empName, sizeClass: o.sizeClass,
+      models: Object.keys(o.models),
+      count: o.count,
+      avgTotal: o.count ? Math.round((o.sumTotal / o.count) * 10) / 10 : null,
+      avgCycle: o.count ? Math.round((o.sumCycle / o.count) * 10) / 10 : null,
+      avgFill: o.fillCount ? Math.round((o.sumFill / o.fillCount) * 10) / 10 : null,
+      properYes: o.properYes, properNo: o.properNo,
+      passportRate: passportTotal ? Math.round((o.properYes / passportTotal) * 1000) / 10 : null,
+    };
+  });
+
+  // Сортировка: сначала по классу техники (алфавитно — "Большой" раньше
+  // "Маленький" по кириллице, не принципиально), внутри класса — по
+  // среднему циклу ковша по возрастанию (короче цикл = быстрее = выше).
+  operators.sort((a,b) => {
+    if (a.sizeClass !== b.sizeClass) return a.sizeClass.localeCompare(b.sizeClass, "ru");
+    return (a.avgCycle === null ? 999999 : a.avgCycle) - (b.avgCycle === null ? 999999 : b.avgCycle);
+  });
+
+  // ── Сводка по компании ──────────────────────────────────────
+  const allCycles = filtered.map(({r}) => Number(r[tIdx["cycleTimeSec"]])).filter(v => !isNaN(v));
+  const allProperYes = filtered.filter(({r}) => String(r[tIdx["properLoading"]]).trim() === "да").length;
+  const allProperNo  = filtered.filter(({r}) => String(r[tIdx["properLoading"]]).trim() === "нет").length;
+  const allPassportTotal = allProperYes + allProperNo;
+
+  // ── Простои: группируем по empId+дата, сортируем по startTime внутри
+  // группы, считаем разрывы между соседними замерами. Только у записей, где
+  // startTime заполнен — это не все исторические записи, объём растёт по
+  // мере ввода новых замеров с этим полем.
+  const dayGroups = {};
+  filtered.forEach(({ r, d }) => {
+    const startRaw = String(r[tIdx["startTime"]] || "").trim();
+    const m = startRaw.match(/^(\d{1,2}):(\d{2})$/);
+    if (!m) return;
+    const startMin = Number(m[1]) * 60 + Number(m[2]);
+    const empId = String(r[tIdx["empId"]] || "").trim();
+    const empName = r[tIdx["empName"]] || "";
+    const dateStr = !isNaN(d) ? Utilities.formatDate(d, "Asia/Almaty", "dd.MM.yyyy") : String(r[tIdx["date"]] || "");
+    const key = empId + "|" + dateStr;
+    if (!dayGroups[key]) dayGroups[key] = { empId: empId, empName: empName, items: [] };
+    const total = Number(r[tIdx["totalLoadTimeSec"]]) || 0;
+    dayGroups[key].items.push({ startMin: startMin, endMin: startMin + total / 60 });
+  });
+
+  const downtimeByOp = {};
+  Object.keys(dayGroups).forEach(key => {
+    const g = dayGroups[key];
+    const items = g.items.slice().sort((a,b) => a.startMin - b.startMin);
+    for (let i = 1; i < items.length; i++) {
+      const pauseMin = items[i].startMin - items[i-1].endMin;
+      if (pauseMin <= 0) continue;
+      if (!downtimeByOp[g.empId]) downtimeByOp[g.empId] = { empId: g.empId, empName: g.empName, totalPauseSec: 0, gaps: 0 };
+      downtimeByOp[g.empId].totalPauseSec += pauseMin * 60;
+      downtimeByOp[g.empId].gaps += 1;
+    }
+  });
+
+  const downtime = Object.keys(downtimeByOp).map(id => {
+    const o = downtimeByOp[id];
+    return {
+      empId: o.empId, empName: o.empName, gaps: o.gaps,
+      totalPauseSec: Math.round(o.totalPauseSec),
+      avgPauseSec: o.gaps ? Math.round(o.totalPauseSec / o.gaps) : null,
+    };
+  }).sort((a,b) => b.avgPauseSec - a.avgPauseSec); // худший (самый долгий средний простой) — первый
+
+  const allPauseSec = downtime.reduce((s,o) => s + o.totalPauseSec, 0);
+  const allGaps = downtime.reduce((s,o) => s + o.gaps, 0);
+
+  const companyStats = {
+    count: filtered.length,
+    avgCycle: allCycles.length ? Math.round((allCycles.reduce((a,b)=>a+b,0)/allCycles.length) * 10) / 10 : null,
+    passportRate: allPassportTotal ? Math.round((allProperYes / allPassportTotal) * 1000) / 10 : null,
+    avgPauseSec: allGaps ? Math.round(allPauseSec / allGaps) : null,
+    pauseDataGaps: allGaps,
+  };
+
+  // ── Динамика по неделям (ISO-подобная неделя года) ──────────
+  const trendByWeek = {};
+  filtered.forEach(({ r, d }) => {
+    if (isNaN(d)) return;
+    const weekKey = Utilities.formatDate(d, "Asia/Almaty", "YYYY-'W'ww");
+    if (!trendByWeek[weekKey]) trendByWeek[weekKey] = { sumCycle: 0, count: 0 };
+    const cycle = Number(r[tIdx["cycleTimeSec"]]);
+    if (!isNaN(cycle)) { trendByWeek[weekKey].sumCycle += cycle; trendByWeek[weekKey].count++; }
+  });
+  const trend = Object.keys(trendByWeek).sort().map(week => {
+    const t = trendByWeek[week];
+    return { period: week, count: t.count, avgCycle: t.count ? Math.round((t.sumCycle/t.count)*10)/10 : null };
+  });
+
+  return json({ ok: true, operators: operators, companyStats: companyStats, trend: trend, downtime: downtime });
 }
 
 // ── Резюме оценки через Claude API ────────────────────────────
@@ -4091,16 +4262,11 @@ function saveTimingRecord(p) {
   const startTimeCol = sheet.getRange(1,1,1,sheet.getLastColumn()).getValues()[0].indexOf("startTime") + 1;
   if (startTimeCol > 0) sheet.getRange(newRow, startTimeCol).setNumberFormat("@").setValue(startTime || "");
 
-  // Личное дело — та же запись видна в истории сотрудника рядом с оценками,
-  // взысканиями/поощрениями. evalId-колонка используется как общий FK на
-  // источник события (для оценок — evalId, здесь — recordId хронометража).
-  savePersonnelEvent(
-    empId || "", empName, "Хронометраж",
-    dateStr,
-    timingPersonnelEventText(totalLoadTimeSec, bucketCount, cycleTimeSec, bucketFillPercent, properLoading, truckModel, summary),
-    instructorName || "",
-    recordId
-  );
+  // Личное дело: одна сводная запись на пару «оператор+дата», а не по
+  // записи на каждый самосвал — иначе за день на одного оператора могло
+  // накопиться 5-7 почти одинаковых строк. Пересчитывается заново из ВСЕХ
+  // текущих замеров этого дня.
+  syncTimingPersonnelEventForDay(ss, empId || "", empName, dateStr, instructorName || "");
 
   return json({ ok: true, recordId });
 }
@@ -4118,16 +4284,88 @@ function ensureTimingStartTimeColumn(sheet) {
   }
 }
 
-// Текст события в личном деле для хронометража — общий для saveTimingRecord
-// и updateTimingRecord, чтобы формат не разъезжался между созданием и
-// редактированием одной и той же записи.
-function timingPersonnelEventText(totalLoadTimeSec, bucketCount, cycleTimeSec, bucketFillPercent, properLoading, truckModel, summary) {
-  let text = "Время погрузки: " + totalLoadTimeSec + " с, ковшей: " + bucketCount + ", цикл: " + cycleTimeSec + " с";
-  if (bucketFillPercent) text += ", наполнение: " + bucketFillPercent + "%";
-  if (properLoading) text += ", паспорт: " + properLoading;
-  if (truckModel) text += " (" + truckModel + ")";
-  if (summary) text += ". " + summary;
-  return text;
+// Сводная запись в личном деле для пары «empId+дата» — одна на весь день,
+// не на каждый замер. Ключ связи — синтетический id в evalId-колонке
+// ("timingday_" + empId + дата без точек), не recordId конкретного замера.
+// Пересчитывается ЗАНОВО из всех текущих замеров этого дня при каждом
+// save/update/delete (не наращивается инкрементально) — иначе запись
+// разъехалась бы с фактом при редактировании задним числом. Если замеров
+// на день не осталось (удалили последний) — сводная запись тоже удаляется.
+function syncTimingPersonnelEventForDay(ss, empId, empName, dateStr, instructorName) {
+  if (!empId || !dateStr) return;
+
+  const timingSheet = ss.getSheetByName(SHEET_TIMING);
+  if (!timingSheet) return;
+  const tRows = timingSheet.getDataRange().getValues();
+  if (tRows.length < 2) return;
+  const tHeaders = tRows[0];
+  const tIdx = h => tHeaders.indexOf(h);
+
+  const dayRecords = tRows.slice(1).filter(r =>
+    String(r[tIdx("empId")]).trim() === empId && String(r[tIdx("date")]).trim() === dateStr
+  );
+
+  const peSheet = ss.getSheetByName(SHEET_PERSONNEL_EVENTS);
+  const peKey = "timingday_" + empId + "_" + dateStr.replace(/\./g, "");
+
+  if (!dayRecords.length) {
+    if (peSheet) {
+      const peRows = peSheet.getDataRange().getValues();
+      const peHeaders = peRows[0];
+      const idCol = peHeaders.indexOf("evalId");
+      if (idCol >= 0) {
+        for (let i = peRows.length - 1; i >= 1; i--) {
+          if (String(peRows[i][idCol]).trim() === peKey) { peSheet.deleteRow(i + 1); break; }
+        }
+      }
+    }
+    return;
+  }
+
+  const n = dayRecords.length;
+  const nums = key => dayRecords.map(r => Number(r[tIdx(key)])).filter(v => !isNaN(v));
+  const avg = key => { const v = nums(key); return v.length ? v.reduce((a,b)=>a+b,0)/v.length : null; };
+  const round = (v, d) => v === null ? null : Math.round(v * Math.pow(10,d)) / Math.pow(10,d);
+
+  const avgTotal = round(avg("totalLoadTimeSec"), 0);
+  const avgCycle = round(avg("cycleTimeSec"), 1);
+  const avgFill  = round(avg("bucketFillPercent"), 0);
+  const bucketVals = nums("bucketCount");
+  const bucketLabel = bucketVals.length
+    ? (Math.min.apply(null,bucketVals) === Math.max.apply(null,bucketVals) ? String(bucketVals[0]) : Math.min.apply(null,bucketVals) + "–" + Math.max.apply(null,bucketVals))
+    : "-";
+  const properYes = dayRecords.filter(r => String(r[tIdx("properLoading")]).trim() === "да").length;
+  const wordN = n === 1 ? "замер" : (n >= 2 && n <= 4 ? "замера" : "замеров");
+
+  const text = n + " " + wordN + ": ср. время " + avgTotal + " с, ковшей " + bucketLabel
+    + (avgFill !== null ? ", наполнение " + avgFill + "%" : "")
+    + ", цикл " + avgCycle + " с, паспорт " + properYes + "/" + n;
+
+  let updated = false;
+  if (peSheet) {
+    const peRows = peSheet.getDataRange().getValues();
+    const peHeaders = peRows[0];
+    const idCol = peHeaders.indexOf("evalId");
+    if (idCol >= 0) {
+      for (let i = 1; i < peRows.length; i++) {
+        if (String(peRows[i][idCol]).trim() === peKey) {
+          const dateColNum = peHeaders.indexOf("date") + 1;
+          const typeColNum = peHeaders.indexOf("type") + 1;
+          const descColNum = peHeaders.indexOf("description") + 1;
+          const issColNum  = peHeaders.indexOf("issuedBy") + 1;
+          peSheet.getRange(i + 1, dateColNum).setValue(dateStr);
+          if (typeColNum > 0) peSheet.getRange(i + 1, typeColNum).setValue("Хронометраж");
+          peSheet.getRange(i + 1, descColNum).setValue(text);
+          if (issColNum > 0) peSheet.getRange(i + 1, issColNum).setValue(instructorName || "");
+          updated = true;
+          break;
+        }
+      }
+    }
+  }
+  if (!updated) {
+    savePersonnelEvent(empId, empName, "Хронометраж", dateStr, text, instructorName || "", peKey);
+  }
 }
 
 function updateTimingRecord(p) {
@@ -4156,6 +4394,14 @@ function updateTimingRecord(p) {
   }
   if (rowNum < 0) return json({ ok: false, error: "Запись с таким recordId не найдена — возможно, была удалена. Обновите список." });
 
+  // Запоминаем старую пару empId+дата ДО перезаписи — если замер переносят
+  // на другого сотрудника/другой день, сводную запись личного дела нужно
+  // пересчитать в обеих группах (старой и новой), а не только в новой.
+  const oldRow = rows[rowNum - 1];
+  const oldEmpId = String(oldRow[headers.indexOf("empId")] || "").trim();
+  const oldEmpName = String(oldRow[headers.indexOf("empName")] || "").trim();
+  const oldDateStr = String(oldRow[headers.indexOf("date")] || "").trim();
+
   const dateStr = date || Utilities.formatDate(new Date(), "Asia/Almaty", "dd.MM.yyyy");
   const col = h => headers.indexOf(h) + 1;
   sheet.getRange(rowNum, col("empId")).setValue(empId || "");
@@ -4175,36 +4421,9 @@ function updateTimingRecord(p) {
   sheet.getRange(rowNum, col("summary")).setValue(summary || "");
   if (col("startTime") > 0) sheet.getRange(rowNum, col("startTime")).setNumberFormat("@").setValue(startTime || "");
 
-  // Личное дело: обновляем связанную запись (по evalId = recordId
-  // хронометража), а не создаём новую — тот же паттерн, что у оценок.
-  // Для замеров, сохранённых до появления этой связки, записи нет —
-  // тогда создаём, как при первом сохранении.
-  const peText = timingPersonnelEventText(totalLoadTimeSec, bucketCount, cycleTimeSec, bucketFillPercent, properLoading, truckModel, summary);
-  const peSheet = ss.getSheetByName(SHEET_PERSONNEL_EVENTS);
-  let peUpdated = false;
-  if (peSheet) {
-    const peRows = peSheet.getDataRange().getValues();
-    const peHeaders = peRows[0];
-    const peEvalIdCol = peHeaders.indexOf("evalId");
-    if (peEvalIdCol >= 0) {
-      for (let i = 1; i < peRows.length; i++) {
-        if (String(peRows[i][peEvalIdCol]).trim() === String(recordId).trim()) {
-          const dateColNum = peHeaders.indexOf("date") + 1;
-          const typeColNum = peHeaders.indexOf("type") + 1;
-          const descColNum = peHeaders.indexOf("description") + 1;
-          const issColNum  = peHeaders.indexOf("issuedBy") + 1;
-          peSheet.getRange(i + 1, dateColNum).setValue(dateStr);
-          if (typeColNum > 0) peSheet.getRange(i + 1, typeColNum).setValue("Хронометраж");
-          peSheet.getRange(i + 1, descColNum).setValue(peText);
-          if (issColNum > 0) peSheet.getRange(i + 1, issColNum).setValue(instructorName || "");
-          peUpdated = true;
-          break;
-        }
-      }
-    }
-  }
-  if (!peUpdated) {
-    savePersonnelEvent(empId || "", empName, "Хронометраж", dateStr, peText, instructorName || "", recordId);
+  syncTimingPersonnelEventForDay(ss, empId || "", empName, dateStr, instructorName || "");
+  if (oldEmpId && oldDateStr && (oldEmpId !== (empId || "") || oldDateStr !== dateStr)) {
+    syncTimingPersonnelEventForDay(ss, oldEmpId, oldEmpName, oldDateStr, instructorName || "");
   }
 
   return json({ ok: true, recordId });
@@ -4223,16 +4442,30 @@ function deleteTimingRecord(p) {
     return json({ ok: false, error: "Строка не найдена — список успел измениться, обновите страницу." });
   }
 
+  const headers = sheet.getRange(1,1,1,sheet.getLastColumn()).getValues()[0];
+  const idCol = headers.indexOf("recordId");
+
   if (recordId) {
-    const headers = sheet.getRange(1,1,1,sheet.getLastColumn()).getValues()[0];
-    const idCol = headers.indexOf("recordId");
     const actualId = idCol >= 0 ? String(sheet.getRange(rowNum, idCol + 1).getValue()).trim() : "";
     if (actualId !== String(recordId).trim()) {
       return json({ ok: false, error: "Строка сдвинулась (список изменился параллельно). Обновите страницу и повторите." });
     }
   }
 
+  // Данные строки — до удаления, иначе после deleteRow брать неоткуда, а
+  // без них не пересчитать (или не удалить) сводную запись личного дела.
+  const rowVals = sheet.getRange(rowNum, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const delEmpId = String(rowVals[headers.indexOf("empId")] || "").trim();
+  const delEmpName = String(rowVals[headers.indexOf("empName")] || "").trim();
+  const delDateStr = String(rowVals[headers.indexOf("date")] || "").trim();
+  const delInstructor = String(rowVals[headers.indexOf("instructorName")] || "").trim();
+
   sheet.deleteRow(rowNum);
+
+  if (delEmpId && delDateStr) {
+    syncTimingPersonnelEventForDay(ss, delEmpId, delEmpName, delDateStr, delInstructor);
+  }
+
   return json({ ok: true, deleted: rowNum });
 }
 
