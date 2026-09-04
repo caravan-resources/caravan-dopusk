@@ -4050,14 +4050,24 @@ function getTimingRatingList(p) {
   const operators = Object.keys(byOp).map(key => {
     const o = byOp[key];
     const passportTotal = o.properYes + o.properNo;
+    const avgCycle = o.count ? Math.round((o.sumCycle / o.count) * 10) / 10 : null;
+    const avgFill = o.fillCount ? Math.round((o.sumFill / o.fillCount) * 10) / 10 : null;
+    // Приведённый цикл — основной критерий места в рейтинге (по просьбе
+    // Ивана, 04.09.2026): цикл, пересчитанный так, будто ковш всегда полный
+    // (100%). Неполный ковш означает, что за тот же цикл реально перевезли
+    // меньше породы — значит эффективный цикл у такого оператора хуже
+    // (выше), даже если секундомер показывает быстро. avgFill=0 не даёт
+    // поделить на ноль — тогда приведённый цикл не считается (null).
+    const effectiveCycle = (avgCycle !== null && avgFill) ? Math.round((avgCycle / (avgFill/100)) * 10) / 10 : null;
     return {
       empId: o.empId, empName: o.empName, sizeClass: o.sizeClass,
       models: Object.keys(o.models),
       count: o.count,
       avgTotal: o.count ? Math.round((o.sumTotal / o.count) * 10) / 10 : null,
-      avgCycle: o.count ? Math.round((o.sumCycle / o.count) * 10) / 10 : null,
+      avgCycle: avgCycle,
       avgBuckets: o.bucketCount ? Math.round((o.sumBuckets / o.bucketCount) * 10) / 10 : null,
-      avgFill: o.fillCount ? Math.round((o.sumFill / o.fillCount) * 10) / 10 : null,
+      avgFill: avgFill,
+      effectiveCycle: effectiveCycle,
       properYes: o.properYes, properNo: o.properNo,
       passportRate: passportTotal ? Math.round((o.properYes / passportTotal) * 1000) / 10 : null,
     };
@@ -4065,10 +4075,15 @@ function getTimingRatingList(p) {
 
   // Сортировка: сначала по классу техники (алфавитно — "Большой" раньше
   // "Маленький" по кириллице, не принципиально), внутри класса — по
-  // среднему циклу ковша по возрастанию (короче цикл = быстрее = выше).
+  // приведённому циклу по возрастанию (короче = быстрее и полнее = выше).
+  // Если приведённый цикл не считается (нет данных по наполнению) —
+  // используем обычный цикл как запасной критерий, чтобы такой оператор не
+  // проваливался в конец списка на пустом месте.
   operators.sort((a,b) => {
     if (a.sizeClass !== b.sizeClass) return a.sizeClass.localeCompare(b.sizeClass, "ru");
-    return (a.avgCycle === null ? 999999 : a.avgCycle) - (b.avgCycle === null ? 999999 : b.avgCycle);
+    const av = a.effectiveCycle !== null ? a.effectiveCycle : (a.avgCycle === null ? 999999 : a.avgCycle);
+    const bv = b.effectiveCycle !== null ? b.effectiveCycle : (b.avgCycle === null ? 999999 : b.avgCycle);
+    return av - bv;
   });
 
   // ── Сводка по компании ──────────────────────────────────────
