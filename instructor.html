@@ -3022,6 +3022,7 @@ function renderTimingSummary(records) {
 
   const dataRow = t => `
     <tr>
+      <td style="padding:7px 10px;font-size:12px;color:var(--gray);border-bottom:1px solid #EDE9FE;white-space:nowrap">${t.arrivalTime || "—"}</td>
       <td style="padding:7px 10px;font-size:12px;color:var(--gray);border-bottom:1px solid #EDE9FE;white-space:nowrap">${t.startTime || "—"}</td>
       <td style="padding:7px 10px;font-size:12px;color:var(--gray);border-bottom:1px solid #EDE9FE;white-space:nowrap">${t.truckModel || "—"}</td>
       <td style="padding:7px 10px;font-size:12.5px;color:var(--navy);font-weight:700;border-bottom:1px solid #EDE9FE">${t.totalLoadTimeSec} с</td>
@@ -3035,16 +3036,27 @@ function renderTimingSummary(records) {
     </tr>
   `;
 
-  const pauseRow = pauseMin => {
+  // Если у следующего замера известно время приезда самосвала (и оно
+  // укладывается в разрыв) — показываем простой раздельно: сколько ждали
+  // подвоза (до приезда) и сколько самосвал уже стоял, но погрузка не
+  // началась (после приезда). Без arrivalTime — один общий простой, как раньше.
+  const pauseRow = (pauseMin, nextArrivalMin, prevEndMin, nextStartMin) => {
     const isLong = pauseMin >= 1;
-    const mm = Math.floor(pauseMin);
-    const ss = Math.round((pauseMin - mm) * 60);
-    const label = mm > 0 ? `${mm} мин${ss ? " " + ss + " с" : ""}` : `${ss} с`;
+    const fmt1 = min => {
+      const mm = Math.floor(min), ss = Math.round((min - mm) * 60);
+      return mm > 0 ? `${mm} мин${ss ? " " + ss + " с" : ""}` : `${ss} с`;
+    };
+    let label = `⏸ простой ${fmt1(pauseMin)}`;
+    if (nextArrivalMin !== null && nextArrivalMin >= prevEndMin && nextArrivalMin <= nextStartMin) {
+      const waitMin = nextArrivalMin - prevEndMin;
+      const posMin = nextStartMin - nextArrivalMin;
+      label = `⏸ ждали подвоза ${fmt1(waitMin)}` + (posMin > 0.001 ? ` + стоял без погрузки ${fmt1(posMin)}` : "");
+    }
     return `
       <tr>
-        <td colspan="7" style="padding:5px 10px;font-size:11px;border-bottom:1px solid #EDE9FE;
+        <td colspan="8" style="padding:5px 10px;font-size:11px;border-bottom:1px solid #EDE9FE;
           color:${isLong ? '#B45309' : 'var(--gray)'};background:${isLong ? '#FFFBEB' : 'transparent'}">
-          ⏸ простой ${label}${isLong ? " — техника не работала" : ""}
+          ${label}${isLong ? " — техника не работала" : ""}
         </td>
       </tr>
     `;
@@ -3054,7 +3066,8 @@ function renderTimingSummary(records) {
   withStart.forEach((item, i) => {
     if (i > 0) {
       const pauseMin = item.startMin - withStart[i-1].endMin;
-      if (pauseMin > 0) tableRows += pauseRow(pauseMin);
+      const nextArrivalMin = parseHHMM(item.t.arrivalTime);
+      if (pauseMin > 0) tableRows += pauseRow(pauseMin, nextArrivalMin, withStart[i-1].endMin, item.startMin);
     }
     tableRows += dataRow(item.t);
   });
@@ -3062,9 +3075,9 @@ function renderTimingSummary(records) {
 
   const table = `
     <div style="overflow-x:auto">
-      <table style="border-collapse:collapse;width:100%;min-width:540px">
+      <table style="border-collapse:collapse;width:100%;min-width:600px">
         <thead><tr>
-          ${th("Начало")}${th("Самосвал")}${th("Погрузка")}${th("Ковшей")}${th("Наполн.")}${th("Цикл")}${th("Паспорт")}
+          ${th("Приезд")}${th("Начало")}${th("Самосвал")}${th("Погрузка")}${th("Ковшей")}${th("Наполн.")}${th("Цикл")}${th("Паспорт")}
         </tr></thead>
         <tbody>${tableRows}</tbody>
       </table>
@@ -3192,7 +3205,15 @@ function renderTimingRatingDowntime() {
     return;
   }
   const maxPause = Math.max(...LAST_TIMING_DOWNTIME.map(o => o.avgPauseSec || 0), 1);
-  el.innerHTML = LAST_TIMING_DOWNTIME.map((o,i) => `
+  el.innerHTML = LAST_TIMING_DOWNTIME.map((o,i) => {
+    // Разбивка на «ждали подвоза» / «стоял без погрузки» — только если хотя
+    // бы часть разрывов у этого оператора размечена по arrivalTime
+    // (splitGaps > 0). Иначе показываем общий простой одним числом, как раньше.
+    const hasSplit = o.splitGaps > 0;
+    const splitLabel = hasSplit
+      ? `<span style="color:#B45309">${formatPauseSec(o.avgWaitSec||0)}</span> ждали + <span style="color:#B45309">${formatPauseSec(o.avgPositionSec||0)}</span> стояли`
+      : "";
+    return `
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
       <div style="width:140px;font-size:12px;color:var(--navy);font-weight:700;flex-shrink:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${i+1}. ${escapeHtml(o.empName||"—")}</div>
       <div style="flex:1;background:#F1F5F9;border-radius:6px;height:20px;position:relative;overflow:hidden">
@@ -3201,15 +3222,11 @@ function renderTimingRatingDowntime() {
       <div style="width:110px;font-size:12px;font-weight:700;color:var(--navy);text-align:right;flex-shrink:0">${o.avgPauseSec !== null ? formatPauseSec(o.avgPauseSec) : "—"} <span style="font-weight:400;color:var(--gray)">(${o.gaps})</span></div>
       <div style="width:150px;font-size:11px;color:var(--gray);text-align:right;flex-shrink:0">цикл ${o.avgFullCycleSec ? formatPauseSec(o.avgFullCycleSec) : "—"} · ~${o.maxTrucksPerHour ?? "—"}/ч</div>
     </div>
-  `).join("");
+    ${hasSplit ? `<div style="font-size:11px;color:var(--gray);margin:-2px 0 8px 150px">${splitLabel} <span style="color:var(--gray)">(${o.splitGaps} из ${o.gaps} разрывов размечены по приезду)</span></div>` : ""}
+  `;
+  }).join("");
 }
 
-// Список конкретных критичных простоев (≥1 мин, порог зашит в бэкенде —
-// см. CRITICAL_PAUSE_SEC в getTimingRatingList) и калькулятор «потерянных»
-// самосвалов: сумма критичных простоев / целевой цикл на самосвал.
-// Целевой цикл — редактируемое поле (200-210 сек по разговору с Иваном,
-// 03.09.2026, по умолчанию 205 — середина диапазона), пересчёт мгновенный,
-// без повторного запроса к серверу (все данные уже на клиенте).
 // Список конкретных критичных простоев (≥1 мин, порог зашит в бэкенде —
 // см. CRITICAL_PAUSE_SEC в getTimingRatingList) и калькулятор «потерянных»
 // самосвалов — ОТДЕЛЬНО по каждому оператору (не суммарно по компании: у
@@ -3257,7 +3274,8 @@ function renderCriticalPauses() {
     <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid #FDE68A;font-size:12px">
       <div>
         <b style="color:var(--navy)">${escapeHtml(c.empName||"—")}</b>
-        <span style="color:var(--gray)"> · ${c.date} · ${c.beforeStartTime||"?"} → ${c.afterStartTime||"?"}</span>
+        <span style="color:var(--gray)"> · ${c.date} · ${c.beforeStartTime||"?"} → ${c.arrivalTime ? "🚚"+c.arrivalTime+" → " : ""}${c.afterStartTime||"?"}</span>
+        ${(c.waitSec !== null && c.waitSec !== undefined) ? `<div style="font-size:10.5px;color:var(--gray)">ждали подвоза ${formatPauseSec(c.waitSec)} + стояли без погрузки ${formatPauseSec(c.positionSec||0)}</div>` : ""}
       </div>
       <b style="color:#B45309">${formatPauseSec(c.pauseSec)}</b>
     </div>
