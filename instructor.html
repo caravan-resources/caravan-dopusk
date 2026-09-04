@@ -1550,6 +1550,19 @@ const CFG = {
   WARN_DAYS: 30,
 };
 
+// Экранирование данных, пришедших от пользователя (анкета, чек-листы и т.д.)
+// перед вставкой через innerHTML — без этого поле вида <img onerror=...>
+// выполнится как код в браузере инструктора. Экранируем ВСЕГДА на выводе,
+// а не на входе — так работает даже для того, что уже лежит в таблице.
+function escapeHtml(str) {
+  return String(str ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 // ══════════════════════════════════════════════════════
 // ДАННЫЕ
 // ══════════════════════════════════════════════════════
@@ -2063,7 +2076,7 @@ function renderOpenDefects() {
       border-radius:10px;margin-bottom:8px">
       <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px">
         <span style="font-size:14px;font-weight:800;color:var(--navy)">${o.equipmentId}${o.model?` — ${o.model}`:""}</span>
-        <span style="font-size:11px;color:var(--gray)">${o.empName||"—"} · ${fmtRecordDateTime(o.date)}</span>
+        <span style="font-size:11px;color:var(--gray)">${escapeHtml(o.empName||"—")} · ${fmtRecordDateTime(o.date)}</span>
       </div>
       ${(o.items||[]).map(d => `<div style="font-size:12px;color:var(--red);padding:2px 0">
         ✗ ${d.itemText}${d.comment?` <span style="color:var(--gray)">— ${d.comment}</span>`:""}
@@ -2135,7 +2148,7 @@ function renderDashOperators() {
         <div style="display:flex;gap:8px;align-items:center">
           <span style="font-size:14px;min-width:24px">${["🥇","🥈","🥉"][i]||(i+1)+"."}</span>
           <div>
-            <div style="font-size:13px;font-weight:700;color:var(--navy)">${link(o,o.name)}</div>
+            <div style="font-size:13px;font-weight:700;color:var(--navy)">${link(o, escapeHtml(o.name))}</div>
             <div style="font-size:11px;color:var(--gray)">${o.osmotrs} осм. · ${o.eq.size} ед. техники</div>
           </div>
         </div>
@@ -2154,7 +2167,7 @@ function renderDashOperators() {
       <div style="display:flex;justify-content:space-between;align-items:center;
         padding:9px 11px;background:var(--redbg);border-radius:8px;margin-bottom:6px">
         <div>
-          <div style="font-size:13px;font-weight:700;color:var(--navy)">${link(o,o.name)}</div>
+          <div style="font-size:13px;font-weight:700;color:var(--navy)">${link(o, escapeHtml(o.name))}</div>
           <div style="font-size:11px;color:var(--gray)">${o.eq.size} ед. техники</div>
         </div>
         <div style="text-align:right;font-size:12px;color:var(--red)">
@@ -2274,8 +2287,8 @@ function renderDashboard() {
       <div style="display:flex;justify-content:space-between;align-items:center;
         padding:9px 0;border-bottom:1px solid var(--border)">
         <div>
-          <div style="font-size:13px;font-weight:700;color:var(--navy)">${e.name}</div>
-          <div style="font-size:11px;color:var(--gray)">${e.__kind==="instruktazh"?"🔻 "+e.position:(e.position||"")+" · "+(e.site||"")}</div>
+          <div style="font-size:13px;font-weight:700;color:var(--navy)">${escapeHtml(e.name)}</div>
+          <div style="font-size:11px;color:var(--gray)">${escapeHtml(e.__kind==="instruktazh"?"🔻 "+e.position:(e.position||"")+" · "+(e.site||""))}</div>
         </div>
         <div style="text-align:right">
           <div style="font-size:13px;font-weight:800;color:${color}">${dateLabel}</div>
@@ -2385,7 +2398,7 @@ function renderDashboard() {
             <div style="display:flex;justify-content:space-between;align-items:center">
               <div>
                 <div style="font-size:13px;font-weight:700;color:var(--navy)">${eqLabel}</div>
-                <div style="font-size:11px;color:var(--gray)">${r.empName} · ${fmtRecordDateTime(r.date)}</div>
+                <div style="font-size:11px;color:var(--gray)">${escapeHtml(r.empName)} · ${fmtRecordDateTime(r.date)}</div>
               </div>
               <span style="background:var(--redbg);color:var(--red);font-size:12px;font-weight:700;padding:3px 10px;border-radius:99px">⚠ ${defects.length}</span>
             </div>
@@ -2664,7 +2677,7 @@ function renderDashTimingDetail() {
   const list = groups.slice(0,2);
   el.innerHTML = list.length ? list.map(g => `
     <div style="margin-bottom:14px">
-      <div style="font-size:13px;font-weight:700;color:var(--navy)">${g.empName || "—"}</div>
+      <div style="font-size:13px;font-weight:700;color:var(--navy)">${escapeHtml(g.empName || "—")}</div>
       <div style="font-size:11px;color:var(--gray);margin-bottom:8px">${[g.equipmentModel, g.site, g.date].filter(Boolean).join(" · ")}</div>
       ${renderTimingSummary(g.records||[])}
     </div>`).join("")
@@ -3181,7 +3194,7 @@ function renderTimingRatingDowntime() {
   const maxPause = Math.max(...LAST_TIMING_DOWNTIME.map(o => o.avgPauseSec || 0), 1);
   el.innerHTML = LAST_TIMING_DOWNTIME.map((o,i) => `
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
-      <div style="width:140px;font-size:12px;color:var(--navy);font-weight:700;flex-shrink:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${i+1}. ${o.empName||"—"}</div>
+      <div style="width:140px;font-size:12px;color:var(--navy);font-weight:700;flex-shrink:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${i+1}. ${escapeHtml(o.empName||"—")}</div>
       <div style="flex:1;background:#F1F5F9;border-radius:6px;height:20px;position:relative;overflow:hidden">
         <div style="width:${o.avgPauseSec ? Math.max(4,(o.avgPauseSec/maxPause)*100) : 0}%;background:${o.avgPauseSec>=180?'#DC2626':'#F4A52A'};height:100%;border-radius:6px"></div>
       </div>
@@ -3229,7 +3242,7 @@ function renderCriticalPauses() {
     const lostTrucks = targetSec ? Math.floor(o.criticalSec / targetSec) : null;
     return `
       <div style="padding:10px 12px;background:#fff;border:1px solid #FDE68A;border-radius:8px;margin-bottom:8px">
-        <div style="font-size:13px;font-weight:800;color:var(--navy);margin-bottom:6px">${o.empName||"—"}</div>
+        <div style="font-size:13px;font-weight:800;color:var(--navy);margin-bottom:6px">${escapeHtml(o.empName||"—")}</div>
         <div style="display:flex;gap:20px;flex-wrap:wrap;align-items:baseline">
           <div><span style="font-size:18px;font-weight:800;color:#B45309">${o.criticalCount}</span> <span style="font-size:11px;color:var(--gray)">простоев</span></div>
           <div><span style="font-size:18px;font-weight:800;color:#B45309">${formatPauseSec(o.criticalSec)}</span> <span style="font-size:11px;color:var(--gray)">потеряно</span></div>
@@ -3243,7 +3256,7 @@ function renderCriticalPauses() {
   listEl.innerHTML = LAST_CRITICAL_PAUSES.map(c => `
     <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid #FDE68A;font-size:12px">
       <div>
-        <b style="color:var(--navy)">${c.empName||"—"}</b>
+        <b style="color:var(--navy)">${escapeHtml(c.empName||"—")}</b>
         <span style="color:var(--gray)"> · ${c.date} · ${c.beforeStartTime||"?"} → ${c.afterStartTime||"?"}</span>
       </div>
       <b style="color:#B45309">${formatPauseSec(c.pauseSec)}</b>
@@ -3273,7 +3286,7 @@ function renderTimingRating() {
     const rowsHtml = rows.map((o,i) => `
       <tr>
         <td style="padding:7px 10px;font-size:12px;color:var(--gray);border-bottom:1px solid #EDE9FE">${i+1}</td>
-        <td style="padding:7px 10px;font-size:13px;color:var(--navy);font-weight:700;border-bottom:1px solid #EDE9FE">${o.empName||"—"}</td>
+        <td style="padding:7px 10px;font-size:13px;color:var(--navy);font-weight:700;border-bottom:1px solid #EDE9FE">${escapeHtml(o.empName||"—")}</td>
         <td style="padding:7px 10px;font-size:12px;color:var(--gray);border-bottom:1px solid #EDE9FE">${o.count}</td>
         <td style="padding:7px 10px;font-size:12.5px;color:var(--navy);font-weight:700;border-bottom:1px solid #EDE9FE">${o.avgTotal ?? "—"} с</td>
         <td style="padding:7px 10px;font-size:12.5px;color:var(--navy);font-weight:700;border-bottom:1px solid #EDE9FE">${o.avgBuckets ?? "—"}</td>
@@ -3310,7 +3323,7 @@ function renderTimingRating() {
 function renderEvalJournalCard(e, scoreColor, showSite) {
   const clickable = e.empId
     ? `<span style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted"
-         onclick="goToEmployeeProfile('${String(e.empId).replace(/'/g,"\\'")}')">${e.empName}</span>`
+         onclick="goToEmployeeProfile('${String(e.empId).replace(/'/g,"\\'")}')">${escapeHtml(e.empName)}</span>`
     : e.empName;
 
   const timingHtml = (e.timing && e.timing.length) ? renderTimingSummary(e.timing) : "";
@@ -3321,7 +3334,7 @@ function renderEvalJournalCard(e, scoreColor, showSite) {
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:16px;flex-wrap:wrap">
         <div>
           <div style="font-size:16px;font-weight:800;color:var(--navy)">${clickable}</div>
-          <div style="font-size:12px;color:var(--gray);margin-top:2px">${e.position||""}${e.equipmentModel?" · "+e.equipmentModel:""}${e.workType?" · "+e.workType:""}${showSite && e.site?" · 📍 "+e.site:""}</div>
+          <div style="font-size:12px;color:var(--gray);margin-top:2px">${escapeHtml(e.position||"")}${e.equipmentModel?" · "+e.equipmentModel:""}${e.workType?" · "+e.workType:""}${showSite && e.site?" · 📍 "+e.site:""}</div>
         </div>
         <div style="text-align:center">
           <div style="font-size:22px;font-weight:800;color:${scoreColor(e.overallAvg)}">${e.overallAvg}</div>
@@ -3577,8 +3590,8 @@ function renderRequirementsPanel() {
         if (testTitles.length) parts.push(`тесты: ${testTitles.join(", ")}`);
         if ((r.requiredCourses||[]).length) parts.push(`курсы: ${r.requiredCourses.join(", ")}`);
         return `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px">
-          <div><b>${r.position}</b> <span style="color:var(--gray)">— ${parts.join(" · ")}</span></div>
-          <button class="btn btn-ghost" style="width:auto;padding:4px 12px;font-size:12px" onclick="editRequirement('${r.position.replace(/'/g,"\\'")}')">Изменить</button>
+          <div><b>${escapeHtml(r.position)}</b> <span style="color:var(--gray)">— ${parts.join(" · ")}</span></div>
+          <button class="btn btn-ghost" style="width:auto;padding:4px 12px;font-size:12px" onclick="editRequirement('${escapeHtml(r.position.replace(/'/g,"\\'"))}')">Изменить</button>
         </div>`;
       }).join("")
     : `<div style="font-size:12px;color:var(--gray);margin-top:12px">Пока ни для одной должности требования не заданы.</div>`;
@@ -3677,13 +3690,13 @@ function renderAccessTable() {
           }
           <label style="cursor:pointer;font-size:16px;line-height:1" title="Загрузить фото">
             <input type="file" accept="image/*" style="display:none"
-              onchange="uploadPhoto(event,'${e.id}','${e.name}')">
+              onchange="uploadPhoto(event,'${e.id}','${escapeHtml(e.name)}')">
             📷
           </label>
         </div>
       </td>
-      <td><div class="emp-name">${e.name||"—"}</div></td>
-      <td style="color:var(--gray);font-size:12px">${e.position||"—"}</td>
+      <td><div class="emp-name">${escapeHtml(e.name||"—")}</div></td>
+      <td style="color:var(--gray);font-size:12px">${escapeHtml(e.position||"—")}</td>
       <td><span class="badge b-gray">${e.site||"—"}</span></td>
       <td style="color:var(--gray)">${fmtDate(e.passDate)}</td>
       <td style="font-weight:700;color:${st==="expired"?"var(--red)":st==="warning"?"var(--yellow)":"var(--navy)"}">
@@ -3916,8 +3929,8 @@ function renderPrintSelect() {
           <input type="checkbox" checked onchange="togglePrint('${e.id}')"
             style="width:16px;height:16px;accent-color:var(--gold)">
           <div>
-            <div style="font-size:13px;font-weight:700;color:var(--navy)">${e.name}</div>
-            <div style="font-size:11px;color:var(--gray)">${e.position||""} · ${e.site||""}</div>
+            <div style="font-size:13px;font-weight:700;color:var(--navy)">${escapeHtml(e.name)}</div>
+            <div style="font-size:11px;color:var(--gray)">${escapeHtml(e.position||"")} · ${e.site||""}</div>
           </div>
         </label>`).join("");
     }
@@ -3947,8 +3960,8 @@ function renderPrintSelect() {
         <input type="checkbox" ${sel?"checked":""} onchange="togglePrint('${e.id}')"
           style="width:16px;height:16px;accent-color:var(--gold)">
         <div>
-          <div style="font-size:13px;font-weight:700;color:var(--navy)">${e.name}</div>
-          <div style="font-size:11px;color:var(--gray)">${e.position||""} · ${e.site||""}</div>
+          <div style="font-size:13px;font-weight:700;color:var(--navy)">${escapeHtml(e.name)}</div>
+          <div style="font-size:11px;color:var(--gray)">${escapeHtml(e.position||"")} · ${e.site||""}</div>
         </div>
       </label>`;
     }).join("");
@@ -4132,7 +4145,7 @@ function cardHTML(emp) {
           <div class="card-name-fit" style="font-size:14pt;font-weight:700;color:#0B1A35;
             text-transform:uppercase;line-height:1.05;letter-spacing:.01em;
             word-break:break-word">
-            ${(emp.name||"— — —")}
+            ${escapeHtml((emp.name||"— — —"))}
           </div>
         </div>
 
@@ -4274,7 +4287,7 @@ function drivingSelectItemHTML(t, sel) {
     <input type="checkbox" ${sel?"checked":""} onchange="toggleDrivingPrint('${key}')"
       style="width:16px;height:16px;accent-color:var(--gold)">
     <div>
-      <div style="font-size:13px;font-weight:700;color:var(--navy)">${t.empName||"—"}</div>
+      <div style="font-size:13px;font-weight:700;color:var(--navy)">${escapeHtml(t.empName||"—")}</div>
       <div style="font-size:11px;color:var(--gray)">действителен до ${fmtDate(t.validUntil)}</div>
     </div>
   </label>`;
@@ -4404,7 +4417,7 @@ function certSelectItemHTML(t, sel, kind) {
     <input type="checkbox" ${sel?"checked":""} onchange="toggleCertPrint('${key}','${kind}')"
       style="width:16px;height:16px;accent-color:#0EA5A0">
     <div>
-      <div style="font-size:13px;font-weight:700;color:var(--navy)">${t.empName||"—"}</div>
+      <div style="font-size:13px;font-weight:700;color:var(--navy)">${escapeHtml(t.empName||"—")}</div>
       <div style="font-size:11px;color:var(--gray)">${t.course||"—"} · ${t.date||""}</div>
     </div>
   </label>`;
@@ -4508,7 +4521,7 @@ function certCardHTML(t) {
             <div class="card-name-fit" style="font-size:13pt;font-weight:700;color:#0B1A35;
               text-transform:uppercase;line-height:1.05;letter-spacing:.01em;
               word-break:break-word">
-              ${(t.empName||"— — —")}
+              ${escapeHtml((t.empName||"— — —"))}
             </div>
             <div style="margin-top:1.5mm">
               <span style="display:inline-block;background:#FDF1F4;color:#9C2748;
@@ -4599,7 +4612,7 @@ function certCardHTML(t) {
           <div class="card-name-fit" style="font-size:13pt;font-weight:700;color:#0B1A35;
             text-transform:uppercase;line-height:1.05;letter-spacing:.01em;
             word-break:break-word">
-            ${(t.empName||"— — —")}
+            ${escapeHtml((t.empName||"— — —"))}
           </div>
           <div style="margin-top:1.5mm">
             <span style="display:inline-block;background:#ECFEFF;color:#0C8C88;
@@ -4767,7 +4780,7 @@ function renderTrainingTable() {
         ${fmtDate(r.date)}
       </td>
       <td style="padding:10px 12px;font-weight:700;color:var(--navy);font-size:13px">
-        ${r.empName||"—"}
+        ${escapeHtml(r.empName||"—")}
       </td>
       <td style="padding:10px 12px;color:var(--gray);font-size:13px">
         ${trainingSiteOf(r) || "—"}
@@ -4933,8 +4946,8 @@ function renderPersonnelList() {
         display:flex;justify-content:space-between;align-items:center;background:#fff"
       onmouseover="this.style.background='var(--light)'" onmouseout="this.style.background='#fff'">
       <div>
-        <div style="font-weight:700;color:var(--navy);font-size:13px">${e.name||"—"}</div>
-        <div style="font-size:11px;color:var(--gray)">${e.position||"—"} · ${e.site||""}</div>
+        <div style="font-weight:700;color:var(--navy);font-size:13px">${escapeHtml(e.name||"—")}</div>
+        <div style="font-size:11px;color:var(--gray)">${escapeHtml(e.position||"—")} · ${e.site||""}</div>
       </div>
       <div style="text-align:right">
         <div style="font-size:11px;color:var(--gray);font-family:monospace">${e.id||""}</div>
@@ -5000,18 +5013,18 @@ function selectPersonnelEmployee(id) {
               : `<div style="width:168px;height:168px;border-radius:50%;background:var(--light);border:2px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--gray)">фото</div>`}
             <span style="position:absolute;bottom:2px;right:2px;background:var(--navy);color:#fff;font-size:20px;
               width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;border:2px solid #fff">✏</span>
-            <input type="file" accept="image/*" style="display:none" onchange="uploadPhoto(event,'${emp.id}','${(emp.name||"").replace(/'/g,"\\'")}')">
+            <input type="file" accept="image/*" style="display:none" onchange="uploadPhoto(event,'${emp.id}','${escapeHtml((emp.name||"").replace(/'/g,"\\'"))}')">
           </label>
           <div>
-            <div style="font-size:20px;font-weight:800;color:var(--navy)">${emp.name||"—"}</div>
-            <div style="font-size:13px;color:var(--gray);margin-top:2px">${emp.position||"—"} · ${emp.site||"—"}</div>
+            <div style="font-size:20px;font-weight:800;color:var(--navy)">${escapeHtml(emp.name||"—")}</div>
+            <div style="font-size:13px;color:var(--gray);margin-top:2px">${escapeHtml(emp.position||"—")} · ${emp.site||"—"}</div>
             <div style="font-size:11px;color:var(--gray);font-family:monospace;margin-top:4px">${emp.id||""}</div>
           </div>
         </div>
         <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
           <button class="btn btn-ghost" onclick="openEditEmployeeModal('${emp.id}')">✏ Редактировать карточку</button>
-          <button class="btn btn-ghost" onclick="openEventModal('${emp.id}','${(emp.name||"").replace(/'/g,"\\'")}')">+ Событие в личное дело</button>
-          <button class="btn btn-ghost" style="color:var(--red);font-size:12px" onclick="deleteEmployeeProfile('${emp.id}','${(emp.name||"").replace(/'/g,"\\'")}')">🗑 Удалить профиль</button>
+          <button class="btn btn-ghost" onclick="openEventModal('${emp.id}','${escapeHtml((emp.name||"").replace(/'/g,"\\'"))}')">+ Событие в личное дело</button>
+          <button class="btn btn-ghost" style="color:var(--red);font-size:12px" onclick="deleteEmployeeProfile('${emp.id}','${escapeHtml((emp.name||"").replace(/'/g,"\\'"))}')">🗑 Удалить профиль</button>
         </div>
       </div>
 
@@ -5023,17 +5036,17 @@ function selectPersonnelEmployee(id) {
 
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;font-size:12px">
         <div><span style="color:var(--gray)">ТОО (основное):</span> <b>${emp.tooPrimary||"—"}</b></div>
-        <div><span style="color:var(--gray)">ТОО (доп.):</span> <b>${emp.tooSecondary||"—"}</b></div>
+        <div><span style="color:var(--gray)">ТОО (доп.):</span> <b>${escapeHtml(emp.tooSecondary||"—")}</b></div>
         <div><span style="color:var(--gray)">Дата приёма:</span> <b>${fmtDate(emp.hireDate)}</b></div>
-        <div><span style="color:var(--gray)">Телефон:</span> <b>${emp.phone||"—"}</b></div>
-        <div style="grid-column:1/-1"><span style="color:var(--gray)">Адрес:</span> <b>${emp.address||"—"}</b></div>
-        <div><span style="color:var(--gray)">Образование:</span> <b>${emp.education||"—"}</b></div>
-        <div><span style="color:var(--gray)">Стаж по профессии:</span> <b>${emp.experienceYears?emp.experienceYears+" лет":"—"}</b></div>
-        <div style="grid-column:1/-1"><span style="color:var(--gray)">Специальности:</span> <b>${emp.specialties||"—"}</b></div>
-        <div style="grid-column:1/-1"><span style="color:var(--gray)">Доп. компетенции:</span> <b>${emp.additionalSkills||"—"}</b></div>
-        <div><span style="color:var(--gray)">Почта:</span> <b>${emp.email||"—"}</b></div>
-        <div style="grid-column:1/-1"><span style="color:var(--gray)">Сертификаты:</span> <b>${emp.certificates||"—"}</b></div>
-        <div style="grid-column:1/-1"><span style="color:var(--gray)">Курсы:</span> <b>${emp.courses||"—"}</b></div>
+        <div><span style="color:var(--gray)">Телефон:</span> <b>${escapeHtml(emp.phone||"—")}</b></div>
+        <div style="grid-column:1/-1"><span style="color:var(--gray)">Адрес:</span> <b>${escapeHtml(emp.address||"—")}</b></div>
+        <div><span style="color:var(--gray)">Образование:</span> <b>${escapeHtml(emp.education||"—")}</b></div>
+        <div><span style="color:var(--gray)">Стаж по профессии:</span> <b>${escapeHtml(emp.experienceYears?emp.experienceYears+" лет":"—")}</b></div>
+        <div style="grid-column:1/-1"><span style="color:var(--gray)">Специальности:</span> <b>${escapeHtml(emp.specialties||"—")}</b></div>
+        <div style="grid-column:1/-1"><span style="color:var(--gray)">Доп. компетенции:</span> <b>${escapeHtml(emp.additionalSkills||"—")}</b></div>
+        <div><span style="color:var(--gray)">Почта:</span> <b>${escapeHtml(emp.email||"—")}</b></div>
+        <div style="grid-column:1/-1"><span style="color:var(--gray)">Сертификаты:</span> <b>${escapeHtml(emp.certificates||"—")}</b></div>
+        <div style="grid-column:1/-1"><span style="color:var(--gray)">Курсы:</span> <b>${escapeHtml(emp.courses||"—")}</b></div>
       </div>
 
       <div style="padding:10px 12px;background:var(--light);border-radius:10px;margin-bottom:16px;
@@ -5059,7 +5072,7 @@ function selectPersonnelEmployee(id) {
               ${gap.coursesMissing.map(c=>`<span style="background:var(--redbg);color:var(--red);font-size:11px;font-weight:700;padding:3px 9px;border-radius:99px">✗ ${c}</span>`).join("")}
             </div>
           ` : ""}
-        ` : `<div style="font-size:12px;color:var(--gray)">Для должности «${emp.position||"—"}» требования не заданы.</div>`}
+        ` : `<div style="font-size:12px;color:var(--gray)">Для должности «${escapeHtml(emp.position||"—")}» требования не заданы.</div>`}
       </div>
 
       <div style="margin-bottom:16px">
@@ -5225,7 +5238,7 @@ function showTestReview(resultId, filter) {
   };
 
   openModal(`
-    <div style="font-size:16px;font-weight:800;color:var(--navy);margin-bottom:2px">${r.empName}</div>
+    <div style="font-size:16px;font-weight:800;color:var(--navy);margin-bottom:2px">${escapeHtml(r.empName)}</div>
     <div style="font-size:13px;color:var(--gray);margin-bottom:4px">${r.testTitle}</div>
     <div style="font-size:12px;color:var(--gray);margin-bottom:10px">
       ${fmtDate(r.date)} ${r.time||""} · результат
@@ -5373,7 +5386,7 @@ async function submitHire(force) {
       const w = document.getElementById("hireWarning");
       w.style.display = "block";
       w.innerHTML = `⚠ ${data.message}<br><br>` +
-        data.candidates.map(c=>`• ${c.name} (${c.id})`).join("<br>") +
+        data.candidates.map(c=>`• ${escapeHtml(c.name)} (${c.id})`).join("<br>") +
         `<br><br><button class="btn btn-gold" onclick="submitHire(true)" style="width:100%;margin-top:8px">Всё равно создать нового</button>`;
       return;
     }
@@ -5392,7 +5405,7 @@ async function submitHire(force) {
 
 function openEventModal(empId, empName) {
   openModal(`
-    <div style="font-size:16px;font-weight:800;color:var(--navy);margin-bottom:16px">Событие в личное дело — ${empName}</div>
+    <div style="font-size:16px;font-weight:800;color:var(--navy);margin-bottom:16px">Событие в личное дело — ${escapeHtml(empName)}</div>
     <div style="display:flex;flex-direction:column;gap:10px">
       <select id="eventType" style="padding:10px;border:1px solid var(--border);border-radius:8px">
         <option value="поощрение">Поощрение</option>
@@ -5408,7 +5421,7 @@ function openEventModal(empId, empName) {
     </div>
     <div style="display:flex;gap:8px;margin-top:16px">
       <button class="btn btn-ghost" onclick="closeModal()" style="flex:1">Отмена</button>
-      <button class="btn btn-gold" onclick="submitPersonnelEvent('${empId}','${empName.replace(/'/g,"\\'")}')" style="flex:1">Сохранить</button>
+      <button class="btn btn-gold" onclick="submitPersonnelEvent('${empId}','${escapeHtml(empName.replace(/'/g,"\\'"))}')" style="flex:1">Сохранить</button>
     </div>
   `);
 }
@@ -5453,17 +5466,17 @@ function openEditEmployeeModal(id) {
   const esc = s => String(s||"").replace(/"/g,"&quot;");
 
   openModal(`
-    <div style="font-size:16px;font-weight:800;color:var(--navy);margin-bottom:16px">✏ Редактировать — ${emp.name||""}</div>
+    <div style="font-size:16px;font-weight:800;color:var(--navy);margin-bottom:16px">✏ Редактировать — ${escapeHtml(emp.name||"")}</div>
     <div style="display:flex;flex-direction:column;gap:10px">
       <input id="editName" placeholder="ФИО" value="${esc(emp.name)}" style="padding:10px;border:1px solid var(--border);border-radius:8px">
       <select id="editPosition" onchange="togglePositionOther(this.value,'edit')" style="padding:10px;border:1px solid var(--border);border-radius:8px">
         <option value="">Должность — выберите</option>
-        ${EDIT_POSITIONS.map(p=>`<option value="${p}" ${emp.position===p?"selected":""}>${p}</option>`).join("")}
-        <option value="__other__" ${!isPreset && emp.position ? "selected" : ""}>Другое (указать)</option>
+        ${EDIT_POSITIONS.map(p=>`<option value="${p}" ${escapeHtml(emp.position===p?"selected":"")}>${p}</option>`).join("")}
+        <option value="__other__" ${escapeHtml(!isPreset && emp.position ? "selected" : "")}>Другое (указать)</option>
       </select>
       <input type="text" id="editPositionOther" placeholder="Укажите должность"
-        value="${!isPreset ? esc(emp.position) : ""}"
-        style="display:${!isPreset && emp.position ? "block" : "none"};padding:10px;border:1px solid var(--border);border-radius:8px">
+        value="${escapeHtml(!isPreset ? esc(emp.position) : "")}"
+        style="display:${escapeHtml(!isPreset && emp.position ? "block" : "none")};padding:10px;border:1px solid var(--border);border-radius:8px">
       <select id="editSite" style="padding:10px;border:1px solid var(--border);border-radius:8px">
         <option value="" ${!(emp.site||"").trim()?"selected":""}>Участок — не указан</option>
         <option value="Алмалы" ${(emp.site||"").trim()==="Алмалы"?"selected":""}>Алмалы</option>
@@ -5475,21 +5488,21 @@ function openEditEmployeeModal(id) {
         <option value="CL" ${emp.tooPrimary==="CL"?"selected":""}>ТОО «Караван Логистик» (CL)</option>
       </select>
       <select id="editTooSecondary" style="padding:10px;border:1px solid var(--border);border-radius:8px">
-        <option value="" ${!emp.tooSecondary?"selected":""}>Второе ТОО — нет</option>
-        <option value="SRC" ${emp.tooSecondary==="SRC"?"selected":""}>ТОО «Saryarka Resources Capital» (SRC)</option>
-        <option value="КУ" ${emp.tooSecondary==="КУ"?"selected":""}>ТОО «Караван Улытау» (КУ)</option>
-        <option value="CL" ${emp.tooSecondary==="CL"?"selected":""}>ТОО «Караван Логистик» (CL)</option>
+        <option value="" ${escapeHtml(!emp.tooSecondary?"selected":"")}>Второе ТОО — нет</option>
+        <option value="SRC" ${escapeHtml(emp.tooSecondary==="SRC"?"selected":"")}>ТОО «Saryarka Resources Capital» (SRC)</option>
+        <option value="КУ" ${escapeHtml(emp.tooSecondary==="КУ"?"selected":"")}>ТОО «Караван Улытау» (КУ)</option>
+        <option value="CL" ${escapeHtml(emp.tooSecondary==="CL"?"selected":"")}>ТОО «Караван Логистик» (CL)</option>
       </select>
       <input id="editPhone" placeholder="Телефон" value="${esc(emp.phone)}" style="padding:10px;border:1px solid var(--border);border-radius:8px">
       <input id="editEmail" type="email" placeholder="Электронная почта" value="${esc(emp.email)}" style="padding:10px;border:1px solid var(--border);border-radius:8px">
       <input id="editAddress" placeholder="Адрес" value="${esc(emp.address)}" style="padding:10px;border:1px solid var(--border);border-radius:8px">
       <select id="editEducation" style="padding:10px;border:1px solid var(--border);border-radius:8px">
-        <option value="" ${!emp.education?"selected":""}>Образование — не указано</option>
-        <option value="Среднее общее" ${emp.education==="Среднее общее"?"selected":""}>Среднее общее</option>
-        <option value="Среднее специальное (ТиПО)" ${emp.education==="Среднее специальное (ТиПО)"?"selected":""}>Среднее специальное (ТиПО)</option>
-        <option value="Незаконченное высшее" ${emp.education==="Незаконченное высшее"?"selected":""}>Незаконченное высшее</option>
-        <option value="Высшее техническое" ${emp.education==="Высшее техническое"?"selected":""}>Высшее техническое</option>
-        <option value="Высшее нетехническое" ${emp.education==="Высшее нетехническое"?"selected":""}>Высшее нетехническое</option>
+        <option value="" ${escapeHtml(!emp.education?"selected":"")}>Образование — не указано</option>
+        <option value="Среднее общее" ${escapeHtml(emp.education==="Среднее общее"?"selected":"")}>Среднее общее</option>
+        <option value="Среднее специальное (ТиПО)" ${escapeHtml(emp.education==="Среднее специальное (ТиПО)"?"selected":"")}>Среднее специальное (ТиПО)</option>
+        <option value="Незаконченное высшее" ${escapeHtml(emp.education==="Незаконченное высшее"?"selected":"")}>Незаконченное высшее</option>
+        <option value="Высшее техническое" ${escapeHtml(emp.education==="Высшее техническое"?"selected":"")}>Высшее техническое</option>
+        <option value="Высшее нетехническое" ${escapeHtml(emp.education==="Высшее нетехническое"?"selected":"")}>Высшее нетехническое</option>
       </select>
       <input id="editExperience" type="number" min="0" max="60" step="0.01" placeholder="Стаж по профессии (лет)"
         value="${esc(String(emp.experienceYears||"").trim().replace(",","."))}"
@@ -5502,9 +5515,9 @@ function openEditEmployeeModal(id) {
           </label>
         `).join("")}
       </div>
-      <textarea id="editAdditionalSkills" placeholder="Доп. компетенции: тренер, инженер, кат. Б и т.п." rows="2" style="padding:10px;border:1px solid var(--border);border-radius:8px;font-family:inherit;resize:vertical">${emp.additionalSkills||""}</textarea>
-      <textarea id="editCertificates" placeholder="Сертификаты" rows="2" style="padding:10px;border:1px solid var(--border);border-radius:8px;font-family:inherit;resize:vertical">${emp.certificates||""}</textarea>
-      <textarea id="editCourses" placeholder="Курсы" rows="2" style="padding:10px;border:1px solid var(--border);border-radius:8px;font-family:inherit;resize:vertical">${emp.courses||""}</textarea>
+      <textarea id="editAdditionalSkills" placeholder="Доп. компетенции: тренер, инженер, кат. Б и т.п." rows="2" style="padding:10px;border:1px solid var(--border);border-radius:8px;font-family:inherit;resize:vertical">${escapeHtml(emp.additionalSkills||"")}</textarea>
+      <textarea id="editCertificates" placeholder="Сертификаты" rows="2" style="padding:10px;border:1px solid var(--border);border-radius:8px;font-family:inherit;resize:vertical">${escapeHtml(emp.certificates||"")}</textarea>
+      <textarea id="editCourses" placeholder="Курсы" rows="2" style="padding:10px;border:1px solid var(--border);border-radius:8px;font-family:inherit;resize:vertical">${escapeHtml(emp.courses||"")}</textarea>
       <label style="font-size:11px;color:var(--gray)">Дата приёма
         <input id="editHireDate" type="date" value="${toDateInputValue(emp.hireDate)}" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;margin-top:4px">
       </label>
@@ -5572,7 +5585,7 @@ function openEditEventModal(row) {
   if (!ev) { alert("Запись не найдена — обновите список"); return; }
 
   openModal(`
-    <div style="font-size:16px;font-weight:800;color:var(--navy);margin-bottom:16px">✏ Событие — ${ev.empName||""}</div>
+    <div style="font-size:16px;font-weight:800;color:var(--navy);margin-bottom:16px">✏ Событие — ${escapeHtml(ev.empName||"")}</div>
     <div style="display:flex;flex-direction:column;gap:10px">
       <select id="editEventType" style="padding:10px;border:1px solid var(--border);border-radius:8px">
         <option value="поощрение" ${ev.type==="поощрение"?"selected":""}>Поощрение</option>
@@ -5662,7 +5675,7 @@ function renderSurveysList() {
         <div style="display:flex;gap:10px;align-items:flex-start">
           ${s.photoUrl ? `<img src="${s.photoUrl}" loading="lazy" decoding="async" referrerpolicy="no-referrer" style="width:44px;height:44px;border-radius:50%;object-fit:cover;flex-shrink:0;border:1.5px solid var(--border)">` : ""}
           <div>
-            <div style="font-weight:700;color:var(--navy);font-size:14px">${s.empName}</div>
+            <div style="font-weight:700;color:var(--navy);font-size:14px">${escapeHtml(s.empName)}</div>
             <div style="font-size:11px;color:var(--gray)">
               ${s.empId ? "Найден в базе: " + s.empId : "⚠ Новый профиль — не найден в базе"}
               · подано ${s.submittedAt}
@@ -5671,20 +5684,20 @@ function renderSurveysList() {
         </div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12px;margin-bottom:10px">
-        <div><span style="color:var(--gray)">Должность:</span> <b>${s.position||"—"}</b></div>
+        <div><span style="color:var(--gray)">Должность:</span> <b>${escapeHtml(s.position||"—")}</b></div>
         <div><span style="color:var(--gray)">Участок:</span> <b>${s.site||"—"}</b></div>
         <div><span style="color:var(--gray)">ТОО:</span> <b>${tooNames[s.too]||s.too||"—"}</b></div>
-        <div><span style="color:var(--gray)">ТОО (доп.):</span> <b>${tooNames[s.tooSecondary]||s.tooSecondary||"—"}</b></div>
+        <div><span style="color:var(--gray)">ТОО (доп.):</span> <b>${escapeHtml(tooNames[s.tooSecondary]||s.tooSecondary||"—")}</b></div>
         <div><span style="color:var(--gray)">Дата приёма:</span> <b>${fmtDate(s.hireDate)}</b></div>
-        <div><span style="color:var(--gray)">Телефон:</span> <b>${s.phone||"—"}</b></div>
-        <div style="grid-column:1/-1"><span style="color:var(--gray)">Адрес:</span> <b>${s.address||"—"}</b></div>
-        <div><span style="color:var(--gray)">Образование:</span> <b>${s.education||"—"}</b></div>
-        <div><span style="color:var(--gray)">Стаж:</span> <b>${s.experienceYears?s.experienceYears+" лет":"—"}</b></div>
-        <div style="grid-column:1/-1"><span style="color:var(--gray)">Специальности:</span> <b>${s.specialties||"—"}</b></div>
-        <div style="grid-column:1/-1"><span style="color:var(--gray)">Доп. компетенции:</span> <b>${s.additionalSkills||"—"}</b></div>
-        <div><span style="color:var(--gray)">Почта:</span> <b>${s.email||"—"}</b></div>
-        <div style="grid-column:1/-1"><span style="color:var(--gray)">Сертификаты:</span> <b>${s.certificates||"—"}</b></div>
-        <div style="grid-column:1/-1"><span style="color:var(--gray)">Курсы:</span> <b>${s.courses||"—"}</b></div>
+        <div><span style="color:var(--gray)">Телефон:</span> <b>${escapeHtml(s.phone||"—")}</b></div>
+        <div style="grid-column:1/-1"><span style="color:var(--gray)">Адрес:</span> <b>${escapeHtml(s.address||"—")}</b></div>
+        <div><span style="color:var(--gray)">Образование:</span> <b>${escapeHtml(s.education||"—")}</b></div>
+        <div><span style="color:var(--gray)">Стаж:</span> <b>${escapeHtml(s.experienceYears?s.experienceYears+" лет":"—")}</b></div>
+        <div style="grid-column:1/-1"><span style="color:var(--gray)">Специальности:</span> <b>${escapeHtml(s.specialties||"—")}</b></div>
+        <div style="grid-column:1/-1"><span style="color:var(--gray)">Доп. компетенции:</span> <b>${escapeHtml(s.additionalSkills||"—")}</b></div>
+        <div><span style="color:var(--gray)">Почта:</span> <b>${escapeHtml(s.email||"—")}</b></div>
+        <div style="grid-column:1/-1"><span style="color:var(--gray)">Сертификаты:</span> <b>${escapeHtml(s.certificates||"—")}</b></div>
+        <div style="grid-column:1/-1"><span style="color:var(--gray)">Курсы:</span> <b>${escapeHtml(s.courses||"—")}</b></div>
       </div>
       <div style="display:flex;gap:8px">
         <button class="btn btn-ghost" onclick="handleRejectSurvey(${s.__row})" style="flex:1">Отклонить</button>
@@ -6091,7 +6104,7 @@ function renderChecklistAnalytics(site) {
         <div style="padding:8px 0;border-bottom:1px solid var(--border);font-size:13px">
           <div style="display:flex;justify-content:space-between;align-items:baseline">
             <span style="font-weight:700;color:var(--navy)">${eqLabel}</span>
-            <span style="font-size:11px;color:var(--gray)">${c.empName} · ${fmtRecordDateTime(c.date)}</span>
+            <span style="font-size:11px;color:var(--gray)">${escapeHtml(c.empName)} · ${fmtRecordDateTime(c.date)}</span>
           </div>
           <div style="font-size:11px;color:var(--gray);margin-top:2px">${c.itemText}${c.status==='defect'?' (неисправно)':''}</div>
           <div style="margin-top:2px">${c.comment}</div>
@@ -6144,7 +6157,7 @@ function renderChecklistRecordsList(site) {
         <div style="display:flex;justify-content:space-between;align-items:center;cursor:pointer" onclick="toggleChecklistRecord('${detailId}')">
           <div>
             <div style="font-weight:700;color:var(--navy)">${eqLabel}</div>
-            <div style="font-size:12px;color:var(--gray)">${r.empName} · ${fmtRecordDateTime(r.date)}</div>
+            <div style="font-size:12px;color:var(--gray)">${escapeHtml(r.empName)} · ${fmtRecordDateTime(r.date)}</div>
           </div>
           ${defects.length > 0
             ? `<span style="background:var(--redbg);color:var(--red);font-size:12px;font-weight:700;padding:3px 10px;border-radius:99px">⚠ ${defects.length} неисправност${defects.length===1?'ь':defects.length<5?'и':'ей'}</span>`
@@ -6559,7 +6572,7 @@ function renderFuelRecordsList(site) {
       <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);font-size:13px">
         <div>
           <div style="font-weight:700;color:var(--navy)">${eqLabel}</div>
-          <div style="font-size:11px;color:var(--gray)">${f.empName||"—"} · ${fmtRecordDateTime(f.date)} · ${shift === "День" ? "☀ день" : "🌙 ночь"}</div>
+          <div style="font-size:11px;color:var(--gray)">${escapeHtml(f.empName||"—")} · ${fmtRecordDateTime(f.date)} · ${shift === "День" ? "☀ день" : "🌙 ночь"}</div>
         </div>
         <span style="font-weight:800;color:var(--navy2)">${Number(f.amountLiters)||0} л</span>
       </div>
@@ -6684,7 +6697,7 @@ function renderFuelEquipmentHistory(site) {
           return `<tr>
             <td>${fmtRecordDateTime(f.date)}</td>
             <td>${shift === "День" ? "☀ день" : shift === "Ночь" ? "🌙 ночь" : "—"}</td>
-            <td>${f.empName||"—"}</td>
+            <td>${escapeHtml(f.empName||"—")}</td>
             <td><b>${Number(f.amountLiters)||0} л</b></td>
           </tr>`;
         }).join("")}</tbody>
@@ -6888,7 +6901,7 @@ function shiftPersonLine(a, ctx) {
     ? `<span style="color:var(--navy);font-weight:700;cursor:pointer;text-decoration:underline;text-decoration-style:dotted"
          onclick="goToEmployeeProfile('${String(a.empId).replace(/'/g,"\\'")}')">${text}</span>`
     : `<span style="color:var(--navy);font-weight:500">${text}</span>`;
-  const editCtx = `${a.__row}, '${String(ctx.equipmentId||"").replace(/'/g,"\\'")}', '${String(ctx.position||"").replace(/'/g,"\\'")}', '${ctx.vahta}', ${a.smena}, '${String(a.empId||"").replace(/'/g,"\\'")}', '${String(a.empName||"").replace(/'/g,"\\'")}', '${a.status}', '${a.dismissDate||""}', '${ctx.site}'`;
+  const editCtx = `${a.__row}, '${String(ctx.equipmentId||"").replace(/'/g,"\\'")}', '${escapeHtml(String(ctx.position||"").replace(/'/g,"\\'"))}', '${ctx.vahta}', ${a.smena}, '${String(a.empId||"").replace(/'/g,"\\'")}', '${escapeHtml(String(a.empName||"").replace(/'/g,"\\'"))}', '${a.status}', '${a.dismissDate||""}', '${ctx.site}'`;
   return `<div style="display:flex;align-items:center;gap:5px;font-size:11px;padding:2px 0">
     <span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${color};flex-shrink:0"></span>
     <span style="color:var(--gray);font-weight:700;min-width:34px;flex-shrink:0">${label}</span>
@@ -6899,7 +6912,7 @@ function shiftPersonLine(a, ctx) {
 
 function shiftEmptySlotLine(smenaNum, ctx) {
   const label = SMENA_LABEL[smenaNum] || String(smenaNum);
-  const addCtx = `null, '${String(ctx.equipmentId||"").replace(/'/g,"\\'")}', '${String(ctx.position||"").replace(/'/g,"\\'")}', '${ctx.vahta}', ${smenaNum}, '', '', 'активен', '', '${ctx.site}'`;
+  const addCtx = `null, '${String(ctx.equipmentId||"").replace(/'/g,"\\'")}', '${escapeHtml(String(ctx.position||"").replace(/'/g,"\\'"))}', '${ctx.vahta}', ${smenaNum}, '', '', 'активен', '', '${ctx.site}'`;
   return `<div style="display:flex;align-items:center;gap:5px;font-size:11px;padding:2px 0">
     <span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--border);flex-shrink:0"></span>
     <span style="color:var(--gray);font-weight:700;min-width:34px;flex-shrink:0">${label}</span>
@@ -6955,7 +6968,7 @@ function equipmentFuelChecklistLines(equipmentId) {
   const lastChk  = lastChecklistOf(equipmentId);
 
   const fuelLine = lastFuel
-    ? `⛽ ${fmtRecordDateTime(lastFuel.date)} · ${lastFuel.amountLiters}л · <span style="color:var(--navy)">${lastFuel.empName||"—"}</span>`
+    ? `⛽ ${fmtRecordDateTime(lastFuel.date)} · ${lastFuel.amountLiters}л · <span style="color:var(--navy)">${escapeHtml(lastFuel.empName||"—")}</span>`
     : `⛽ заправок не было`;
 
   let chkLine, chkColor = "var(--gray)";
@@ -6964,7 +6977,7 @@ function equipmentFuelChecklistLines(equipmentId) {
       ? lastChk.defectCount > 0
       : (lastChk.items||[]).some(it => it.status === "defect");
     chkColor = hasDefect ? "var(--red)" : "var(--gray)";
-    chkLine = `📋 ${fmtRecordDateTime(lastChk.date)} · <span style="color:var(--navy)">${lastChk.empName||"—"}</span> ${hasDefect?"⚠":"✓"}`;
+    chkLine = `📋 ${fmtRecordDateTime(lastChk.date)} · <span style="color:var(--navy)">${escapeHtml(lastChk.empName||"—")}</span> ${hasDefect?"⚠":"✓"}`;
   } else {
     chkLine = `📋 осмотров не было`;
   }
@@ -7212,9 +7225,9 @@ async function renderWeeklyAward() {
       <div style="font-size:26px;min-width:36px">${medals[i]}</div>
       ${photo}
       <div style="flex:1">
-        <div style="font-size:15px;font-weight:800;color:var(--navy)">${w.name}</div>
+        <div style="font-size:15px;font-weight:800;color:var(--navy)">${escapeHtml(w.name)}</div>
         <div style="font-size:12px;color:var(--gray);margin-top:2px">
-          ${emp ? (emp.position||"") + " · " + (emp.site||"") : ""}
+          ${escapeHtml(emp ? (emp.position||"") + " · " + (emp.site||"") : "")}
         </div>
         <div style="font-size:12px;color:var(--navy2);margin-top:4px">
           🚜 <b>${w.equipmentLabel}</b>
@@ -7232,13 +7245,13 @@ async function renderWeeklyAward() {
             ? `<span style="font-size:12px;color:var(--green,#2E7D32);font-weight:700">✓ уже в личном деле</span>`
             : closed
               ? `<button class="btn btn-gold" style="width:auto;padding:8px 14px;font-size:12px"
-                   onclick="awardExcellent('${String(w.empId).replace(/'/g,"\\'")}','${w.name.replace(/'/g,"\\'")}',${i+1},${w.defects},${w.comments},${w.osmotrs},'${String(w.equipmentLabel||"").replace(/'/g,"\\'")}')">
+                   onclick="awardExcellent('${String(w.empId).replace(/'/g,"\\'")}','${escapeHtml(w.name.replace(/'/g,"\\'"))}',${i+1},${w.defects},${w.comments},${w.osmotrs},'${String(w.equipmentLabel||"").replace(/'/g,"\\'")}')">
                    🏅 В личное дело</button>`
               : `<span style="font-size:11px;color:var(--gray);text-align:right;max-width:150px">
                    Период не завершён — награждать можно после ${periodEndLabel}
                  </span>`}
           ${closed ? `<button class="btn btn-ghost" style="width:auto;padding:7px 14px;font-size:12px"
-            onclick="printAwardCertificate('${String(w.empId).replace(/'/g,"\\'")}','${w.name.replace(/'/g,"\\'")}',${i+1},${w.defects},${w.comments},${w.osmotrs},'${String(w.equipmentLabel||"").replace(/'/g,"\\'")}')">
+            onclick="printAwardCertificate('${String(w.empId).replace(/'/g,"\\'")}','${escapeHtml(w.name.replace(/'/g,"\\'"))}',${i+1},${w.defects},${w.comments},${w.osmotrs},'${String(w.equipmentLabel||"").replace(/'/g,"\\'")}')">
             🖨 Печать грамоты</button>` : ""}
         </div>
       </div>
@@ -7364,10 +7377,10 @@ function awardCertificateHTML(w, place, period) {
     <div style="text-align:center;margin-top:10mm">
       ${photo}
       <div style="font-size:20pt;font-weight:800;color:#0B1A35;margin-top:5mm;line-height:1.25">
-        ${w.name}
+        ${escapeHtml(w.name)}
       </div>
       <div style="font-size:10pt;color:#64748B;margin-top:1.5mm">
-        ${[emp.position, emp.site].filter(Boolean).join(" · ")}
+        ${escapeHtml([emp.position, emp.site].filter(Boolean).join(" · "))}
       </div>
       ${w.equipmentLabel && w.equipmentLabel !== "—" ? `
 <div style="display:inline-block;margin-top:4mm;padding:1.5mm 6mm;
@@ -7520,7 +7533,7 @@ function renderRatingTop3(rows) {
       <div style="display:flex;align-items:center;gap:10px">
         <span style="font-size:16px;min-width:28px">${medal(i)}</span>
         <div>
-          <div style="font-size:13px;font-weight:700;color:var(--navy)">${ratingClickable(r, r.name)}</div>
+          <div style="font-size:13px;font-weight:700;color:var(--navy)">${ratingClickable(r, escapeHtml(r.name))}</div>
           <div style="font-size:11px;color:var(--gray)">
             🚜 ${r.equipmentLabel} · ${r.osmotrs} осмотр(ов) · ${r.daysCount} дн.${r.fuel?` · ${r.fuel} заправ.`:""}
           </div>
@@ -7548,7 +7561,7 @@ function renderRatingTableFull(rows) {
     <tbody>${rows.map((r,i)=>`
       <tr${r.formal?' style="background:var(--redbg,#FEECEC)"':''}>
         <td>${i+1}</td>
-        <td><b>${ratingClickable(r, r.name)}</b>${r.formal?' <span style="font-size:10px;color:var(--red)">формально</span>':''}</td>
+        <td><b>${ratingClickable(r, escapeHtml(r.name))}</b>${r.formal?' <span style="font-size:10px;color:var(--red)">формально</span>':''}</td>
         <td style="font-size:12px;color:var(--gray)">${r.equipmentLabel}</td>
         <td>${r.osmotrs}</td>
         <td>${r.daysCount}</td>
@@ -7569,7 +7582,7 @@ function renderRatingFormalFull(rows) {
     <div style="display:flex;justify-content:space-between;align-items:center;
       padding:10px 12px;background:var(--redbg,#FEECEC);border-radius:8px;margin-bottom:6px">
       <div>
-        <div style="font-size:13px;font-weight:700;color:var(--navy)">${ratingClickable(r, r.name)}</div>
+        <div style="font-size:13px;font-weight:700;color:var(--navy)">${ratingClickable(r, escapeHtml(r.name))}</div>
         <div style="font-size:11px;color:var(--gray)">🚜 ${r.equipmentLabel} · ${r.daysCount} дн.</div>
       </div>
       <div style="text-align:right;font-size:12px;color:var(--red)">
@@ -7755,7 +7768,7 @@ function renderTrainingPlan() {
     noTr.innerHTML = need.length ? `<div class="tbl-wrap"><table style="font-size:13px">
       <thead><tr><th>Сотрудник</th><th>Техника</th><th>Тип</th><th>Участок</th><th>Вахта / смена</th></tr></thead>
       <tbody>${need.map(r=>`<tr>
-        <td><b>${link(r, r.empName)}</b></td>
+        <td><b>${link(r, escapeHtml(r.empName))}</b></td>
         <td>${r.equipmentId} <span style="color:var(--gray);font-size:11px">${r.model||""}</span></td>
         <td style="color:var(--red);font-weight:700">${r.eqType||"—"}</td>
         <td>${r.site}</td>
@@ -7807,7 +7820,7 @@ function renderTrainingPlan() {
               ${g} <span style="color:${arr.length>=LIMIT?'var(--red)':'var(--gray)'}">(${arr.length} из ${LIMIT})</span>
             </div>
             ${arr.map(r=>`<div style="font-size:12px;padding:2px 0;color:var(--navy)">
-              • ${link(r, r.empName)} — <span style="color:var(--gray)">${r.eqType} (${r.equipmentId})</span>
+              • ${link(r, escapeHtml(r.empName))} — <span style="color:var(--gray)">${r.eqType} (${r.equipmentId})</span>
             </div>`).join("")}
           </div>`).join("")}
       </div>`;
@@ -7831,7 +7844,7 @@ function renderTrainingPlan() {
         return !pats || !pats.some(p => p.test(cc));
       });
       return `<tr${r.trained===false?' style="background:var(--redbg)"':''}>
-        <td><b>${link(r, r.empName)}</b>${!r.linked?' <span style="font-size:10px;color:var(--gray)">нет карточки</span>':''}</td>
+        <td><b>${link(r, escapeHtml(r.empName))}</b>${!r.linked?' <span style="font-size:10px;color:var(--gray)">нет карточки</span>':''}</td>
         <td>${r.equipmentId} <span style="color:var(--gray);font-size:11px">${r.model||""}</span></td>
         <td>${r.eqType||"—"}</td>
         <td>${r.site}</td>
@@ -7967,7 +7980,7 @@ function renderEvaluationQueue() {
       ? `<span style="color:var(--red);font-weight:700">ни разу</span>`
       : `<span style="color:${r.daysSince>=365?'var(--red)':'var(--gray)'}">${Math.floor(r.daysSince/30)} мес. назад</span>`;
     return `<tr>
-      <td><b>${link(r, r.empName)}</b></td>
+      <td><b>${link(r, escapeHtml(r.empName))}</b></td>
       <td>${r.equipmentId||"—"} <span style="color:var(--gray);font-size:11px">${eq?eq.model:""}</span></td>
       <td>${r.site}</td>
       <td style="font-size:12px;color:var(--gray)">${r.vahta} · ${r.smena==="1"?"день":"ночь"}</td>
@@ -8055,7 +8068,7 @@ function renderShiftFormation(vahtaNum, containerId, site) {
       const titleClick = g.equipmentId ? ` onclick="showEquipmentQuickView('${String(g.equipmentId).replace(/'/g,"\\'")}')" style="cursor:pointer"` : "";
       const title = g.equipmentId
         ? `<span${titleClick}><span style="text-decoration:underline;text-decoration-style:dotted">${g.equipmentId}</span> <span style="font-weight:500;color:var(--gray);font-size:10px">${eq ? eq.model : ""}</span></span>`
-        : `<span style="font-size:12px">${g.position}</span>`;
+        : `<span style="font-size:12px">${escapeHtml(g.position)}</span>`;
       const ctx = { equipmentId: g.equipmentId, position: g.position, vahta: vahtaLabel, site };
       const bySmena = {};
       g.items.forEach(a => { bySmena[Number(a.smena)] = a; });
@@ -8095,7 +8108,7 @@ function showEquipmentQuickView(equipmentId) {
   const crew = (DATA.shiftAssignments||[]).filter(a => String(a.equipmentId)===String(equipmentId) && a.status==="активен");
   const crewHtml = crew.length
     ? crew.map(a => `<div style="font-size:12px;padding:3px 0">
-        <b>${a.vahta}</b> · ${SMENA_LABEL[Number(a.smena)]||a.smena} — ${a.empName||"—"}
+        <b>${a.vahta}</b> · ${SMENA_LABEL[Number(a.smena)]||a.smena} — ${escapeHtml(a.empName||"—")}
       </div>`).join("")
     : `<div style="font-size:12px;color:var(--gray)">Экипаж по вахтам не назначен.</div>`;
   openModal(`
@@ -8171,7 +8184,7 @@ function renderEquipmentDayDetail(data) {
     html += `<div style="font-weight:700;font-size:12px;color:var(--navy);margin-bottom:4px">⛽ Заправки (${fuel.length})</div>`;
     html += fuel.map(f => `
       <div style="font-size:12px;padding:5px 0;border-bottom:1px solid var(--border)">
-        ${fmtRecordDateTime(f.date)} · <b>${f.amountLiters}л</b> · ${f.empName||"—"}
+        ${fmtRecordDateTime(f.date)} · <b>${f.amountLiters}л</b> · ${escapeHtml(f.empName||"—")}
       </div>`).join("");
   }
 
@@ -8194,7 +8207,7 @@ function renderEquipmentDayDetail(data) {
       return `<div style="border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:8px">
         <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
           <b>${fmtRecordDateTime(rec.date)}</b>
-          <span style="color:var(--gray)">${rec.empName||"—"}</span>
+          <span style="color:var(--gray)">${escapeHtml(rec.empName||"—")}</span>
         </div>
         ${defects.length
           ? `<div style="color:var(--red);font-size:11px;font-weight:700;margin-bottom:4px">⚠ Неисправностей: ${defects.length}</div>`
@@ -8219,7 +8232,7 @@ function openShiftEditModal(row, equipmentId, position, vahta, smena, empId, emp
   const title = equipmentId || position || "—";
 
   openModal(`
-    <div style="font-size:16px;font-weight:800;color:var(--navy);margin-bottom:2px">${title}</div>
+    <div style="font-size:16px;font-weight:800;color:var(--navy);margin-bottom:2px">${escapeHtml(title)}</div>
     <div style="font-size:12px;color:var(--gray);margin-bottom:16px">${vahta} · ${SMENA_LABEL[Number(smena)]||smena}</div>
 
     <label style="font-size:12px;font-weight:700;color:var(--gray);display:block;margin-bottom:4px">Сотрудник</label>
@@ -8266,8 +8279,8 @@ function renderShiftEmpSearchResults() {
   box.innerHTML = matches.map(e => `
     <div style="padding:7px 9px;border:1px solid var(--border);border-top:none;cursor:pointer;font-size:12px"
       onmouseover="this.style.background='var(--light)'" onmouseout="this.style.background='#fff'"
-      onclick="document.getElementById('shiftEditEmpSearch').value='${e.name.replace(/'/g,"\\'")}';document.getElementById('shiftEditEmpId').value='${e.id}';document.getElementById('shiftEmpSearchResults').innerHTML=''">
-      <b>${e.name}</b> <span style="color:var(--gray)">${e.position||""}</span>
+      onclick="document.getElementById('shiftEditEmpSearch').value='${escapeHtml(e.name.replace(/'/g,"\\'"))}';document.getElementById('shiftEditEmpId').value='${e.id}';document.getElementById('shiftEmpSearchResults').innerHTML=''">
+      <b>${escapeHtml(e.name)}</b> <span style="color:var(--gray)">${escapeHtml(e.position||"")}</span>
     </div>`).join("");
 }
 
