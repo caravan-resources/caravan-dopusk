@@ -453,6 +453,11 @@ td { padding:8px; border-bottom:1px solid var(--border); }
           </div>
         </div>
         <div class="field">
+          <label>Время приезда самосвала на площадку (чч:мм) — необязательно</label>
+          <input type="time" id="timingArrivalTime">
+          <div class="hint">Отдельно от времени начала погрузки — позволяет разделить простой на «ждали подвоза» и «стоял, но не грузили».</div>
+        </div>
+        <div class="field">
           <label>Время начала погрузки (чч:мм) — необязательно</label>
           <input type="time" id="timingStartTime">
           <div class="hint">Нужно только чтобы отчёт мог посчитать простои между самосвалами. Можно оставить пустым.</div>
@@ -2023,6 +2028,7 @@ async function submitTiming() {
     instructorName: document.getElementById("timingInstructor").value.trim(),
     summary: document.getElementById("timingSummary").value.trim(),
     startTime: document.getElementById("timingStartTime").value,
+    arrivalTime: document.getElementById("timingArrivalTime").value,
   };
   if (isEditing) payload.recordId = TIMING_EDITING_ID;
 
@@ -2044,6 +2050,7 @@ async function submitTiming() {
     document.getElementById("timingTruckModel").value = "";
     document.getElementById("timingSummary").value = "";
     document.getElementById("timingStartTime").value = "";
+    document.getElementById("timingArrivalTime").value = "";
     setProperLoading("");
     document.querySelectorAll("#timingProperLoadingBtns .eval-opt-btn").forEach(b => b.classList.remove("active","high","low"));
     resetLapCalc();
@@ -2182,7 +2189,7 @@ function renderTimingRecordCard(r) {
   return `
     <div style="border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:12px;background:#fff">
       <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:12px">
-        <div style="font-size:12px;color:var(--gray)">${r.startTime ? "🕐 " + r.startTime + " · " : ""}${r.truckModel ? "→ " + r.truckModel : "самосвал не указан"}</div>
+        <div style="font-size:12px;color:var(--gray)">${r.arrivalTime ? "🚚 " + r.arrivalTime + " " : ""}${r.startTime ? "🕐 " + r.startTime + " · " : ""}${r.truckModel ? "→ " + r.truckModel : "самосвал не указан"}</div>
         <div style="display:flex;align-items:flex-start;gap:8px">
           <span style="font-size:12px;color:var(--gray)">${r.instructorName||""}</span>
           <button type="button" class="btn-ghost" style="padding:3px 10px;font-size:12px"
@@ -2224,6 +2231,7 @@ async function editTimingRecord(recordId) {
   document.getElementById("timingInstructor").value = r.instructorName || "";
   document.getElementById("timingSummary").value = r.summary || "";
   document.getElementById("timingStartTime").value = r.startTime || "";
+  document.getElementById("timingArrivalTime").value = r.arrivalTime || "";
   setProperLoading(r.properLoading || "");
 
   if (r.equipmentType) await loadEvalEquipmentModels(r.equipmentType);
@@ -2252,6 +2260,7 @@ function cancelTimingEdit() {
   document.getElementById("timingTruckModel").value = "";
   document.getElementById("timingSummary").value = "";
   document.getElementById("timingStartTime").value = "";
+  document.getElementById("timingArrivalTime").value = "";
   setProperLoading("");
   resetLapCalc();
 }
@@ -2270,7 +2279,7 @@ function resetLapCalc() {
 // saveTimingRecord — тем же действием, что и обычная форма, так что вся
 // дальнейшая логика (джойн с оценкой, резюме дня и т.д.) работает без
 // изменений на бэкенде.
-const TIMING_IMPORT_HEADERS = ["ФИО сотрудника","Дата","Начало погрузки (чч:мм)","Тип техники","Модель экскаватора","Модель самосвала",
+const TIMING_IMPORT_HEADERS = ["ФИО сотрудника","Дата","Приезд самосвала (чч:мм)","Начало погрузки (чч:мм)","Тип техники","Модель экскаватора","Модель самосвала",
   "Время погрузки, сек","Ковшей","Наполнение, %","Цикл, сек","Паспорт (да/нет)","Инструктор","Примечание"];
 
 function downloadTimingTemplate() {
@@ -2279,8 +2288,8 @@ function downloadTimingTemplate() {
   // Если замеряли не сегодня — просто исправить в паре ячеек, а не во всех.
   const today = new Date();
   const todayStr = `${String(today.getDate()).padStart(2,"0")}.${String(today.getMonth()+1).padStart(2,"0")}.${today.getFullYear()}`;
-  const exampleRow = ["Иванов Иван Иванович", todayStr, "16:15", "Экскаватор с обратной лопатой", "Sandvik DX800", "Sany SKT 115S", 125, 6, 92, 25, "да", "Петров П.П.", "пример — замените своими данными"];
-  const blankRows = Array.from({ length: 5 }, () => ["", todayStr, "", "", "", "", "", "", "", "", "", "", ""]);
+  const exampleRow = ["Иванов Иван Иванович", todayStr, "16:13", "16:15", "Экскаватор с обратной лопатой", "Sandvik DX800", "Sany SKT 115S", 125, 6, 92, 25, "да", "Петров П.П.", "пример — замените своими данными"];
+  const blankRows = Array.from({ length: 5 }, () => ["", todayStr, "", "", "", "", "", "", "", "", "", "", "", ""]);
   const ws = XLSX.utils.aoa_to_sheet([TIMING_IMPORT_HEADERS, exampleRow, ...blankRows]);
   ws['!cols'] = TIMING_IMPORT_HEADERS.map(h => ({ wch: Math.max(14, h.length) }));
   const wb = XLSX.utils.book_new();
@@ -2332,6 +2341,11 @@ function parseTimingImportRow(row) {
     ? `${String(startTimeRaw.getHours()).padStart(2,"0")}:${String(startTimeRaw.getMinutes()).padStart(2,"0")}`
     : String(startTimeRaw).trim();
 
+  const arrivalTimeRaw = get("Приезд самосвала (чч:мм)","Приезд самосвала","Время приезда");
+  const arrivalTime = (arrivalTimeRaw instanceof Date)
+    ? `${String(arrivalTimeRaw.getHours()).padStart(2,"0")}:${String(arrivalTimeRaw.getMinutes()).padStart(2,"0")}`
+    : String(arrivalTimeRaw).trim();
+
   const totalTime = Number(get("Время погрузки, сек","Время погрузки"));
   const bucketCount = Number(get("Ковшей","Количество ковшей"));
   const bucketFill = Number(get("Наполнение, %","Наполнение ковшей (%)"));
@@ -2349,7 +2363,7 @@ function parseTimingImportRow(row) {
   if (!properLoading) errors.push("паспорт: да/нет");
 
   return {
-    name, emp, dateStr, startTime,
+    name, emp, dateStr, startTime, arrivalTime,
     equipmentType: String(get("Тип техники")).trim(),
     equipmentModel: String(get("Модель экскаватора")).trim(),
     truckModel: String(get("Модель самосвала")).trim(),
@@ -2370,6 +2384,7 @@ function renderTimingImportPreview() {
     <tr style="${r.errors.length ? 'background:var(--redbg)' : ''}">
       <td style="padding:6px 8px;font-size:12px;border-bottom:1px solid var(--border);white-space:nowrap">${r.name||"—"}</td>
       <td style="padding:6px 8px;font-size:12px;border-bottom:1px solid var(--border);white-space:nowrap">${r.dateStr||"—"}</td>
+      <td style="padding:6px 8px;font-size:12px;border-bottom:1px solid var(--border);white-space:nowrap">${r.arrivalTime||"—"}</td>
       <td style="padding:6px 8px;font-size:12px;border-bottom:1px solid var(--border);white-space:nowrap">${r.startTime||"—"}</td>
       <td style="padding:6px 8px;font-size:12px;border-bottom:1px solid var(--border);white-space:nowrap">${r.truckModel||"—"}</td>
       <td style="padding:6px 8px;font-size:12px;border-bottom:1px solid var(--border)">${r.totalTime||"—"}</td>
@@ -2388,7 +2403,7 @@ function renderTimingImportPreview() {
     </div>
     <div style="overflow-x:auto">
       <table style="border-collapse:collapse;width:100%;min-width:700px">
-        <thead><tr>${th("ФИО")}${th("Дата")}${th("Начало")}${th("Самосвал")}${th("Погрузка")}${th("Ковшей")}${th("Наполн.")}${th("Цикл")}${th("Паспорт")}${th("Ошибки")}</tr></thead>
+        <thead><tr>${th("ФИО")}${th("Дата")}${th("Приезд")}${th("Начало")}${th("Самосвал")}${th("Погрузка")}${th("Ковшей")}${th("Наполн.")}${th("Цикл")}${th("Паспорт")}${th("Ошибки")}</tr></thead>
         <tbody>${rowsHtml}</tbody>
       </table>
     </div>
@@ -2415,6 +2430,7 @@ async function submitTimingImport(evt) {
       cycleTimeSec: r.cycleTime, properLoading: r.properLoading,
       site: CURRENT_SITE, instructorName: r.instructorName, summary: r.summary,
       startTime: r.startTime,
+      arrivalTime: r.arrivalTime,
     };
     try {
       const res = await fetch(CFG.SHEET_URL, { method: "POST", body: JSON.stringify(payload) });
