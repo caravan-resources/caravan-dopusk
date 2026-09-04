@@ -3310,6 +3310,7 @@ function renderTimingRating() {
         <td style="padding:7px 10px;font-size:12.5px;color:var(--navy);font-weight:700;border-bottom:1px solid #EDE9FE">${o.avgBuckets ?? "—"}</td>
         <td style="padding:7px 10px;font-size:12.5px;color:var(--navy);font-weight:700;border-bottom:1px solid #EDE9FE">${o.avgCycle ?? "—"} с</td>
         <td style="padding:7px 10px;font-size:12.5px;color:var(--navy);font-weight:700;border-bottom:1px solid #EDE9FE">${o.avgFill ?? "—"}%</td>
+        <td style="padding:7px 10px;font-size:12.5px;color:#7C3AED;font-weight:800;border-bottom:1px solid #EDE9FE">${o.effectiveCycle ?? "—"} с</td>
         <td style="padding:7px 10px;font-size:12px;font-weight:700;border-bottom:1px solid #EDE9FE;
           color:${o.passportRate===null?'var(--gray)':(o.passportRate>=90?'var(--green)':(o.passportRate>=70?'var(--yellow)':'var(--red)'))}">
           ${o.passportRate===null?"—":o.passportRate+"%"}
@@ -3320,10 +3321,11 @@ function renderTimingRating() {
     return `
       <div style="margin-bottom:22px">
         <div style="font-size:13px;font-weight:800;color:var(--navy);margin-bottom:8px">${cls}</div>
+        <div class="hint" style="margin-bottom:6px">Место определяет «Привед. цикл» — цикл, пересчитанный так, будто ковш всегда полный (100%): цикл ÷ (наполнение/100).</div>
         <div style="overflow-x:auto">
-          <table style="border-collapse:collapse;width:100%;min-width:600px">
+          <table style="border-collapse:collapse;width:100%;min-width:660px">
             <thead><tr>
-              ${th("#")}${th("Оператор")}${th("Замеров")}${th("Ср. время")}${th("Ковшей")}${th("Ср. цикл")}${th("Наполнение")}${th("Паспорт")}
+              ${th("#")}${th("Оператор")}${th("Замеров")}${th("Ср. время")}${th("Ковшей")}${th("Ср. цикл")}${th("Наполнение")}${th("Привед. цикл")}${th("Паспорт")}
             </tr></thead>
             <tbody>${rowsHtml}</tbody>
           </table>
