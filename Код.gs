@@ -4088,13 +4088,16 @@ function getTimingRatingList(p) {
     const m = startRaw.match(/^(\d{1,2}):(\d{2})$/);
     if (!m) return;
     const startMin = Number(m[1]) * 60 + Number(m[2]);
+    const arrivalRaw = String(r[tIdx["arrivalTime"]] || "").trim();
+    const am = arrivalRaw.match(/^(\d{1,2}):(\d{2})$/);
+    const arrivalMin = am ? Number(am[1]) * 60 + Number(am[2]) : null;
     const empId = String(r[tIdx["empId"]] || "").trim();
     const empName = r[tIdx["empName"]] || "";
     const dateStr = !isNaN(d) ? Utilities.formatDate(d, "Asia/Almaty", "dd.MM.yyyy") : String(r[tIdx["date"]] || "");
     const key = empId + "|" + dateStr;
     if (!dayGroups[key]) dayGroups[key] = { empId: empId, empName: empName, dateStr: dateStr, items: [] };
     const total = Number(r[tIdx["totalLoadTimeSec"]]) || 0;
-    dayGroups[key].items.push({ startMin: startMin, endMin: startMin + total / 60, startRaw: startRaw });
+    dayGroups[key].items.push({ startMin: startMin, endMin: startMin + total / 60, startRaw: startRaw, arrivalMin: arrivalMin, arrivalRaw: arrivalRaw });
   });
 
   // Среднее время погрузки по каждому оператору отдельно (по ВСЕМ его
@@ -4115,7 +4118,11 @@ function getTimingRatingList(p) {
   // Критичные простои — от минуты и больше (по договорённости с Иваном,
   // 03.09.2026): собираем каждый такой разрыв отдельным пунктом списка, а не
   // только агрегатом, чтобы можно было увидеть, где именно и когда он
-  // случился, и постепенно с ними бороться.
+  // случился, и постепенно с ними бороться. Если известно время приезда
+  // самосвала (arrivalTime, добавлено 03.09.2026) — разбиваем разрыв на
+  // «ждали подвоза» (до приезда) и «стоял, но не грузили» (после приезда,
+  // до старта погрузки — позиционирование и т.п.). Без arrivalTime разбить
+  // нечем, весь разрыв идёт в «ждали подвоза» с пометкой, что это не разбито.
   const CRITICAL_PAUSE_SEC = 60;
   const criticalPauses = [];
 
@@ -4124,27 +4131,51 @@ function getTimingRatingList(p) {
     const g = dayGroups[key];
     const items = g.items.slice().sort((a,b) => a.startMin - b.startMin);
     for (let i = 1; i < items.length; i++) {
-      const pauseMin = items[i].startMin - items[i-1].endMin;
+      const prev = items[i-1], cur = items[i];
+      const pauseMin = cur.startMin - prev.endMin;
       // Полный цикл на самосвал — интервал между стартами соседних замеров
       // (погрузка + простой вместе), считаем всегда, даже если простоя нет
       // (pauseMin <= 0 — самосвалы шли впритык). Именно этот интервал даёт
       // реальную пропускную способность (3600/интервал), а не одна погрузка.
-      const intervalMin = items[i].startMin - items[i-1].startMin;
-      if (!downtimeByOp[g.empId]) downtimeByOp[g.empId] = { empId: g.empId, empName: g.empName, totalPauseSec: 0, gaps: 0, totalIntervalSec: 0, intervals: 0, criticalSec: 0, criticalCount: 0 };
+      const intervalMin = cur.startMin - prev.startMin;
+      if (!downtimeByOp[g.empId]) {
+        downtimeByOp[g.empId] = {
+          empId: g.empId, empName: g.empName, totalPauseSec: 0, gaps: 0,
+          totalIntervalSec: 0, intervals: 0, criticalSec: 0, criticalCount: 0,
+          waitSec: 0, waitCount: 0, positionSec: 0, positionCount: 0, splitGaps: 0,
+        };
+      }
       downtimeByOp[g.empId].totalIntervalSec += intervalMin * 60;
       downtimeByOp[g.empId].intervals += 1;
       if (pauseMin > 0) {
         const pauseSec = Math.round(pauseMin * 60);
         downtimeByOp[g.empId].totalPauseSec += pauseSec;
         downtimeByOp[g.empId].gaps += 1;
+
+        // Разбивка на «ждали подвоза» / «стояли без погрузки» — только если
+        // arrivalTime заполнен И укладывается в разрыв (иначе данные не
+        // согласуются, не разбиваем, считаем всё как ожидание подвоза).
+        let waitSec = pauseSec, positionSec = 0, split = false;
+        if (cur.arrivalMin !== null && cur.arrivalMin >= prev.endMin && cur.arrivalMin <= cur.startMin) {
+          waitSec = Math.round((cur.arrivalMin - prev.endMin) * 60);
+          positionSec = Math.round((cur.startMin - cur.arrivalMin) * 60);
+          split = true;
+        }
+        downtimeByOp[g.empId].waitSec += waitSec;
+        downtimeByOp[g.empId].positionSec += positionSec;
+        if (split) { downtimeByOp[g.empId].splitGaps += 1; }
+
         if (pauseSec >= CRITICAL_PAUSE_SEC) {
           downtimeByOp[g.empId].criticalSec += pauseSec;
           downtimeByOp[g.empId].criticalCount += 1;
           criticalPauses.push({
             empId: g.empId, empName: g.empName, date: g.dateStr,
             pauseSec: pauseSec,
-            beforeStartTime: items[i-1].startRaw,
-            afterStartTime: items[i].startRaw,
+            beforeStartTime: prev.startRaw,
+            afterStartTime: cur.startRaw,
+            arrivalTime: cur.arrivalRaw || null,
+            waitSec: split ? waitSec : null,
+            positionSec: split ? positionSec : null,
           });
         }
       }
@@ -4163,6 +4194,9 @@ function getTimingRatingList(p) {
       maxTrucksPerHour: avgIntervalSec ? Math.floor(3600 / avgIntervalSec) : null,
       criticalSec: o.criticalSec, criticalCount: o.criticalCount,
       avgLoadSec: l && l.count ? Math.round((l.sum / l.count) * 10) / 10 : null,
+      avgWaitSec: o.gaps ? Math.round(o.waitSec / o.gaps) : null,
+      avgPositionSec: o.gaps ? Math.round(o.positionSec / o.gaps) : null,
+      splitGaps: o.splitGaps,
     };
   }).sort((a,b) => (b.avgPauseSec||0) - (a.avgPauseSec||0)); // худший (самый долгий средний простой) — первый
 
@@ -4283,7 +4317,7 @@ const SHEET_TIMING = "Хронометраж";
 function saveTimingRecord(p) {
   const { empId, empName, position, date, equipmentType, equipmentModel, truckModel,
           totalLoadTimeSec, bucketCount, bucketFillPercent, cycleTimeSec, properLoading,
-          site, instructorName, summary, startTime } = p || {};
+          site, instructorName, summary, startTime, arrivalTime } = p || {};
 
   if (!empName || !totalLoadTimeSec || !bucketCount || !cycleTimeSec) {
     return json({ ok: false, error: "Нужны как минимум empName, totalLoadTimeSec, bucketCount и cycleTimeSec" });
@@ -4293,7 +4327,7 @@ function saveTimingRecord(p) {
   let sheet = ss.getSheetByName(SHEET_TIMING);
   const HEADER = ["recordId","empId","empName","position","date","equipmentType","equipmentModel",
                   "truckModel","totalLoadTimeSec","bucketCount","bucketFillPercent","cycleTimeSec",
-                  "properLoading","site","instructorName","summary","createdAt","startTime"];
+                  "properLoading","site","instructorName","summary","createdAt","startTime","arrivalTime"];
   if (!sheet) {
     sheet = ss.insertSheet(SHEET_TIMING);
     sheet.appendRow(HEADER);
@@ -4304,6 +4338,7 @@ function saveTimingRecord(p) {
     sheet.setColumnWidth(16, 400);
   } else {
     ensureTimingStartTimeColumn(sheet);
+    ensureTimingArrivalTimeColumn(sheet);
   }
 
   const recordId = "timing" + Date.now();
@@ -4314,16 +4349,19 @@ function saveTimingRecord(p) {
   sheet.appendRow([
     recordId, empId || "", empName, position || "", dateStr, equipmentType || "", equipmentModel || "",
     truckModel || "", totalLoadTimeSec, bucketCount, bucketFillPercent || "", cycleTimeSec,
-    properLoading || "", site || "", instructorName || "", summary || "", createdAt, "",
+    properLoading || "", site || "", instructorName || "", summary || "", createdAt, "", "",
   ]);
-  // startTime — «чч:мм» текстом, а не числом. appendRow пишет всё одним
-  // вызовом без возможности задать формат по ячейке, а лист по умолчанию
-  // распознаёт «16:21» как значение времени (эпоха 1899-12-30) — тот же
-  // класс проблемы, что раньше ловили на experienceYears. Поэтому пишем
-  // startTime отдельным вызовом сразу после, с явным текстовым форматом.
+  // startTime/arrivalTime — «чч:мм» текстом, а не числом. appendRow пишет
+  // всё одним вызовом без возможности задать формат по ячейке, а лист по
+  // умолчанию распознаёт «16:21» как значение времени (эпоха 1899-12-30) —
+  // тот же класс проблемы, что раньше ловили на experienceYears. Поэтому
+  // пишем оба поля отдельным вызовом сразу после, с явным текстовым форматом.
   const newRow = sheet.getLastRow();
-  const startTimeCol = sheet.getRange(1,1,1,sheet.getLastColumn()).getValues()[0].indexOf("startTime") + 1;
+  const headerRow = sheet.getRange(1,1,1,sheet.getLastColumn()).getValues()[0];
+  const startTimeCol = headerRow.indexOf("startTime") + 1;
+  const arrivalTimeCol = headerRow.indexOf("arrivalTime") + 1;
   if (startTimeCol > 0) sheet.getRange(newRow, startTimeCol).setNumberFormat("@").setValue(startTime || "");
+  if (arrivalTimeCol > 0) sheet.getRange(newRow, arrivalTimeCol).setNumberFormat("@").setValue(arrivalTime || "");
 
   // Личное дело: одна сводная запись на пару «оператор+дата», а не по
   // записи на каждый самосвал — иначе за день на одного оператора могло
@@ -4334,15 +4372,32 @@ function saveTimingRecord(p) {
   return json({ ok: true, recordId });
 }
 
-// «Хронометраж» — лист, созданный ещё до появления поля startTime, у него
-// может не быть этой колонки. Дописываем её в конец существующих колонок
-// (никогда не переставляя уже существующие) — так старые записи остаются на
-// своих местах, просто с пустым startTime, а не сдвигаются.
+// «Хронометраж» — лист, созданный ещё до появления полей startTime/
+// arrivalTime, у него может не быть этих колонок. Дописываем их в конец
+// существующих колонок (никогда не переставляя уже существующие) — так
+// старые записи остаются на своих местах, просто с пустыми значениями,
+// а не сдвигаются.
 function ensureTimingStartTimeColumn(sheet) {
   const lastCol = sheet.getLastColumn();
   const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
   if (headers.indexOf("startTime") === -1) {
     sheet.getRange(1, lastCol + 1).setValue("startTime")
+      .setBackground("#0D1B3E").setFontColor("#F4A52A").setFontWeight("bold");
+  }
+}
+
+// Время приезда самосвала на площадку — отдельно от startTime (момент
+// начала погрузки первого ковша). Разница между ними — время, которое
+// самосвал уже стоял на месте, но экскаватор его ещё не грузил (позиционирование
+// техники и т.п.); разница между приездом и отъездом предыдущего — время,
+// пока самосвала физически не было на месте (простой в ожидании подвоза).
+// По просьбе Ивана, 03.09.2026 — чтобы разбить общий простой на эти две
+// составляющие, а не считать его одним неразличимым числом.
+function ensureTimingArrivalTimeColumn(sheet) {
+  const lastCol = sheet.getLastColumn();
+  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  if (headers.indexOf("arrivalTime") === -1) {
+    sheet.getRange(1, lastCol + 1).setValue("arrivalTime")
       .setBackground("#0D1B3E").setFontColor("#F4A52A").setFontWeight("bold");
   }
 }
@@ -4434,7 +4489,7 @@ function syncTimingPersonnelEventForDay(ss, empId, empName, dateStr, instructorN
 function updateTimingRecord(p) {
   const { recordId, empId, empName, position, date, equipmentType, equipmentModel, truckModel,
           totalLoadTimeSec, bucketCount, bucketFillPercent, cycleTimeSec, properLoading,
-          site, instructorName, summary, startTime } = p || {};
+          site, instructorName, summary, startTime, arrivalTime } = p || {};
 
   if (!recordId) return json({ ok: false, error: "Нужен recordId" });
   if (!empName || !totalLoadTimeSec || !bucketCount || !cycleTimeSec) {
@@ -4445,6 +4500,7 @@ function updateTimingRecord(p) {
   const sheet = ss.getSheetByName(SHEET_TIMING);
   if (!sheet) return json({ ok: false, error: "Лист «Хронометраж» не найден" });
   ensureTimingStartTimeColumn(sheet);
+  ensureTimingArrivalTimeColumn(sheet);
 
   const rows = sheet.getDataRange().getValues();
   const headers = rows[0];
@@ -4483,6 +4539,7 @@ function updateTimingRecord(p) {
   sheet.getRange(rowNum, col("instructorName")).setValue(instructorName || "");
   sheet.getRange(rowNum, col("summary")).setValue(summary || "");
   if (col("startTime") > 0) sheet.getRange(rowNum, col("startTime")).setNumberFormat("@").setValue(startTime || "");
+  if (col("arrivalTime") > 0) sheet.getRange(rowNum, col("arrivalTime")).setNumberFormat("@").setValue(arrivalTime || "");
 
   syncTimingPersonnelEventForDay(ss, empId || "", empName, dateStr, instructorName || "");
   if (oldEmpId && oldDateStr && (oldEmpId !== (empId || "") || oldDateStr !== dateStr)) {
