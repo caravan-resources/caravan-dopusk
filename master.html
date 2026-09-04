@@ -229,6 +229,18 @@ const CFG = {
   SHEET_URL: "https://script.google.com/macros/s/AKfycbwhdMV20k8US2BXUz1Xk2XCXE9MEwpHpQaadTF9xEfzbU1--dHL-Zuj06K2qXW-rFtKGw/exec",
 };
 
+// Экранирование данных, пришедших от пользователя (анкета и т.д.) перед
+// вставкой через innerHTML. Экранируем на выводе, а не на входе — так
+// работает даже для того, что уже лежит в таблице.
+function escapeHtml(str) {
+  return String(str ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 let DATA = { equipment: [], employees: [], shiftAssignments: [], fuel: [], checklistStats: null, personnelEvents: [], training: [] };
 let CURRENT_SITE = "Алмалы";
 let CURRENT_VAHTA = "Вахта-1";
@@ -687,8 +699,8 @@ function renderShiftAbsent() {
     <div style="display:flex;flex-direction:column;gap:6px">
       ${rows.map(a => `
         <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:12px;padding:5px 8px;background:var(--redbg,#FEF2F2);border-radius:8px">
-          <span style="font-weight:700;color:var(--navy)">${a.empName||"—"}</span>
-          <span style="color:var(--gray)">${a.equipmentId||a.position||"—"} · ${SMENA_LABEL[Number(a.smena)]||""}</span>
+          <span style="font-weight:700;color:var(--navy)">${escapeHtml(a.empName||"—")}</span>
+          <span style="color:var(--gray)">${escapeHtml(a.equipmentId||a.position||"—")} · ${SMENA_LABEL[Number(a.smena)]||""}</span>
           <span style="font-weight:700;color:${workStatusColor(a.workStatus)}">${a.workStatus}</span>
         </div>`).join("")}
     </div>
@@ -792,7 +804,7 @@ function renderShift() {
       const eq = g.equipmentId ? (DATA.equipment||[]).find(e => String(e.equipmentId)===String(g.equipmentId)) : null;
       const title = g.equipmentId
         ? `${g.equipmentId} <span style="font-weight:500;color:var(--gray);font-size:10px">${eq ? eq.model : ""}</span>`
-        : `<span style="font-size:12px">${g.position}</span>`;
+        : `<span style="font-size:12px">${escapeHtml(g.position)}</span>`;
       const bySmena = {};
       g.items.forEach(a => { bySmena[Number(a.smena)] = a; });
       const slots = [1,2].map(sm => {
@@ -804,7 +816,7 @@ function renderShift() {
         const curWorkStatus = a ? (a.workStatus||"") : "";
         const curReassignNote = a ? (a.reassignNote||"") : "";
         const editIcon = `<span class="edit-slot-icon" style="cursor:pointer;font-size:12px;margin-left:6px" title="Назначить"
-          onclick="openAssignModal('${String(g.equipmentId).replace(/'/g,"\\'")}', ${sm}, ${rowArg}, '${String(curEmpId).replace(/'/g,"\\'")}', '${String(curEmpName).replace(/'/g,"\\'")}', '${String(curWorkStatus).replace(/'/g,"\\'")}', '${String(curReassignNote).replace(/'/g,"\\'")}', '${String(g.position||"").replace(/'/g,"\\'")}')">✎</span>`;
+          onclick="openAssignModal('${String(g.equipmentId).replace(/'/g,"\\'")}', ${sm}, ${rowArg}, '${String(curEmpId).replace(/'/g,"\\'")}', '${escapeHtml(String(curEmpName).replace(/'/g,"\\'"))}', '${String(curWorkStatus).replace(/'/g,"\\'")}', '${String(curReassignNote).replace(/'/g,"\\'")}', '${escapeHtml(String(g.position||"").replace(/'/g,"\\'"))}')">✎</span>`;
         if (!a) return `<div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;padding:3px 0;color:var(--gray)">
           <span>${label}</span><span>—${editIcon}</span></div>`;
         const color = shiftStatusColor(a.status);
@@ -812,8 +824,8 @@ function renderShift() {
         if (a.status === "увольняется" && a.dismissDate) text += ` (до ${a.dismissDate})`;
         const clickable = a.empId && a.status !== "вакансия" && a.status !== "оптимизация";
         const nameHtml = clickable
-          ? `<span style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted" onclick="openEmployeeCard('${String(a.empId).replace(/'/g,"\\'")}')">${text}</span>`
-          : text;
+          ? `<span style="cursor:pointer;text-decoration:underline;text-decoration-style:dotted" onclick="openEmployeeCard('${String(a.empId).replace(/'/g,"\\'")}')">${escapeHtml(text)}</span>`
+          : escapeHtml(text);
         const wsHtml = a.workStatus
           ? `<div style="font-size:11px;font-weight:700;color:${workStatusColor(a.workStatus)};text-align:right">${a.workStatus}</div>` : "";
         // Статус техники — ставит сам работник через QR (checklist.html), не мастер.
@@ -940,7 +952,7 @@ function renderFuel() {
       const label = eq ? `${f.equipmentId} — ${eq.model}` : f.equipmentId;
       const d = new Date(f.date);
       const dateStr = isNaN(d) ? f.date : d.toLocaleString("ru-RU",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
-      return `<tr><td>${label}</td><td>${dateStr}</td><td>${f.empName||"—"}</td>
+      return `<tr><td>${label}</td><td>${dateStr}</td><td>${escapeHtml(f.empName||"—")}</td>
         <td style="text-align:right;font-weight:700">${f.amountLiters}</td></tr>`;
     }).join("")}</tbody>
   </table></div>` + (records.length>80 ? `<div style="text-align:center;color:var(--gray);font-size:12px;padding-top:10px">Показаны последние 80 из ${records.length}</div>` : "");
@@ -1174,7 +1186,7 @@ async function renderFuelEquipmentHistoryM() {
         return `<tr>
           <td>${dateStr}</td>
           <td>${shift === "День" ? "☀ день" : shift === "Ночь" ? "🌙 ночь" : "—"}</td>
-          <td>${f.empName||"—"}</td>
+          <td>${escapeHtml(f.empName||"—")}</td>
           <td><b>${Number(f.amountLiters)||0} л</b></td>
         </tr>`;
       }).join("")}</tbody>
@@ -1359,7 +1371,7 @@ function renderFuelTypeFilterM() {
           <td><b>${f.equipmentId}</b>${eq ? ` — ${eq.model||""}` : ""}</td>
           <td>${dateStr}</td>
           <td>${shift === "День" ? "☀ день" : shift === "Ночь" ? "🌙 ночь" : "—"}</td>
-          <td>${f.empName||"—"}</td>
+          <td>${escapeHtml(f.empName||"—")}</td>
           <td><b>${Number(f.amountLiters)||0} л</b></td>
         </tr>`;
       }).join("")}</tbody>
@@ -1504,8 +1516,8 @@ function renderPersonnelList() {
     shownCount += toShow.length;
     const bodyRows = toShow.map(e => `
       <tr style="cursor:pointer" onclick="openEmployeeCard('${String(e.id).replace(/'/g,"\\'")}')">
-        <td><b>${e.name}</b></td>
-        <td style="color:var(--gray)">${e.position||"—"}</td>
+        <td><b>${escapeHtml(e.name)}</b></td>
+        <td style="color:var(--gray)">${escapeHtml(e.position||"—")}</td>
         <td>${statusBadge(statusOf(e))} <span style="color:var(--gray);font-size:10px">· ${e.__completeness.score}%</span></td>
       </tr>`).join("");
     return headerRow + bodyRows;
@@ -1537,8 +1549,8 @@ function openEmployeeCard(empId) {
     <div style="display:flex;gap:14px;align-items:center;margin-bottom:16px">
       ${photo}
       <div>
-        <div style="font-size:17px;font-weight:800;color:var(--navy)">${e.name}</div>
-        <div style="font-size:13px;color:var(--gray)">${e.position||""} · ${e.site||""}</div>
+        <div style="font-size:17px;font-weight:800;color:var(--navy)">${escapeHtml(e.name)}</div>
+        <div style="font-size:13px;color:var(--gray)">${escapeHtml(e.position||"")} · ${e.site||""}</div>
       </div>
     </div>
     <div style="display:flex;justify-content:space-between;align-items:center;background:var(--light);
@@ -1549,7 +1561,7 @@ function openEmployeeCard(empId) {
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:13px;margin-bottom:16px">
       <div><span style="color:var(--gray)">Допуск:</span> ${statusBadge(statusOf(e))}</div>
       <div><span style="color:var(--gray)">До:</span> ${e.validUntil||"—"}</div>
-      <div><span style="color:var(--gray)">Телефон:</span> ${e.phone||"—"}</div>
+      <div><span style="color:var(--gray)">Телефон:</span> ${escapeHtml(e.phone||"—")}</div>
       <div><span style="color:var(--gray)">ТОО:</span> ${e.tooPrimary||"—"}</div>
     </div>
     <div style="font-size:13px;font-weight:700;color:var(--navy);margin-bottom:8px">Личное дело (${events.length})</div>
@@ -1587,7 +1599,7 @@ function openAssignModal(equipmentId, smena, row, curEmpId, curEmpName, curWorkS
   document.getElementById("modalBox").innerHTML = `
     <div style="font-size:16px;font-weight:800;margin-bottom:4px">Назначить оператора</div>
     <div style="font-size:13px;color:var(--gray);margin-bottom:16px">
-      ${equipmentId ? equipmentId + (eq ? " — "+eq.model : "") : position} · ${smLabel} · ${vahtaLabel}
+      ${equipmentId ? equipmentId + (eq ? " — "+eq.model : "") : escapeHtml(position)} · ${smLabel} · ${vahtaLabel}
     </div>
     <div class="field">
       <label>Сотрудник</label>
@@ -1603,14 +1615,14 @@ function openAssignModal(equipmentId, smena, row, curEmpId, curEmpName, curWorkS
       <input type="text" id="assignReassignNote" placeholder="Например: Пересажен на 212" value="${String(curReassignNote||"").replace(/"/g,'&quot;')}">
     </div>
     <div style="display:flex;gap:8px">
-      <button class="btn-gold" style="flex:1" onclick="submitAssign(${row===null?"null":row}, '${String(equipmentId).replace(/'/g,"\\'")}', ${smena}, '${String(position||"").replace(/'/g,"\\'")}')">Сохранить</button>
+      <button class="btn-gold" style="flex:1" onclick="submitAssign(${row===null?"null":row}, '${String(equipmentId).replace(/'/g,"\\'")}', ${smena}, '${escapeHtml(String(position||"").replace(/'/g,"\\'"))}')">Сохранить</button>
       ${curEmpId ? `<button class="btn-red" onclick="submitUnassign(${row})">Снять</button>` : ""}
       <button class="btn-ghost" onclick="closeModal()">Отмена</button>
     </div>
   `;
   const dl = document.getElementById("assignEmpList");
   dl.innerHTML = (DATA.employees||[]).slice().sort((a,b)=>a.name.localeCompare(b.name))
-    .map(e => `<option value="${e.name.replace(/"/g,'&quot;')} [${e.id}]">`).join("");
+    .map(e => `<option value="${escapeHtml(e.name.replace(/"/g,'&quot;'))} [${e.id}]">`).join("");
   document.getElementById("modalOverlay").style.display = "flex";
 }
 
@@ -2061,7 +2073,7 @@ function renderNaryadTable() {
     <tr${rowBg ? ` style="background:${rowBg}"` : ""}>
       <td>${r.equipmentId}${r.model ? ` <span style="color:var(--gray);font-size:11px">${r.model}</span>` : ""}</td>
       <td>${r.smena}</td>
-      <td>${r.empName}</td>
+      <td>${escapeHtml(r.empName)}</td>
       <td style="${r.workStatus ? `color:${workStatusColor(r.workStatus)};font-weight:700` : ""}">${r.workStatus || "—"}</td>
       <td>${r.reassignNote || "—"}</td>
       <td>${accessCell}</td>
@@ -2210,7 +2222,7 @@ function renderAnalytics() {
       border-radius:10px;margin-bottom:8px">
       <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px">
         <span style="font-size:14px;font-weight:800;color:var(--navy)">${o.equipmentId}${o.model?` — ${o.model}`:""}</span>
-        <span style="font-size:11px;color:var(--gray)">${o.empName||"—"}</span>
+        <span style="font-size:11px;color:var(--gray)">${escapeHtml(o.empName||"—")}</span>
       </div>
       ${(o.items||[]).map(d => `<div style="font-size:12px;color:var(--red);padding:2px 0">✗ ${d.itemText}</div>`).join("")}
     </div>`).join("")
@@ -2238,7 +2250,7 @@ function renderAnalytics() {
   ratingEl.innerHTML = rows.length ? `<div style="overflow-x:auto"><table>
     <thead><tr><th>#</th><th>Оператор</th><th>Осмотров</th><th>Неиспр.</th><th>Заправок</th><th>Балл</th></tr></thead>
     <tbody>${rows.map((r,i) => `<tr>
-      <td>${i+1}</td><td><b>${r.empName}</b></td><td>${r.osmotrs}</td>
+      <td>${i+1}</td><td><b>${escapeHtml(r.empName)}</b></td><td>${r.osmotrs}</td>
       <td style="color:${r.defects?'var(--red)':'inherit'}">${r.defects}</td>
       <td>${r.fuel}</td><td style="font-weight:800">${r.score}</td>
     </tr>`).join("")}</tbody>
