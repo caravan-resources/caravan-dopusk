@@ -100,6 +100,11 @@ td { padding:8px; border-bottom:1px solid var(--border); }
     print-color-adjust:exact;
   }
   .no-print { display:none !important; }
+  #printArea.roster-sheet {
+    display:block !important;
+    grid-template-columns:none;
+    gap:0; padding:10mm;
+  }
   @page { size:A4 portrait; margin:0; }
 }
 </style>
@@ -138,6 +143,7 @@ td { padding:8px; border-bottom:1px solid var(--border); }
     <button id="navRequirements" onclick="showScreen('requirements')">🎯 Требования</button>
     <button id="navPrint" onclick="showScreen('print')">🖨 Допуски</button>
     <button id="navCertPrint" onclick="showScreen('certPrint')">🎓 Удостоверения</button>
+    <button id="navRoster" onclick="showScreen('roster')">📋 Ростер</button>
   </div>
 
   <div class="wrap">
@@ -552,11 +558,43 @@ td { padding:8px; border-bottom:1px solid var(--border); }
     <!-- ══ АРХИВ: РОСТЕРЫ И ПРОТОКОЛЫ ══ -->
     <div id="screenArchive" class="screen">
       <div class="panel">
+        <div class="panel-title">📋 Прикрепить скан ростера</div>
+        <div class="hint" style="margin-bottom:12px">
+          Для ростеров, напечатанных во вкладке «📋 Ростер» (в том числе с людьми, которых ещё
+          нет в базе — зачисления группы тут не было, привязывать скан не к чему, кроме курса
+          и даты). Если ростер шёл через обычное зачисление группы на вкладке «👥 Группа» —
+          та форма архивирует скан сама, эта не нужна.
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px">
+          <div class="field" style="margin-bottom:0">
+            <label>Название курса</label>
+            <select id="archiveRosterCourseSelect"></select>
+          </div>
+          <div class="field" style="margin-bottom:0">
+            <label>Дата</label>
+            <input type="date" id="archiveRosterDate">
+          </div>
+          <div class="field" style="margin-bottom:0">
+            <label>Участок</label>
+            <select id="archiveRosterSite">
+              <option value="Алмалы">Алмалы</option>
+              <option value="Ашыктас">Ашыктас</option>
+              <option value="">Оба участка</option>
+            </select>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <label class="btn btn-ghost" style="cursor:pointer" for="archiveRosterFile">📋 Выбрать файл (фото или PDF)</label>
+          <input type="file" id="archiveRosterFile" accept="image/*,application/pdf" style="display:none" onchange="submitRosterUpload(this)">
+          <span id="archiveRosterUploadStatus" style="font-size:12px;color:var(--gray)"></span>
+        </div>
+      </div>
+
+      <div class="panel">
         <div class="panel-title">📎 Прикрепить протокол экзамена</div>
         <div class="hint" style="margin-bottom:12px">
           Скан/фото протокола сохранится на Google Диске и привяжется к выбранному тесту —
-          его можно будет открыть отсюда в любой момент. Ростеры очного обучения архивируются
-          автоматически при зачислении группы — вкладка «👥 Группа».
+          его можно будет открыть отсюда в любой момент.
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px">
           <div class="field" style="margin-bottom:0">
@@ -728,6 +766,51 @@ td { padding:8px; border-bottom:1px solid var(--border); }
         </div>
       </div>
     </div>
+
+    <!-- ══ РОСТЕР ОБУЧЕНИЯ ══ -->
+    <div id="screenRoster" class="screen">
+      <div class="panel">
+        <div class="panel-title">📋 Ростер обучения</div>
+        <div class="hint" style="margin-bottom:12px">
+          Печать бланка на подпись — сама печать никуда не пишет в базе. Подписанный скан
+          после занятия загружается как обычно во вкладке «🗂 Архив» (тип «ростер»).
+          Участок в шапке — по переключателю вверху страницы.
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 200px;gap:12px;margin-bottom:12px">
+          <div class="field" style="margin-bottom:0">
+            <label>Название курса</label>
+            <select id="rosterCourseSelect"></select>
+          </div>
+          <div class="field" style="margin-bottom:0">
+            <label>Инструктор</label>
+            <input type="text" id="rosterInstructor" placeholder="Фамилия Имя Отчество">
+          </div>
+          <div class="field" style="margin-bottom:0">
+            <label>Дата</label>
+            <input type="date" id="rosterDate">
+          </div>
+        </div>
+      </div>
+
+      <div class="panel no-print">
+        <div class="panel-title">Обучаемые</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
+          <input type="text" id="rosterEmpInput" list="planEmpList" placeholder="Начните вводить имя сотрудника..." style="flex:1;min-width:220px">
+          <button class="btn-ghost" style="width:auto;padding:8px 14px" onclick="addRosterEmpFromInput()">➕ Добавить из сотрудников</button>
+          <button class="btn-ghost" style="width:auto;padding:8px 14px" onclick="addRosterEmptyRow()">➕ Пустая строка</button>
+          <button class="btn-ghost" style="width:auto;padding:8px 14px" onclick="clearRosterRows()">Очистить список</button>
+        </div>
+        <div id="rosterRowsList"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">
+          Печать
+          <button class="btn-gold" style="width:auto;padding:8px 16px" onclick="printRoster()">🖨 Печать / PDF</button>
+        </div>
+        <div class="hint">Пустое ФИО в строке при печати пропускается — можно оставить запас пустых строк на будущее.</div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -775,7 +858,7 @@ function logout() {
 }
 
 function showScreen(name) {
-  ["plan","history","catalog","group","eval","timing","archive","requirements","print","certPrint"].forEach(s => {
+  ["plan","history","catalog","group","eval","timing","archive","requirements","print","certPrint","roster"].forEach(s => {
     document.getElementById("screen"+s.charAt(0).toUpperCase()+s.slice(1)).classList.remove("active");
     document.getElementById("nav"+s.charAt(0).toUpperCase()+s.slice(1)).classList.remove("active");
   });
@@ -864,6 +947,7 @@ function renderAll() {
   renderPrintSelect();
   renderDrivingPrintSelect();
   renderCertPrintSelect("profession");
+  renderRosterRows();
 }
 
 function renderSiteSwitch() {
@@ -941,7 +1025,7 @@ function empIdFromInput(text) {
 }
 
 function renderCourseSelect() {
-  ["planCourseSelect", "groupCourseSelect"].forEach(id => {
+  ["planCourseSelect", "groupCourseSelect", "rosterCourseSelect", "archiveRosterCourseSelect"].forEach(id => {
     const el = document.getElementById(id);
     if (!el) return;
     const cur = el.value;
@@ -1218,6 +1302,41 @@ async function prepareFileForUpload(file) {
 function isoToRuLocal(iso) {
   const m = String(iso||"").match(/^(\d{4})-(\d{2})-(\d{2})/);
   return m ? `${m[3]}.${m[2]}.${m[1]}` : "";
+}
+
+// Загрузка скана ростера без привязки к зачислению группы (когда часть или
+// все обучаемые ещё не в базе — batchId неоткуда взять). Тот же archiveDocs,
+// просто linkedIds пустой — привязка только по курсу/дате/участку в метаданных.
+async function submitRosterUpload(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const course = document.getElementById("archiveRosterCourseSelect").value;
+  if (!course) { alert("Сначала выберите название курса"); input.value = ""; return; }
+  const dateIso = document.getElementById("archiveRosterDate").value;
+  const site = document.getElementById("archiveRosterSite").value;
+  const statusEl = document.getElementById("archiveRosterUploadStatus");
+  if (statusEl) statusEl.textContent = "⏳ Загружаю...";
+  try {
+    const { base64, mimeType } = await prepareFileForUpload(file);
+    const res = await fetch(CFG.SHEET_URL, { method:"POST", body: JSON.stringify({
+      action: "uploadDocument",
+      image: base64, mimeType,
+      fileName: file.name,
+      type: "ростер",
+      title: course,
+      date: dateIso ? isoToRuLocal(dateIso) : "",
+      site,
+    })});
+    const val = await res.json();
+    if (!val.ok) { if (statusEl) statusEl.textContent = ""; alert("Не удалось загрузить: " + (val.error||"")); return; }
+    if (statusEl) statusEl.textContent = "✓ Загружено";
+    await loadAll(["archiveDocs"]);
+  } catch (e) {
+    if (statusEl) statusEl.textContent = "";
+    alert("Ошибка: " + e.message);
+  } finally {
+    input.value = "";
+  }
 }
 
 async function submitProtocolUpload(input) {
@@ -3798,6 +3917,120 @@ function professionTraining() {
   return (DATA.trainingHistory||[]).filter(r => !r.validUntil);
 }
 
+// ══════════════════════════════════════════════════════════
+// РОСТЕР ОБУЧЕНИЯ — бланк на подпись (курс + инструктор + дата + список).
+// Ничего не пишет в базу: это только печать. Строки — свободный текст
+// (ФИО/Департамент), а не привязка к empId — так одинаково просто добавить
+// и уже существующего сотрудника, и человека, которого в базе ещё нет.
+// ══════════════════════════════════════════════════════════
+let ROSTER_ROWS = [];
+
+function renderRosterRows() {
+  const el = document.getElementById("rosterRowsList");
+  if (!el) return;
+  if (!ROSTER_ROWS.length) {
+    el.innerHTML = `<div class="hint">Список пуст — добавьте сотрудников или пустые строки выше.</div>`;
+    return;
+  }
+  el.innerHTML = `<div style="overflow-x:auto"><table>
+    <thead><tr><th style="width:36px">№</th><th>ФИО</th><th>Департамент</th><th style="width:36px"></th></tr></thead>
+    <tbody>${ROSTER_ROWS.map((r,i) => `
+      <tr>
+        <td>${i+1}</td>
+        <td><input type="text" value="${escapeHtml(r.name)}" oninput="updateRosterRow(${i},'name',this.value)" style="width:100%"></td>
+        <td><input type="text" value="${escapeHtml(r.dept)}" oninput="updateRosterRow(${i},'dept',this.value)" style="width:100%"></td>
+        <td><button class="btn-ghost" style="width:auto;padding:4px 10px" onclick="removeRosterRow(${i})">✕</button></td>
+      </tr>`).join("")}</tbody>
+  </table></div>`;
+}
+
+function updateRosterRow(i, field, value) {
+  if (!ROSTER_ROWS[i]) return;
+  ROSTER_ROWS[i][field] = value;
+}
+
+function removeRosterRow(i) {
+  ROSTER_ROWS.splice(i, 1);
+  renderRosterRows();
+}
+
+function clearRosterRows() {
+  if (ROSTER_ROWS.length && !confirm("Очистить весь список?")) return;
+  ROSTER_ROWS = [];
+  renderRosterRows();
+}
+
+function addRosterEmptyRow() {
+  ROSTER_ROWS.push({ name: "", dept: "" });
+  renderRosterRows();
+}
+
+// Добавление из существующих сотрудников — тот же datalist ("planEmpList"),
+// что и на вкладке «План». Департамент такого поля в системе вообще нет
+// (проверено — ни в Код.gs, ни на фронтах), поэтому подставляем только ФИО,
+// департамент вписывается вручную, как и для людей не из базы.
+function addRosterEmpFromInput() {
+  const input = document.getElementById("rosterEmpInput");
+  const raw = String(input.value||"").trim();
+  if (!raw) return;
+  const name = raw.replace(/\s*\[[^\]]*\]\s*$/, "").trim();
+  ROSTER_ROWS.push({ name, dept: "" });
+  input.value = "";
+  renderRosterRows();
+}
+
+function printRoster() {
+  const course = document.getElementById("rosterCourseSelect").value;
+  const instructor = document.getElementById("rosterInstructor").value.trim();
+  const dateIso = document.getElementById("rosterDate").value;
+  if (!course) { alert("Выберите название курса"); return; }
+  if (!instructor) { alert("Укажите фамилию инструктора"); return; }
+
+  const rows = ROSTER_ROWS.filter(r => r.name.trim());
+  if (!rows.length) { alert("Добавьте хотя бы одного обучаемого"); return; }
+
+  const dateRu = dateIso ? isoToRuLocal(dateIso) : "";
+  let area = document.getElementById("printArea");
+  if (area) area.remove();
+  area = document.createElement("div");
+  area.id = "printArea";
+  area.className = "roster-sheet";
+  area.style.cssText = "display:none";
+  area.innerHTML = `
+    <div style="font-family:Arial,sans-serif;color:#111">
+      <div style="font-size:13px;margin-bottom:4px"><b>Участок:</b> ${escapeHtml(CURRENT_SITE)}</div>
+      <div style="font-size:13px;margin-bottom:4px"><b>Инструктор:</b> ${escapeHtml(instructor)}</div>
+      <div style="font-size:13px;margin-bottom:4px"><b>Название курса:</b> ${escapeHtml(course)}</div>
+      <div style="font-size:13px;margin-bottom:12px"><b>Дата:</b> ${escapeHtml(dateRu||"—")}</div>
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead>
+          <tr>
+            <th style="border:1px solid #333;padding:4px">№</th>
+            <th style="border:1px solid #333;padding:4px">ФИО</th>
+            <th style="border:1px solid #333;padding:4px">Департамент</th>
+            <th style="border:1px solid #333;padding:4px">Дата</th>
+            <th style="border:1px solid #333;padding:4px">Подпись</th>
+            <th style="border:1px solid #333;padding:4px">Практика/Дата</th>
+            <th style="border:1px solid #333;padding:4px">Подпись</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map((r,i) => `<tr>
+            <td style="border:1px solid #333;padding:4px;text-align:center">${i+1}</td>
+            <td style="border:1px solid #333;padding:4px">${escapeHtml(r.name)}</td>
+            <td style="border:1px solid #333;padding:4px">${escapeHtml(r.dept)}</td>
+            <td style="border:1px solid #333;padding:4px"></td>
+            <td style="border:1px solid #333;padding:4px"></td>
+            <td style="border:1px solid #333;padding:4px"></td>
+            <td style="border:1px solid #333;padding:4px"></td>
+          </tr>`).join("")}
+        </tbody>
+      </table>
+    </div>`;
+  document.body.appendChild(area);
+  area.style.cssText = "";
+  requestAnimationFrame(() => requestAnimationFrame(() => window.print()));
+}
 
 </script>
 </body>
