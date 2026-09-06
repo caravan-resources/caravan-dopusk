@@ -4001,6 +4001,10 @@ function printRoster() {
   area.style.cssText = "display:none";
   area.innerHTML = `
     <div style="font-family:Arial,sans-serif;color:#111">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;border-bottom:2px solid #0B1A35;padding-bottom:10px">
+        <img src="${CR_LOGO_SRC}" style="height:14mm;width:auto;object-fit:contain">
+        <div style="font-size:15px;font-weight:800;color:#0B1A35;letter-spacing:.02em">CARAVAN RESOURCES</div>
+      </div>
       <div style="font-size:13px;margin-bottom:4px"><b>Участок:</b> ${escapeHtml(CURRENT_SITE)}</div>
       <div style="font-size:13px;margin-bottom:4px"><b>Инструктор:</b> ${escapeHtml(instructor)}</div>
       <div style="font-size:13px;margin-bottom:4px"><b>Название курса:</b> ${escapeHtml(course)}</div>
