@@ -776,7 +776,14 @@ td { padding:8px; border-bottom:1px solid var(--border); }
           после занятия загружается как обычно во вкладке «🗂 Архив» (тип «ростер»).
           Участок в шапке — по переключателю вверху страницы.
         </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr 200px;gap:12px;margin-bottom:12px">
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr 200px;gap:12px;margin-bottom:12px">
+          <div class="field" style="margin-bottom:0">
+            <label>Тип ростера</label>
+            <select id="rosterType">
+              <option value="dopusk">Допуск / инструктаж</option>
+              <option value="profession">Обучение по профессии (теория + практика)</option>
+            </select>
+          </div>
           <div class="field" style="margin-bottom:0">
             <label>Название курса</label>
             <select id="rosterCourseSelect"></select>
@@ -3983,6 +3990,7 @@ function addRosterEmpFromInput() {
 }
 
 function printRoster() {
+  const type = document.getElementById("rosterType").value;
   const course = document.getElementById("rosterCourseSelect").value;
   const instructor = document.getElementById("rosterInstructor").value.trim();
   const dateIso = document.getElementById("rosterDate").value;
@@ -3993,6 +4001,18 @@ function printRoster() {
   if (!rows.length) { alert("Добавьте хотя бы одного обучаемого"); return; }
 
   const dateRu = dateIso ? isoToRuLocal(dateIso) : "";
+
+  // «Допуск/инструктаж» — короткая таблица (только итоговая подпись).
+  // «Обучение по профессии» — добавляются колонки теории и практики отдельно,
+  // как в исходном бумажном бланке (Дата/Подпись — теория, затем ещё раз
+  // Дата/Подпись — практика).
+  const headCols = type === "profession"
+    ? ["№","ФИО","Должность","Департамент","Дата","Подпись","Практика/Дата","Подпись"]
+    : ["№","ФИО","Должность","Департамент","Подпись"];
+  const rowCols = (r,i) => type === "profession"
+    ? [i+1, escapeHtml(r.name), escapeHtml(r.position), escapeHtml(r.department), "", "", "", ""]
+    : [i+1, escapeHtml(r.name), escapeHtml(r.position), escapeHtml(r.department), ""];
+
   let area = document.getElementById("printArea");
   if (area) area.remove();
   area = document.createElement("div");
@@ -4011,22 +4031,10 @@ function printRoster() {
       <div style="font-size:13px;margin-bottom:12px"><b>Дата:</b> ${escapeHtml(dateRu||"—")}</div>
       <table style="width:100%;border-collapse:collapse;font-size:12px">
         <thead>
-          <tr>
-            <th style="border:1px solid #333;padding:4px">№</th>
-            <th style="border:1px solid #333;padding:4px">ФИО</th>
-            <th style="border:1px solid #333;padding:4px">Должность</th>
-            <th style="border:1px solid #333;padding:4px">Департамент</th>
-            <th style="border:1px solid #333;padding:4px">Подпись</th>
-          </tr>
+          <tr>${headCols.map(h => `<th style="border:1px solid #333;padding:4px">${h}</th>`).join("")}</tr>
         </thead>
         <tbody>
-          ${rows.map((r,i) => `<tr>
-            <td style="border:1px solid #333;padding:4px;text-align:center">${i+1}</td>
-            <td style="border:1px solid #333;padding:4px">${escapeHtml(r.name)}</td>
-            <td style="border:1px solid #333;padding:4px">${escapeHtml(r.position)}</td>
-            <td style="border:1px solid #333;padding:4px">${escapeHtml(r.department)}</td>
-            <td style="border:1px solid #333;padding:4px"></td>
-          </tr>`).join("")}
+          ${rows.map((r,i) => `<tr>${rowCols(r,i).map((v,ci) => `<td style="border:1px solid #333;padding:4px${ci===0?';text-align:center':''}">${v}</td>`).join("")}</tr>`).join("")}
         </tbody>
       </table>
     </div>`;
