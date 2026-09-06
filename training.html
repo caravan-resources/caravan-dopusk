@@ -3920,7 +3920,7 @@ function professionTraining() {
 // ══════════════════════════════════════════════════════════
 // РОСТЕР ОБУЧЕНИЯ — бланк на подпись (курс + инструктор + дата + список).
 // Ничего не пишет в базу: это только печать. Строки — свободный текст
-// (ФИО/Департамент), а не привязка к empId — так одинаково просто добавить
+// (ФИО/Должность), а не привязка к empId — так одинаково просто добавить
 // и уже существующего сотрудника, и человека, которого в базе ещё нет.
 // ══════════════════════════════════════════════════════════
 let ROSTER_ROWS = [];
@@ -3933,12 +3933,12 @@ function renderRosterRows() {
     return;
   }
   el.innerHTML = `<div style="overflow-x:auto"><table>
-    <thead><tr><th style="width:36px">№</th><th>ФИО</th><th>Департамент</th><th style="width:36px"></th></tr></thead>
+    <thead><tr><th style="width:36px">№</th><th>ФИО</th><th>Должность</th><th style="width:36px"></th></tr></thead>
     <tbody>${ROSTER_ROWS.map((r,i) => `
       <tr>
         <td>${i+1}</td>
         <td><input type="text" value="${escapeHtml(r.name)}" oninput="updateRosterRow(${i},'name',this.value)" style="width:100%"></td>
-        <td><input type="text" value="${escapeHtml(r.dept)}" oninput="updateRosterRow(${i},'dept',this.value)" style="width:100%"></td>
+        <td><input type="text" value="${escapeHtml(r.dept)}" oninput="updateRosterRow(${i},'dept',this.value)" style="width:100%" placeholder="Подставится само из базы"></td>
         <td><button class="btn-ghost" style="width:auto;padding:4px 10px" onclick="removeRosterRow(${i})">✕</button></td>
       </tr>`).join("")}</tbody>
   </table></div>`;
@@ -3966,15 +3966,18 @@ function addRosterEmptyRow() {
 }
 
 // Добавление из существующих сотрудников — тот же datalist ("planEmpList"),
-// что и на вкладке «План». Департамент такого поля в системе вообще нет
-// (проверено — ни в Код.gs, ни на фронтах), поэтому подставляем только ФИО,
-// департамент вписывается вручную, как и для людей не из базы.
+// что и на вкладке «План». Отдельного поля "департамент" в системе нет
+// (проверено — ни в Код.gs, ни на фронтах), поэтому подставляем должность
+// из карточки сотрудника (она есть в личном деле) — для людей не из базы
+// это поле остаётся пустым и вписывается вручную.
 function addRosterEmpFromInput() {
   const input = document.getElementById("rosterEmpInput");
   const raw = String(input.value||"").trim();
   if (!raw) return;
-  const name = raw.replace(/\s*\[[^\]]*\]\s*$/, "").trim();
-  ROSTER_ROWS.push({ name, dept: "" });
+  const empId = empIdFromInput(raw);
+  const emp = empId ? (DATA.employees||[]).find(e => String(e.id) === String(empId)) : null;
+  const name = emp ? emp.name : raw.replace(/\s*\[[^\]]*\]\s*$/, "").trim();
+  ROSTER_ROWS.push({ name, dept: emp ? (emp.position||"") : "" });
   input.value = "";
   renderRosterRows();
 }
@@ -4007,10 +4010,8 @@ function printRoster() {
           <tr>
             <th style="border:1px solid #333;padding:4px">№</th>
             <th style="border:1px solid #333;padding:4px">ФИО</th>
-            <th style="border:1px solid #333;padding:4px">Департамент</th>
+            <th style="border:1px solid #333;padding:4px">Должность</th>
             <th style="border:1px solid #333;padding:4px">Дата</th>
-            <th style="border:1px solid #333;padding:4px">Подпись</th>
-            <th style="border:1px solid #333;padding:4px">Практика/Дата</th>
             <th style="border:1px solid #333;padding:4px">Подпись</th>
           </tr>
         </thead>
@@ -4019,8 +4020,6 @@ function printRoster() {
             <td style="border:1px solid #333;padding:4px;text-align:center">${i+1}</td>
             <td style="border:1px solid #333;padding:4px">${escapeHtml(r.name)}</td>
             <td style="border:1px solid #333;padding:4px">${escapeHtml(r.dept)}</td>
-            <td style="border:1px solid #333;padding:4px"></td>
-            <td style="border:1px solid #333;padding:4px"></td>
             <td style="border:1px solid #333;padding:4px"></td>
             <td style="border:1px solid #333;padding:4px"></td>
           </tr>`).join("")}
