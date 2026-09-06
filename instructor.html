@@ -520,7 +520,7 @@ tr:hover td { background:#FAFBFD; }
               <tr>
                 <th></th><th>Сотрудник</th><th>Должность</th><th>Участок</th>
                 <th>Дата прохождения</th><th>Действителен до</th>
-                <th style="padding-left:8px;padding-right:8px">Статус</th><th style="padding-left:8px;padding-right:8px">Дней</th><th style="padding-left:8px;padding-right:8px">Вождение</th>
+                <th style="padding-left:8px;padding-right:8px">Статус</th><th style="padding-left:8px;padding-right:8px">Дней</th><th style="padding-left:8px;padding-right:8px">Вождение</th><th></th>
               </tr>
             </thead>
             <tbody id="accessTableBody"></tbody>
@@ -3461,6 +3461,10 @@ function renderAccessTable() {
       <td style="padding-left:8px;padding-right:8px">${statusBadge(st)}</td>
       <td style="padding-left:8px;padding-right:8px;font-weight:700;color:${st==="expired"?"var(--red)":st==="warning"?"var(--yellow)":"var(--gray)"}">${daysStr}</td>
       <td style="white-space:nowrap;font-size:12px;padding-left:8px;padding-right:8px">${driving ? compactStatusDot(drivingSt, daysLeft(driving.validUntil)) : `<span style="color:var(--gray)">—</span>`}</td>
+      <td style="padding-left:8px;padding-right:8px">
+        <button class="btn btn-ghost" style="width:auto;padding:4px 10px;font-size:11px" title="Ручной ввод даты допуска — аварийный путь, если сдача теста не записала дату сама"
+          onclick="openEditAccessDate('${e.id}','${escapeHtml(e.name).replace(/'/g,"\\'")}')">✏️</button>
+      </td>
     </tr>`;
   }).join("");
 }
@@ -3490,6 +3494,74 @@ function exportAccessCSV() {
     ];
   });
   downloadCSV([headers,...rows],`Допуски_${today()}.csv`);
+}
+
+// ── Ручной ввод даты допуска ─────────────────────────────
+// Аварийный путь: обычно passDate/validUntil трогает только updateAccess
+// при сдаче теста (см. Код.gs, updateEmployee эти поля намеренно не
+// редактирует). Но если этот вызов не прошёл из-за сетевого сбоя (см.
+// syncFailWarning в index.html) — раньше единственным выходом было
+// пересдавать тест. Использует тот же updateAccess, что и сама сдача теста.
+function openEditAccessDate(empId, empName) {
+  const emp = (DATA.employees||[]).find(e => String(e.id) === String(empId));
+  const passVal = emp && emp.passDate ? toDateInputValue(emp.passDate) : "";
+  const validVal = emp && emp.validUntil ? toDateInputValue(emp.validUntil) : "";
+  openModal(`
+    <div style="font-size:16px;font-weight:800;color:var(--navy);margin-bottom:6px">✏️ Дата допуска вручную</div>
+    <div class="hint" style="margin-bottom:14px">
+      ${escapeHtml(empName)}. Аварийный путь — если сдача теста не записала дату сама
+      (см. предупреждение о сбое связи в приложении сдачи теста). Действителен до по умолчанию — плюс год от даты прохождения.
+    </div>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <label style="font-size:12px;font-weight:700;color:var(--gray)">Дата прохождения
+        <input type="date" id="editAccessPassDate" value="${passVal}" onchange="autofillEditAccessValidUntil()"
+          style="width:100%;margin-top:4px;padding:10px;border:1px solid var(--border);border-radius:8px">
+      </label>
+      <label style="font-size:12px;font-weight:700;color:var(--gray)">Действителен до
+        <input type="date" id="editAccessValidUntil" value="${validVal}"
+          style="width:100%;margin-top:4px;padding:10px;border:1px solid var(--border);border-radius:8px">
+      </label>
+    </div>
+    <div style="display:flex;gap:10px;margin-top:18px">
+      <button class="btn btn-gold" style="flex:1" onclick="saveEditAccessDate('${empId}')">Сохранить</button>
+      <button class="btn btn-ghost" style="flex:1" onclick="closeModal()">Отмена</button>
+    </div>
+  `);
+}
+
+// dd.mm.yyyy / Date-строка → yyyy-mm-dd для value инпута type=date.
+function toDateInputValue(d) {
+  const dt = parseRecordDate(d);
+  if (!dt) return "";
+  const y = dt.getFullYear(), m = String(dt.getMonth()+1).padStart(2,"0"), day = String(dt.getDate()).padStart(2,"0");
+  return `${y}-${m}-${day}`;
+}
+
+function autofillEditAccessValidUntil() {
+  const passEl = document.getElementById("editAccessPassDate");
+  const validEl = document.getElementById("editAccessValidUntil");
+  if (!passEl.value || validEl.value) return; // не перетираем, если уже что-то стоит
+  const d = new Date(passEl.value + "T00:00:00");
+  d.setFullYear(d.getFullYear() + 1);
+  validEl.value = d.toISOString().split("T")[0];
+}
+
+async function saveEditAccessDate(empId) {
+  const passDate = document.getElementById("editAccessPassDate").value;
+  const validUntil = document.getElementById("editAccessValidUntil").value;
+  if (!passDate) { alert("Укажите дату прохождения"); return; }
+  try {
+    const res = await fetch(CFG.SHEET_URL, { method:"POST", body: JSON.stringify({
+      action: "updateAccess",
+      empName: "", passDate, validUntil, position: "", site: "", empId,
+    })});
+    const data = await res.json();
+    if (!data.ok) { alert("Не удалось сохранить: " + (data.error||"неизвестная ошибка")); return; }
+    closeModal();
+    await loadAll();
+  } catch (e) {
+    alert("Ошибка сети: " + e.message);
+  }
 }
 
 // ══════════════════════════════════════════════════════
