@@ -3529,13 +3529,9 @@ function openEditAccessDate(empId, empName) {
   `);
 }
 
-// dd.mm.yyyy / Date-строка → yyyy-mm-dd для value инпута type=date.
-function toDateInputValue(d) {
-  const dt = parseRecordDate(d);
-  if (!dt) return "";
-  const y = dt.getFullYear(), m = String(dt.getMonth()+1).padStart(2,"0"), day = String(dt.getDate()).padStart(2,"0");
-  return `${y}-${m}-${day}`;
-}
+// dd.mm.yyyy / Date-строка → yyyy-mm-dd для value инпута type=date —
+// см. toDateInputValue() ниже (уже была в файле, используется формой
+// редактирования личного дела; та же реализация, дублировать незачем).
 
 function autofillEditAccessValidUntil() {
   const passEl = document.getElementById("editAccessPassDate");
@@ -3958,6 +3954,7 @@ function selectPersonnelEmployee(id) {
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;font-size:12px">
         <div><span style="color:var(--gray)">ТОО (основное):</span> <b>${emp.tooPrimary||"—"}</b></div>
         <div><span style="color:var(--gray)">ТОО (доп.):</span> <b>${escapeHtml(emp.tooSecondary||"—")}</b></div>
+        <div><span style="color:var(--gray)">Департамент:</span> <b>${escapeHtml(emp.department||"—")}</b></div>
         <div><span style="color:var(--gray)">Дата приёма:</span> <b>${fmtDate(emp.hireDate)}</b></div>
         <div><span style="color:var(--gray)">Телефон:</span> <b>${escapeHtml(emp.phone||"—")}</b></div>
         <div style="grid-column:1/-1"><span style="color:var(--gray)">Адрес:</span> <b>${escapeHtml(emp.address||"—")}</b></div>
@@ -4398,6 +4395,7 @@ function openEditEmployeeModal(id) {
       <input type="text" id="editPositionOther" placeholder="Укажите должность"
         value="${escapeHtml(!isPreset ? esc(emp.position) : "")}"
         style="display:${escapeHtml(!isPreset && emp.position ? "block" : "none")};padding:10px;border:1px solid var(--border);border-radius:8px">
+      <input id="editDepartment" placeholder="Департамент (напр. УГР)" value="${esc(emp.department)}" style="padding:10px;border:1px solid var(--border);border-radius:8px">
       <select id="editSite" style="padding:10px;border:1px solid var(--border);border-radius:8px">
         <option value="" ${!(emp.site||"").trim()?"selected":""}>Участок — не указан</option>
         <option value="Алмалы" ${(emp.site||"").trim()==="Алмалы"?"selected":""}>Алмалы</option>
@@ -4459,6 +4457,7 @@ async function submitEditEmployee(id) {
     id,
     name,
     position: getPositionValue("edit"),
+    department: document.getElementById("editDepartment").value.trim(),
     site: document.getElementById("editSite").value,
     tooPrimary: document.getElementById("editToo").value,
     tooSecondary: document.getElementById("editTooSecondary").value,
