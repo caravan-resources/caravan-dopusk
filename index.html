@@ -531,6 +531,14 @@ document.addEventListener("DOMContentLoaded", () => {
         <a href="anketa.html" style="color:var(--red)">анкету</a>, затем пройдите тест повторно.</span>
       </div>
 
+      <div id="syncFailWarning" style="display:none;background:var(--redbg);
+        border:1px solid var(--red);border-radius:10px;padding:12px;
+        margin-bottom:16px;font-size:13px;color:var(--red);font-weight:700;text-align:left">
+        ⚠ Результат теста сохранён, но допуск/обучение НЕ обновились в базе — сбой связи с сервером.<br>
+        <span style="font-weight:400">Сообщите инструктору: нужно проверить карточку сотрудника и
+        при необходимости внести дату вручную.</span>
+      </div>
+
       <!-- Разбор -->
       <details style="text-align:left;margin-bottom:16px">
         <summary style="cursor:pointer;font-weight:800;color:var(--navy);
@@ -1101,91 +1109,104 @@ async function saveResultToSheets(result) {
       const test = TESTS.find(t => t.id === result.testId) || {};
       const testType = test.testType || "dopusk"; // "dopusk" или "profession"
 
-      let accessResponse; // ответ updateAccess — проверяем на notFound ниже
+      let accessResponse; // ответ updateAccess — проверяем ниже (notFound / любой другой сбой)
 
-      if (testType === "profession") {
-        // Профессиональное обучение — пишем в лист «Обучение», бессрочно
-        const dateStr = today.toLocaleDateString("ru-RU", {day:"2-digit",month:"2-digit",year:"numeric"});
-        await fetch(CFG.SHEET_URL, {
-          method:"POST",
-          body: JSON.stringify({
-            action:  "saveTraining",
-            empId:   state.selectedEmp?.id || "",
-            empName: result.empName,
-            course:  result.testTitle,
-            date:    dateStr,
-          })
-        });
-        // Также обновляем должность/участок если нужно
-        const r = await fetch(CFG.SHEET_URL, {
-          method:"POST",
-          body: JSON.stringify({
-            action: "updateAccess",
-            empName: result.empName,
-            passDate: "", validUntil: "",
-            position, site,
-            empId: state.selectedEmp?.id || "",
-          })
-        });
-        accessResponse = await r.json();
-        console.log("Обучение записано:", result.empName, result.testTitle);
-      } else if (testType === "instruktazh") {
-        // Ежегодный инструктаж (напр. безопасное вождение) — пишем в лист
-        // «Обучение», но со сроком действия 1 год, как допуск в карьер.
-        // НЕ трогает passDate/validUntil в «Сотрудники» — это отдельная
-        // от базового допуска годовая сертификация.
-        const dateStr = today.toLocaleDateString("ru-RU", {day:"2-digit",month:"2-digit",year:"numeric"});
-        const validDate = new Date(today);
-        validDate.setFullYear(validDate.getFullYear() + 1);
-        const validUntilStr = validDate.toLocaleDateString("ru-RU", {day:"2-digit",month:"2-digit",year:"numeric"});
-        await fetch(CFG.SHEET_URL, {
-          method:"POST",
-          body: JSON.stringify({
-            action:     "saveTraining",
-            empId:      state.selectedEmp?.id || "",
-            empName:    result.empName,
-            course:     result.testTitle,
-            date:       dateStr,
-            validUntil: validUntilStr,
-          })
-        });
-        const r = await fetch(CFG.SHEET_URL, {
-          method:"POST",
-          body: JSON.stringify({
-            action: "updateAccess",
-            empName: result.empName,
-            passDate: "", validUntil: "",
-            position, site,
-            empId: state.selectedEmp?.id || "",
-          })
-        });
-        accessResponse = await r.json();
-        console.log("Инструктаж записан:", result.empName, result.testTitle, "до", validUntilStr);
-      } else {
-        // Допуск в карьер — обновляем даты
-        const validDate = new Date(today);
-        validDate.setFullYear(validDate.getFullYear() + 1);
-        const validUntil = validDate.toISOString().split("T")[0];
-        const r = await fetch(CFG.SHEET_URL, {
-          method:"POST",
-          body: JSON.stringify({
-            action: "updateAccess",
-            empName: result.empName,
-            passDate: todayStr, validUntil,
-            position, site,
-            empId: state.selectedEmp?.id || "",
-          })
-        });
-        accessResponse = await r.json();
-        console.log("Допуск обновлён:", result.empName, todayStr, "→", validUntil);
+      try {
+        if (testType === "profession") {
+          // Профессиональное обучение — пишем в лист «Обучение», бессрочно
+          const dateStr = today.toLocaleDateString("ru-RU", {day:"2-digit",month:"2-digit",year:"numeric"});
+          await fetch(CFG.SHEET_URL, {
+            method:"POST",
+            body: JSON.stringify({
+              action:  "saveTraining",
+              empId:   state.selectedEmp?.id || "",
+              empName: result.empName,
+              course:  result.testTitle,
+              date:    dateStr,
+            })
+          });
+          // Также обновляем должность/участок если нужно
+          const r = await fetch(CFG.SHEET_URL, {
+            method:"POST",
+            body: JSON.stringify({
+              action: "updateAccess",
+              empName: result.empName,
+              passDate: "", validUntil: "",
+              position, site,
+              empId: state.selectedEmp?.id || "",
+            })
+          });
+          accessResponse = await r.json();
+          console.log("Обучение записано:", result.empName, result.testTitle);
+        } else if (testType === "instruktazh") {
+          // Ежегодный инструктаж (напр. безопасное вождение) — пишем в лист
+          // «Обучение», но со сроком действия 1 год, как допуск в карьер.
+          // НЕ трогает passDate/validUntil в «Сотрудники» — это отдельная
+          // от базового допуска годовая сертификация.
+          const dateStr = today.toLocaleDateString("ru-RU", {day:"2-digit",month:"2-digit",year:"numeric"});
+          const validDate = new Date(today);
+          validDate.setFullYear(validDate.getFullYear() + 1);
+          const validUntilStr = validDate.toLocaleDateString("ru-RU", {day:"2-digit",month:"2-digit",year:"numeric"});
+          await fetch(CFG.SHEET_URL, {
+            method:"POST",
+            body: JSON.stringify({
+              action:     "saveTraining",
+              empId:      state.selectedEmp?.id || "",
+              empName:    result.empName,
+              course:     result.testTitle,
+              date:       dateStr,
+              validUntil: validUntilStr,
+            })
+          });
+          const r = await fetch(CFG.SHEET_URL, {
+            method:"POST",
+            body: JSON.stringify({
+              action: "updateAccess",
+              empName: result.empName,
+              passDate: "", validUntil: "",
+              position, site,
+              empId: state.selectedEmp?.id || "",
+            })
+          });
+          accessResponse = await r.json();
+          console.log("Инструктаж записан:", result.empName, result.testTitle, "до", validUntilStr);
+        } else {
+          // Допуск в карьер — обновляем даты
+          const validDate = new Date(today);
+          validDate.setFullYear(validDate.getFullYear() + 1);
+          const validUntil = validDate.toISOString().split("T")[0];
+          const r = await fetch(CFG.SHEET_URL, {
+            method:"POST",
+            body: JSON.stringify({
+              action: "updateAccess",
+              empName: result.empName,
+              passDate: todayStr, validUntil,
+              position, site,
+              empId: state.selectedEmp?.id || "",
+            })
+          });
+          accessResponse = await r.json();
+          console.log("Допуск обновлён:", result.empName, todayStr, "→", validUntil);
+        }
+      } catch (accessErr) {
+        // Сетевой сбой/таймаут именно на этом запросе — раньше уходило молча
+        // в общий catch и терялось. Теперь accessResponse остаётся undefined,
+        // и ниже это покажет предупреждение оператору, а не тишину.
+        console.log("Ошибка обновления допуска/обучения:", accessErr);
+        accessResponse = undefined;
       }
 
-      // Сервер отказал (сотрудника нет в базе) — результат теста НЕ записан
-      // как допуск/обучение. Экран результата уже показан синхронно,
-      // поэтому предупреждение встраиваем постфактум, как только известен
-      // реальный статус, а не притворяемся, что всё прошло успешно.
+      // Сервер отказал — результат теста НЕ записан как допуск/обучение.
+      // Экран результата уже показан синхронно, поэтому предупреждение
+      // встраиваем постфактум, как только известен реальный статус, а не
+      // притворяемся, что всё прошло успешно. Два разных случая:
+      // «не найден в базе» (notFound) и любой другой сбой (сеть/сервер/
+      // отсутствие ответа) — раньше второй случай не показывался вообще.
       if (accessResponse && accessResponse.notFound) {
         const warn = document.getElementById("notFoundWarning");
+        if (warn) warn.style.display = "block";
+      } else if (!accessResponse || accessResponse.ok !== true) {
+        const warn = document.getElementById("syncFailWarning");
         if (warn) warn.style.display = "block";
       }
     }
@@ -1223,6 +1244,7 @@ function showResult(result) {
   // Сбрасываем предупреждение "не найден в базе" — актуальный статус
   // придёт асинхронно из saveResultToSheets, когда ответит сервер.
   document.getElementById("notFoundWarning").style.display = "none";
+  document.getElementById("syncFailWarning").style.display = "none";
 
   // Кнопка повтора
   document.getElementById("retryBtn").style.display = result.passed?"none":"block";
