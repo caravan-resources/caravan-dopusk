@@ -1097,7 +1097,7 @@ function nextEmployeeId(too) {
 }
 
 function ensureEmpColumns(sheet, headers) {
-  const needed = ["tooPrimary", "tooSecondary", "hireDate", "address", "education", "experienceYears", "specialties", "additionalSkills", "email", "certificates", "courses"];
+  const needed = ["tooPrimary", "tooSecondary", "hireDate", "address", "education", "experienceYears", "specialties", "additionalSkills", "email", "certificates", "courses", "department"];
   let lastCol = headers.length;
   needed.forEach(col => {
     if (headers.indexOf(col) < 0) {
@@ -1113,7 +1113,7 @@ function ensureEmpColumns(sheet, headers) {
 function hireEmployee(p) {
   const { name, position, site, too, tooSecondary, hireDate, phone, address,
           education, experienceYears, specialties, additionalSkills, email, certificates, courses,
-          photoUrl, force } = p || {};
+          department, photoUrl, force } = p || {};
 
   if (!name || !too) {
     return json({ ok: false, error: "Нужны как минимум имя и основное ТОО" });
@@ -1155,6 +1155,7 @@ function hireEmployee(p) {
     if (h === "id")             return newId;
     if (h === "name")           return name;
     if (h === "position")       return position || "";
+    if (h === "department")     return department || "";
     if (h === "site")           return site || "";
     if (h === "phone")          return phone || "";
     if (h === "tooPrimary")     return too;
@@ -1321,7 +1322,7 @@ function savePersonnelEvent(empId, empName, type, date, description, issuedBy, e
 function updateEmployee(p) {
   const { id, name, position, site, tooPrimary, tooSecondary, phone, email,
           address, hireDate, education, experienceYears, specialties,
-          additionalSkills, certificates, courses } = p || {};
+          additionalSkills, certificates, courses, department } = p || {};
 
   if (!id)   return json({ ok: false, error: "Нужен id сотрудника" });
   if (!name) return json({ ok: false, error: "Нужно ФИО" });
@@ -1337,7 +1338,7 @@ function updateEmployee(p) {
 
   const values = { name, position, site, tooPrimary, tooSecondary, phone, email,
     address, hireDate, education, experienceYears, specialties, additionalSkills,
-    certificates, courses };
+    certificates, courses, department };
 
   for (let i = 1; i < rows0.length; i++) {
     if (String(rows0[i][idCol]).trim() === String(id).trim()) {
