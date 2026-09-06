@@ -4005,10 +4005,14 @@ function printRoster() {
   // «Допуск/инструктаж» — короткая таблица (только итоговая подпись).
   // «Обучение по профессии» — добавляются колонки теории и практики отдельно,
   // как в исходном бумажном бланке (Дата/Подпись — теория, затем ещё раз
-  // Дата/Подпись — практика).
+  // Дата/Подпись — практика). Ширины подобраны руками (запрошено: Должность
+  // вдвое уже, Департамент втрое уже, обе колонки "Дата" — одинаковой ширины).
   const headCols = type === "profession"
     ? ["№","ФИО","Должность","Департамент","Дата","Подпись","Практика/Дата","Подпись"]
     : ["№","ФИО","Должность","Департамент","Подпись"];
+  const colWidths = type === "profession"
+    ? [4, 27, 13, 6, 10, 10, 10, 10]
+    : [5, 44, 20, 9, 22];
   const rowCols = (r,i) => type === "profession"
     ? [i+1, escapeHtml(r.name), escapeHtml(r.position), escapeHtml(r.department), "", "", "", ""]
     : [i+1, escapeHtml(r.name), escapeHtml(r.position), escapeHtml(r.department), ""];
@@ -4021,20 +4025,23 @@ function printRoster() {
   area.style.cssText = "display:none";
   area.innerHTML = `
     <div style="font-family:Arial,sans-serif;color:#111">
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;border-bottom:2px solid #0B1A35;padding-bottom:10px">
-        <img src="${CR_LOGO_SRC}" style="height:14mm;width:auto;object-fit:contain">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;border-bottom:2px solid #0B1A35;padding-bottom:10px">
+        <div style="background:#0B1A35;padding:3mm 4mm;border-radius:2mm;flex-shrink:0">
+          <img src="${CR_LOGO_SRC}" style="height:12mm;width:auto;object-fit:contain;display:block">
+        </div>
         <div style="font-size:15px;font-weight:800;color:#0B1A35;letter-spacing:.02em">CARAVAN RESOURCES</div>
       </div>
       <div style="font-size:13px;margin-bottom:4px"><b>Участок:</b> ${escapeHtml(CURRENT_SITE)}</div>
       <div style="font-size:13px;margin-bottom:4px"><b>Инструктор:</b> ${escapeHtml(instructor)}</div>
       <div style="font-size:13px;margin-bottom:4px"><b>Название курса:</b> ${escapeHtml(course)}</div>
       <div style="font-size:13px;margin-bottom:12px"><b>Дата:</b> ${escapeHtml(dateRu||"—")}</div>
-      <table style="width:100%;border-collapse:collapse;font-size:12px">
+      <table style="width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed">
+        <colgroup>${colWidths.map(w => `<col style="width:${w}%">`).join("")}</colgroup>
         <thead>
-          <tr>${headCols.map(h => `<th style="border:1px solid #333;padding:4px">${h}</th>`).join("")}</tr>
+          <tr>${headCols.map(h => `<th style="border:1px solid #333;padding:3px;font-size:4px;text-transform:none;font-weight:700;color:#111;overflow-wrap:break-word">${h}</th>`).join("")}</tr>
         </thead>
         <tbody>
-          ${rows.map((r,i) => `<tr>${rowCols(r,i).map((v,ci) => `<td style="border:1px solid #333;padding:4px${ci===0?';text-align:center':''}">${v}</td>`).join("")}</tr>`).join("")}
+          ${rows.map((r,i) => `<tr>${rowCols(r,i).map((v,ci) => `<td style="border:1px solid #333;padding:4px;overflow-wrap:break-word${ci===0?';text-align:center':''}">${v}</td>`).join("")}</tr>`).join("")}
         </tbody>
       </table>
     </div>`;
