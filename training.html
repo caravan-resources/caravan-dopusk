@@ -3933,12 +3933,13 @@ function renderRosterRows() {
     return;
   }
   el.innerHTML = `<div style="overflow-x:auto"><table>
-    <thead><tr><th style="width:36px">№</th><th>ФИО</th><th>Должность</th><th style="width:36px"></th></tr></thead>
+    <thead><tr><th style="width:36px">№</th><th>ФИО</th><th>Должность</th><th>Департамент</th><th style="width:36px"></th></tr></thead>
     <tbody>${ROSTER_ROWS.map((r,i) => `
       <tr>
         <td>${i+1}</td>
         <td><input type="text" value="${escapeHtml(r.name)}" oninput="updateRosterRow(${i},'name',this.value)" style="width:100%"></td>
-        <td><input type="text" value="${escapeHtml(r.dept)}" oninput="updateRosterRow(${i},'dept',this.value)" style="width:100%" placeholder="Подставится само из базы"></td>
+        <td><input type="text" value="${escapeHtml(r.position)}" oninput="updateRosterRow(${i},'position',this.value)" style="width:100%" placeholder="Подставится само из базы"></td>
+        <td><input type="text" value="${escapeHtml(r.department)}" oninput="updateRosterRow(${i},'department',this.value)" style="width:100%" placeholder="Подставится само из базы"></td>
         <td><button class="btn-ghost" style="width:auto;padding:4px 10px" onclick="removeRosterRow(${i})">✕</button></td>
       </tr>`).join("")}</tbody>
   </table></div>`;
@@ -3961,15 +3962,14 @@ function clearRosterRows() {
 }
 
 function addRosterEmptyRow() {
-  ROSTER_ROWS.push({ name: "", dept: "" });
+  ROSTER_ROWS.push({ name: "", position: "", department: "" });
   renderRosterRows();
 }
 
 // Добавление из существующих сотрудников — тот же datalist ("planEmpList"),
-// что и на вкладке «План». Отдельного поля "департамент" в системе нет
-// (проверено — ни в Код.gs, ни на фронтах), поэтому подставляем должность
-// из карточки сотрудника (она есть в личном деле) — для людей не из базы
-// это поле остаётся пустым и вписывается вручную.
+// что и на вкладке «План». Должность и департамент подставляются из карточки
+// сотрудника (личное дело) — для людей не из базы оба поля остаются пустыми
+// и вписываются вручную.
 function addRosterEmpFromInput() {
   const input = document.getElementById("rosterEmpInput");
   const raw = String(input.value||"").trim();
@@ -3977,7 +3977,7 @@ function addRosterEmpFromInput() {
   const empId = empIdFromInput(raw);
   const emp = empId ? (DATA.employees||[]).find(e => String(e.id) === String(empId)) : null;
   const name = emp ? emp.name : raw.replace(/\s*\[[^\]]*\]\s*$/, "").trim();
-  ROSTER_ROWS.push({ name, dept: emp ? (emp.position||"") : "" });
+  ROSTER_ROWS.push({ name, position: emp ? (emp.position||"") : "", department: emp ? (emp.department||"") : "" });
   input.value = "";
   renderRosterRows();
 }
@@ -4011,7 +4011,7 @@ function printRoster() {
             <th style="border:1px solid #333;padding:4px">№</th>
             <th style="border:1px solid #333;padding:4px">ФИО</th>
             <th style="border:1px solid #333;padding:4px">Должность</th>
-            <th style="border:1px solid #333;padding:4px">Дата</th>
+            <th style="border:1px solid #333;padding:4px">Департамент</th>
             <th style="border:1px solid #333;padding:4px">Подпись</th>
           </tr>
         </thead>
@@ -4019,8 +4019,8 @@ function printRoster() {
           ${rows.map((r,i) => `<tr>
             <td style="border:1px solid #333;padding:4px;text-align:center">${i+1}</td>
             <td style="border:1px solid #333;padding:4px">${escapeHtml(r.name)}</td>
-            <td style="border:1px solid #333;padding:4px">${escapeHtml(r.dept)}</td>
-            <td style="border:1px solid #333;padding:4px"></td>
+            <td style="border:1px solid #333;padding:4px">${escapeHtml(r.position)}</td>
+            <td style="border:1px solid #333;padding:4px">${escapeHtml(r.department)}</td>
             <td style="border:1px solid #333;padding:4px"></td>
           </tr>`).join("")}
         </tbody>
