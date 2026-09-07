@@ -28,6 +28,15 @@ const SHEET_EQUIPMENT = "Техника";
 const SHEET_CHECKLIST_TEMPLATES = "Чек-листы-Шаблоны";
 const SHEET_CHECKLIST_RECORDS = "Чек-листы-Записи";
 
+const SHEET_HAZARDS = "ВыявлениеОпасностей";
+const HAZARD_CATEGORIES = [
+  "Оборудование и техника", "Электробезопасность", "Работа на высоте",
+  "Транспорт и пешеходные зоны", "Пожарная безопасность", "СИЗ",
+  "Рабочее место / территория", "Экология", "Поведение / нарушение процедур", "Другое",
+];
+const HAZARD_RISK_LEVELS = ["Низкий", "Средний", "Высокий", "Критический"];
+const HAZARD_STATUSES = ["Новое", "В работе", "Устранено", "Отклонено"];
+
 const SHEET_EVAL_CRITERIA   = "КаталогКритериевОценки";
 const SHEET_EVALUATIONS     = "ОценкиОператоров";
 const SHEET_EVAL_ANSWERS    = "ОтветыОценки";
@@ -76,6 +85,9 @@ function doGet(e) {
   else if (action === "getEvaluationsList") result = getEvaluationsList(e.parameter);
   else if (action === "getTimingRecordsList") result = getTimingRecordsList(e.parameter);
   else if (action === "getTimingRatingList") result = getTimingRatingList(e.parameter);
+  else if (action === "getHazards") result = getHazards(e.parameter);
+  else if (action === "getHazardStats") result = getHazardStats(e.parameter);
+  else if (action === "getHazardMeta") result = getHazardMeta();
   else result = json({ ok: false, error: "unknown action" });
 
   if (callback) {
@@ -143,6 +155,10 @@ function doPost(e) {
     if (d.action === "deleteEvaluation") return deleteEvaluation(d);
     if (d.action === "generateEvaluationSummary") return generateEvaluationSummary(d);
     if (d.action === "importEvaluationCriteria") return importEvaluationCriteria(d);
+    if (d.action === "submitHazard") return submitHazard(d);
+    if (d.action === "uploadHazardPhoto") return uploadHazardPhoto(d.image, d.mimeType);
+    if (d.action === "updateHazardStatus") return updateHazardStatus(d);
+    if (d.action === "deleteHazard") return deleteHazard(d);
     return json({ ok: false, error: "unknown action" });
   } catch(err) {
     return json({ ok: false, error: err.toString() });
@@ -853,6 +869,271 @@ function getDocuments(linkedId) {
     String(d.linkedIds||"").split(",").map(s=>s.trim()).includes(String(linkedId).trim())
   );
   return json(filtered);
+}
+
+// ══════════════════════════════════════════════════════
+// ВЫЯВЛЕНИЕ ОПАСНОСТЕЙ
+// Публичная анкета (hazard-report.html, по QR/ссылке, без PIN) отправляет
+// сюда сообщения о выявленных опасностях/нарушениях с фото. Панель
+// hazards-panel.html (PIN) их накапливает, показывает и позволяет
+// разбирать (менять статус, назначать ответственного).
+// ══════════════════════════════════════════════════════
+
+const HAZARD_HEADER = [
+  "hazardId","date","site","location","category","riskLevel","description",
+  "reporterName","reporterId","anonymous","photoUrl","status",
+  "assignedTo","resolutionNote","resolvedDate",
+];
+
+function getHazardMeta() {
+  return json({ ok: true, categories: HAZARD_CATEGORIES, riskLevels: HAZARD_RISK_LEVELS, statuses: HAZARD_STATUSES });
+}
+
+function getOrCreateHazardsPhotoFolder() {
+  const file = DriveApp.getFileById(SHEET_ID);
+  const parents = file.getParents();
+  const parentFolder = parents.hasNext() ? parents.next() : DriveApp.getRootFolder();
+  const name = "Фото — Выявление опасностей";
+  const existing = parentFolder.getFoldersByName(name);
+  if (existing.hasNext()) return existing.next();
+  return parentFolder.createFolder(name);
+}
+
+function ensureHazardsSheet(ss) {
+  let sheet = ss.getSheetByName(SHEET_HAZARDS);
+  if (!sheet) {
+    sheet = ss.insertSheet(SHEET_HAZARDS);
+    sheet.appendRow(HAZARD_HEADER);
+    sheet.getRange(1,1,1,HAZARD_HEADER.length)
+      .setBackground("#0D1B3E").setFontColor("#F4A52A").setFontWeight("bold");
+    sheet.setFrozenRows(1);
+    sheet.setColumnWidth(7, 320);  // description
+    sheet.setColumnWidth(11, 220); // photoUrl
+    sheet.setColumnWidth(14, 220); // resolutionNote
+  }
+  return sheet;
+}
+
+// Фото не привязано к сотруднику (в отличие от uploadPhoto) — просто
+// заливается в отдельную папку и возвращает ссылку, которую фронтенд затем
+// передаёт вместе с остальными полями в submitHazard.
+function uploadHazardPhoto(base64Data, mime) {
+  try {
+    if (!base64Data) return json({ ok: false, error: "Нет фото" });
+    const bytes  = Utilities.base64Decode(base64Data);
+    const ext    = (mime === "image/png") ? "png" : "jpg";
+    const fname  = "hazard_" + Date.now() + "." + ext;
+    const blob   = Utilities.newBlob(bytes, mime || "image/jpeg", fname);
+    const folder = getOrCreateHazardsPhotoFolder();
+    const file   = folder.createFile(blob);
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    const photoUrl = "https://drive.google.com/thumbnail?id=" + file.getId() + "&sz=w800";
+    return json({ ok: true, url: photoUrl });
+  } catch (err) {
+    return json({ ok: false, error: err.toString() });
+  }
+}
+
+function submitHazard(p) {
+  const {
+    site, location, category, riskLevel, description,
+    reporterName, reporterId, anonymous, photoUrl,
+  } = p || {};
+
+  if (!site || !category || !riskLevel || !String(description||"").trim()) {
+    return json({ ok: false, error: "Нужны участок, категория, уровень риска и описание" });
+  }
+
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    const sheet = ensureHazardsSheet(ss);
+
+    const hazardId = "haz" + Date.now();
+    const dateStr = Utilities.formatDate(new Date(), "Asia/Almaty", "dd.MM.yyyy HH:mm");
+    const isAnon = !!anonymous;
+
+    const row = [
+      hazardId, dateStr, site, location || "", category, riskLevel,
+      String(description).trim(),
+      isAnon ? "" : (reporterName || ""),
+      isAnon ? "" : (reporterId || ""),
+      isAnon ? "да" : "нет",
+      photoUrl || "",
+      "Новое", "", "", "",
+    ];
+
+    ensureCapacity(sheet, 1);
+    const dateCol = HAZARD_HEADER.indexOf("date") + 1;
+    // Дата — текст вида "dd.MM.yyyy HH:mm", а не число/сериал — иначе
+    // Sheets может переинтерпретировать её при автосохранении (см. баг с
+    // датами в Документы/Ростер — тот же класс проблемы).
+    sheet.appendRow(row);
+    sheet.getRange(sheet.getLastRow(), dateCol).setNumberFormat("@").setValue(dateStr);
+
+    return json({ ok: true, hazardId });
+  } catch (err) {
+    return json({ ok: false, error: err.toString() });
+  }
+}
+
+function getHazards(p) {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName(SHEET_HAZARDS);
+  if (!sheet) return json({ ok: true, items: [] });
+
+  const rows = sheet.getDataRange().getValues();
+  if (rows.length < 2) return json({ ok: true, items: [] });
+  const headers = rows[0];
+
+  const days   = Number((p && p.days) || 0);
+  const site   = p && p.site && p.site !== "Все" ? p.site : null;
+  const status = p && p.status && p.status !== "Все" ? p.status : null;
+
+  let since = null;
+  if (days > 0) { since = new Date(); since.setDate(since.getDate() - days); since.setHours(0,0,0,0); }
+
+  const iDate = headers.indexOf("date"), iSite = headers.indexOf("site"), iStatus = headers.indexOf("status");
+
+  const items = rows.slice(1)
+    .filter(r => r[0])
+    .map(r => { const o = {}; headers.forEach((h,i) => { o[h] = r[i]; }); return o; })
+    .filter(o => {
+      if (site && String(o[headers[iSite]]) !== site) return false;
+      if (status && String(o[headers[iStatus]]) !== status) return false;
+      if (since) {
+        const d = parseHazardDate(o.date);
+        if (!d || d < since) return false;
+      }
+      return true;
+    })
+    .reverse(); // свежие сверху
+
+  return json({ ok: true, items });
+}
+
+function parseHazardDate(s) {
+  // "dd.MM.yyyy HH:mm"
+  const m = String(s || "").match(/^(\d{2})\.(\d{2})\.(\d{4})\s+(\d{2}):(\d{2})/);
+  if (!m) return null;
+  return new Date(Number(m[3]), Number(m[2])-1, Number(m[1]), Number(m[4]), Number(m[5]));
+}
+
+// Серверная агрегация — та же логика, что у getChecklistStats: панель
+// получает готовые цифры, а не всю историю сообщений.
+function getHazardStats(p) {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName(SHEET_HAZARDS);
+  if (!sheet) return json({ ok: true, empty: true });
+
+  const rows = sheet.getDataRange().getValues();
+  if (rows.length < 2) return json({ ok: true, empty: true });
+  const headers = rows[0];
+  const site = p && p.site && p.site !== "Все" ? p.site : null;
+
+  const col = n => headers.indexOf(n);
+  const iSite = col("site"), iCat = col("category"), iRisk = col("riskLevel"),
+        iStatus = col("status"), iDate = col("date");
+
+  const now = new Date();
+  const d7 = new Date();  d7.setDate(d7.getDate() - 7);
+  const d30 = new Date(); d30.setDate(d30.getDate() - 30);
+
+  const stats = {
+    total: 0, last7: 0, open: 0, openCritical: 0,
+    byCategory: {}, byRisk: {}, byStatus: {}, bySite: {},
+    byDay7: {}, // "dd.MM" -> count, для последних 7 дней
+    recent: [], // последние 8 сообщений для быстрого просмотра
+  };
+
+  const bucket = (obj, key) => { obj[key] = (obj[key] || 0) + 1; };
+
+  const filtered = [];
+  rows.slice(1).forEach(r => {
+    if (!r[0]) return;
+    if (site && String(r[iSite]) !== site) return;
+    filtered.push(r);
+  });
+
+  filtered.forEach(r => {
+    stats.total++;
+    const rSite = String(r[iSite] || "");
+    const cat = String(r[iCat] || "");
+    const risk = String(r[iRisk] || "");
+    const status = String(r[iStatus] || "");
+    const date = parseHazardDate(r[iDate]);
+
+    bucket(stats.byCategory, cat);
+    bucket(stats.byRisk, risk);
+    bucket(stats.byStatus, status);
+    bucket(stats.bySite, rSite);
+
+    const isOpen = status === "Новое" || status === "В работе";
+    if (isOpen) {
+      stats.open++;
+      if (risk === "Критический") stats.openCritical++;
+    }
+    if (date && date >= d7) {
+      stats.last7++;
+      const key = Utilities.formatDate(date, "Asia/Almaty", "dd.MM");
+      bucket(stats.byDay7, key);
+    }
+  });
+
+  stats.recent = filtered
+    .map(r => { const o = {}; headers.forEach((h,i) => { o[h] = r[i]; }); return o; })
+    .sort((a,b) => (parseHazardDate(b.date)||0) - (parseHazardDate(a.date)||0))
+    .slice(0, 8);
+
+  return json({ ok: true, stats });
+}
+
+function updateHazardStatus(p) {
+  const { hazardId, status, assignedTo, resolutionNote } = p || {};
+  if (!hazardId) return json({ ok: false, error: "Нужен hazardId" });
+
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName(SHEET_HAZARDS);
+  if (!sheet) return json({ ok: false, error: "Лист не найден" });
+
+  const rows = sheet.getDataRange().getValues();
+  const headers = rows[0];
+  const iId = headers.indexOf("hazardId"), iStatus = headers.indexOf("status"),
+        iAssigned = headers.indexOf("assignedTo"), iNote = headers.indexOf("resolutionNote"),
+        iResolvedDate = headers.indexOf("resolvedDate");
+
+  for (let i = 1; i < rows.length; i++) {
+    if (String(rows[i][iId]).trim() === String(hazardId).trim()) {
+      const rowNum = i + 1;
+      if (status !== undefined) {
+        sheet.getRange(rowNum, iStatus + 1).setValue(status);
+        if (status === "Устранено" || status === "Отклонено") {
+          const dateStr = Utilities.formatDate(new Date(), "Asia/Almaty", "dd.MM.yyyy HH:mm");
+          sheet.getRange(rowNum, iResolvedDate + 1).setNumberFormat("@").setValue(dateStr);
+        }
+      }
+      if (assignedTo !== undefined) sheet.getRange(rowNum, iAssigned + 1).setValue(assignedTo);
+      if (resolutionNote !== undefined) sheet.getRange(rowNum, iNote + 1).setValue(resolutionNote);
+      return json({ ok: true });
+    }
+  }
+  return json({ ok: false, error: "Сообщение не найдено" });
+}
+
+function deleteHazard(p) {
+  const { hazardId } = p || {};
+  if (!hazardId) return json({ ok: false, error: "Нужен hazardId" });
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName(SHEET_HAZARDS);
+  if (!sheet) return json({ ok: false, error: "Лист не найден" });
+  const rows = sheet.getDataRange().getValues();
+  const iId = rows[0].indexOf("hazardId");
+  for (let i = 1; i < rows.length; i++) {
+    if (String(rows[i][iId]).trim() === String(hazardId).trim()) {
+      sheet.deleteRow(i + 1);
+      return json({ ok: true });
+    }
+  }
+  return json({ ok: false, error: "Сообщение не найдено" });
 }
 
 // ── Получить все записи об обучении ─────────────────────────
