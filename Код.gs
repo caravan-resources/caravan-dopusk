@@ -32,7 +32,8 @@ const SHEET_HAZARDS = "ВыявлениеОпасностей";
 const HAZARD_CATEGORIES = [
   "Оборудование и техника", "Электробезопасность", "Работа на высоте",
   "Транспорт и пешеходные зоны", "Пожарная безопасность", "СИЗ",
-  "Рабочее место / территория", "Экология", "Поведение / нарушение процедур", "Другое",
+  "Рабочее место / территория", "Технологический процесс",
+  "Экология", "Поведение / нарушение процедур", "Другое",
 ];
 const HAZARD_RISK_LEVELS = ["Низкий", "Средний", "Высокий", "Критический"];
 const HAZARD_STATUSES = ["Новое", "В работе", "Устранено", "Отклонено"];
@@ -880,10 +881,43 @@ function getDocuments(linkedId) {
 // ══════════════════════════════════════════════════════
 
 const HAZARD_HEADER = [
-  "hazardId","date","site","location","category","riskLevel","description",
+  "hazardId","number","date","site","location","category","riskLevel","description",
+  "immediateActions",
   "reporterName","reporterId","anonymous","photoUrl","status",
-  "assignedTo","resolutionNote","resolvedDate",
+  "assignedTo","resolutionNote","resolvedDate","statusLog",
 ];
+
+// Безопасная миграция колонок — тот же приём, что ensureEmpColumns для
+// «Сотрудники»: если лист уже существовал до появления поля, дописываем
+// колонку в конец, а не пересоздаём лист. Чтение везде идёт по имени
+// заголовка, а не по номеру колонки, так что порядок не важен.
+function ensureHazardColumns(sheet, headers) {
+  const needed = ["immediateActions", "number", "statusLog"];
+  let lastCol = headers.length;
+  let numberWasMissing = false;
+  needed.forEach(col => {
+    if (headers.indexOf(col) < 0) {
+      lastCol += 1;
+      sheet.getRange(1, lastCol).setValue(col);
+      sheet.getRange(1, lastCol).setBackground("#0D1B3E").setFontColor("#F4A52A").setFontWeight("bold");
+      headers.push(col);
+      if (col === "number") numberWasMissing = true;
+    }
+  });
+  // Бэкфилл номеров для записей, созданных до появления этого поля —
+  // нумеруем по порядку строк (он же хронологический, всегда append).
+  if (numberWasMissing) {
+    const lastRow = sheet.getLastRow();
+    if (lastRow > 1) {
+      const numberCol = headers.indexOf("number") + 1;
+      const idCol = headers.indexOf("hazardId") + 1;
+      const ids = sheet.getRange(2, idCol, lastRow - 1, 1).getValues();
+      const nums = ids.map((r, i) => r[0] ? [i + 1] : [""]);
+      sheet.getRange(2, numberCol, nums.length, 1).setValues(nums);
+    }
+  }
+  return headers;
+}
 
 function getHazardMeta() {
   return json({ ok: true, categories: HAZARD_CATEGORIES, riskLevels: HAZARD_RISK_LEVELS, statuses: HAZARD_STATUSES });
@@ -908,8 +942,12 @@ function ensureHazardsSheet(ss) {
       .setBackground("#0D1B3E").setFontColor("#F4A52A").setFontWeight("bold");
     sheet.setFrozenRows(1);
     sheet.setColumnWidth(7, 320);  // description
-    sheet.setColumnWidth(11, 220); // photoUrl
-    sheet.setColumnWidth(14, 220); // resolutionNote
+    sheet.setColumnWidth(8, 260);  // immediateActions
+    sheet.setColumnWidth(12, 220); // photoUrl
+    sheet.setColumnWidth(15, 220); // resolutionNote
+  } else {
+    const headers = sheet.getRange(1,1,1,sheet.getLastColumn()).getValues()[0];
+    ensureHazardColumns(sheet, headers);
   }
   return sheet;
 }
@@ -936,7 +974,7 @@ function uploadHazardPhoto(base64Data, mime) {
 
 function submitHazard(p) {
   const {
-    site, location, category, riskLevel, description,
+    site, location, category, riskLevel, description, immediateActions,
     reporterName, reporterId, anonymous, photoUrl,
   } = p || {};
 
@@ -947,30 +985,61 @@ function submitHazard(p) {
   try {
     const ss = SpreadsheetApp.openById(SHEET_ID);
     const sheet = ensureHazardsSheet(ss);
+    const headers = sheet.getRange(1,1,1,sheet.getLastColumn()).getValues()[0];
 
     const hazardId = "haz" + Date.now();
     const dateStr = Utilities.formatDate(new Date(), "Asia/Almaty", "dd.MM.yyyy HH:mm");
     const isAnon = !!anonymous;
 
-    const row = [
-      hazardId, dateStr, site, location || "", category, riskLevel,
-      String(description).trim(),
-      isAnon ? "" : (reporterName || ""),
-      isAnon ? "" : (reporterId || ""),
-      isAnon ? "да" : "нет",
-      photoUrl || "",
-      "Новое", "", "", "",
-    ];
+    // Считаем «это ваше N-е сообщение» — до записи новой строки, чтобы
+    // не находить только что добавленную запись саму в себе.
+    const iReporterId = headers.indexOf("reporterId");
+    const iReporterName = headers.indexOf("reporterName");
+    const existingRows = sheet.getLastRow() > 1
+      ? sheet.getRange(2, 1, sheet.getLastRow() - 1, headers.length).getValues().filter(r => r[0])
+      : [];
+    let reporterCount = 0;
+    if (!isAnon && (String(reporterId||"").trim() || String(reporterName||"").trim())) {
+      reporterCount = existingRows.filter(r => {
+        if (String(reporterId||"").trim()) return String(r[iReporterId]).trim() === String(reporterId).trim();
+        return String(r[iReporterName]).trim().toLowerCase() === String(reporterName).trim().toLowerCase();
+      }).length;
+    }
+    const totalCount = existingRows.length;
+
+    const values = {
+      hazardId, number: totalCount + 1,
+      date: dateStr, site, location: location || "", category, riskLevel,
+      description: String(description).trim(),
+      immediateActions: String(immediateActions || "").trim(),
+      reporterName: isAnon ? "" : (reporterName || ""),
+      reporterId: isAnon ? "" : (reporterId || ""),
+      anonymous: isAnon ? "да" : "нет",
+      photoUrl: photoUrl || "",
+      status: "Новое", assignedTo: "", resolutionNote: "", resolvedDate: "",
+      statusLog: dateStr + ": создано (Новое)",
+    };
+    // Строим строку строго по фактическому порядку колонок листа (headers),
+    // а не по HAZARD_HEADER — если лист уже существовал до появления нового
+    // поля, ensureHazardColumns дописала его в конец, и порядок колонок в
+    // листе мог разойтись с порядком в константе.
+    const row = headers.map(h => values[h] !== undefined ? values[h] : "");
 
     ensureCapacity(sheet, 1);
-    const dateCol = HAZARD_HEADER.indexOf("date") + 1;
+    sheet.appendRow(row);
     // Дата — текст вида "dd.MM.yyyy HH:mm", а не число/сериал — иначе
     // Sheets может переинтерпретировать её при автосохранении (см. баг с
     // датами в Документы/Ростер — тот же класс проблемы).
-    sheet.appendRow(row);
+    const dateCol = headers.indexOf("date") + 1;
     sheet.getRange(sheet.getLastRow(), dateCol).setNumberFormat("@").setValue(dateStr);
 
-    return json({ ok: true, hazardId });
+    return json({
+      ok: true, hazardId,
+      number: totalCount + 1,
+      reporterCount: reporterCount + 1, // включая только что отправленное
+      totalCount: totalCount + 1,
+      isAnon,
+    });
   } catch (err) {
     return json({ ok: false, error: err.toString() });
   }
@@ -1088,7 +1157,7 @@ function getHazardStats(p) {
 }
 
 function updateHazardStatus(p) {
-  const { hazardId, status, assignedTo, resolutionNote } = p || {};
+  const { hazardId, status, assignedTo, resolutionNote, changedBy } = p || {};
   if (!hazardId) return json({ ok: false, error: "Нужен hazardId" });
 
   const ss = SpreadsheetApp.openById(SHEET_ID);
@@ -1099,16 +1168,27 @@ function updateHazardStatus(p) {
   const headers = rows[0];
   const iId = headers.indexOf("hazardId"), iStatus = headers.indexOf("status"),
         iAssigned = headers.indexOf("assignedTo"), iNote = headers.indexOf("resolutionNote"),
-        iResolvedDate = headers.indexOf("resolvedDate");
+        iResolvedDate = headers.indexOf("resolvedDate"), iLog = headers.indexOf("statusLog");
 
   for (let i = 1; i < rows.length; i++) {
     if (String(rows[i][iId]).trim() === String(hazardId).trim()) {
       const rowNum = i + 1;
-      if (status !== undefined) {
+      const dateStr = Utilities.formatDate(new Date(), "Asia/Almaty", "dd.MM.yyyy HH:mm");
+      const oldStatus = String(rows[i][iStatus] || "");
+
+      if (status !== undefined && status !== oldStatus) {
         sheet.getRange(rowNum, iStatus + 1).setValue(status);
         if (status === "Устранено" || status === "Отклонено") {
-          const dateStr = Utilities.formatDate(new Date(), "Asia/Almaty", "dd.MM.yyyy HH:mm");
           sheet.getRange(rowNum, iResolvedDate + 1).setNumberFormat("@").setValue(dateStr);
+        }
+        // Журнал изменений — дописываем строку, а не перезаписываем, чтобы
+        // видеть всю историю переходов, а не только последнее состояние.
+        if (iLog >= 0) {
+          const who = String(changedBy || "").trim();
+          const prevLog = String(rows[i][iLog] || "");
+          const line = `${dateStr}: ${oldStatus || "—"} → ${status}${who ? " (" + who + ")" : ""}`;
+          const newLog = prevLog ? prevLog + "\n" + line : line;
+          sheet.getRange(rowNum, iLog + 1).setValue(newLog);
         }
       }
       if (assignedTo !== undefined) sheet.getRange(rowNum, iAssigned + 1).setValue(assignedTo);
