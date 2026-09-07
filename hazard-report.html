@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="kk">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-<title>Выявление опасностей — Caravan Resources</title>
+<title>Қауіп-қатерлерді анықтау / Выявление опасностей — Caravan Resources</title>
 <style>
 :root {
   --navy:#0B1A35; --navy2:#1B3B6F; --gold:#F4A52A;
@@ -99,7 +99,9 @@ textarea { resize:vertical; min-height:90px; }
 .success-sub { font-size:13px; color:var(--gray); line-height:1.6; }
 
 .step-label { font-size:12px; font-weight:800; color:var(--navy2); text-transform:uppercase;
-  letter-spacing:.03em; margin-bottom:8px; }
+  letter-spacing:.03em; margin-bottom:2px; }
+.step-label-ru { font-size:11px; font-weight:600; color:var(--gray); margin-bottom:8px; }
+.hint-kz { font-weight:700; color:var(--navy2); }
 
 #screenLoading, #screenForm, #screenSuccess, #screenError { display:none; }
 #screenLoading.active, #screenForm.active, #screenSuccess.active, #screenError.active { display:block; }
@@ -109,80 +111,106 @@ textarea { resize:vertical; min-height:90px; }
 
 <div class="wrap">
   <div class="header">
-    <h1>⚠ Выявление опасностей</h1>
-    <p>Caravan Resources · сообщите об опасности или нарушении</p>
+    <h1>⚠ Қауіп-қатерлерді анықтау</h1>
+    <h1 style="font-size:13px;font-weight:700;color:rgba(255,255,255,.75);margin-top:2px">Выявление опасностей</h1>
+    <p>Caravan Resources · қауіп немесе бұзушылық туралы хабарлаңыз</p>
+    <p style="opacity:.8">сообщите об опасности или нарушении</p>
   </div>
 
   <div id="screenLoading" class="active">
-    <div class="card" style="text-align:center;color:var(--gray)">Загрузка...</div>
+    <div class="card" style="text-align:center;color:var(--gray)">Жүктелуде... / Загрузка...</div>
   </div>
 
   <div id="screenError">
     <div class="card" style="text-align:center">
       <div style="font-size:40px;margin-bottom:12px">⚠</div>
-      <div style="font-weight:800;color:var(--red);margin-bottom:6px">Ошибка соединения</div>
-      <div class="hint">Проверьте интернет и обновите страницу.</div>
+      <div style="font-weight:800;color:var(--red);margin-bottom:2px">Байланыс қатесі</div>
+      <div style="font-weight:600;color:var(--red);opacity:.75;font-size:12px;margin-bottom:6px">Ошибка соединения</div>
+      <div class="hint"><span class="hint-kz">Интернетті тексеріп, парақты жаңартыңыз.</span><br>Проверьте интернет и обновите страницу.</div>
     </div>
   </div>
 
   <div id="screenForm">
 
     <div class="card">
-      <div class="step-label">Участок</div>
+      <div class="step-label">Кен орны / Учаске</div>
       <div class="choice-grid" id="siteChoices"></div>
     </div>
 
     <div class="card">
-      <div class="step-label">Кто сообщает</div>
+      <div class="step-label">Хабарлаушы кім</div>
+      <div class="step-label-ru">Кто сообщает</div>
       <div class="choice-grid" id="identityChoices">
-        <button type="button" class="choice-btn" onclick="setIdentityMode('named')">Укажу себя</button>
-        <button type="button" class="choice-btn" onclick="setIdentityMode('anon')">Анонимно</button>
+        <button type="button" class="choice-btn" onclick="setIdentityMode('named')">Өзімді көрсетемін / Укажу себя</button>
+        <button type="button" class="choice-btn" onclick="setIdentityMode('anon')">Анонимді / Анонимно</button>
       </div>
       <div id="identityBlock"></div>
     </div>
 
     <div class="card">
-      <div class="step-label">Категория опасности</div>
+      <div class="step-label">Қауіп санаты</div>
+      <div class="step-label-ru">Категория опасности</div>
       <div class="choice-grid" id="categoryChoices"></div>
     </div>
 
     <div class="card">
-      <div class="step-label">Уровень риска</div>
+      <div class="step-label">Тәуекел деңгейі</div>
+      <div class="step-label-ru">Уровень риска</div>
       <div class="choice-grid" id="riskChoices"></div>
     </div>
 
     <div class="card">
-      <div class="step-label">Место (участок работ, объект, где именно)</div>
-      <input type="text" id="location" placeholder="Например: карьер, борт №3, экскаватор ЕХ1200 №4">
+      <div class="step-label">Орны (жұмыс алаңы, объект, нақты қайда)</div>
+      <div class="step-label-ru">Место (участок работ, объект, где именно)</div>
+      <input type="text" id="location" placeholder="Мысалы: карьер, борт №3, ЕХ1200 №4 экскаваторы">
     </div>
 
     <div class="card">
-      <div class="step-label">Описание</div>
-      <div class="hint">Что вы увидели? Что может произойти, если не устранить?</div>
-      <textarea id="description" placeholder="Опишите опасность или нарушение..."></textarea>
+      <div class="step-label">Сипаттама</div>
+      <div class="step-label-ru">Описание</div>
+      <div class="hint">
+        <span class="hint-kz">Не көрдіңіз? Жоймасаңыз не болуы мүмкін?</span><br>
+        Что вы увидели? Что может произойти, если не устранить?
+      </div>
+      <textarea id="description" placeholder="Қауіп немесе бұзушылықты сипаттаңыз... / Опишите опасность или нарушение..."></textarea>
     </div>
 
     <div class="card">
-      <div class="step-label">Фото (не обязательно, но очень помогает)</div>
+      <div class="step-label">Қабылданған шаралар</div>
+      <div class="step-label-ru">Принятые меры</div>
+      <div class="hint">
+        <span class="hint-kz">Егер орнында бірдеңе жасаған болсаңыз (жұмысты тоқтаттыңыз, қоршадыңыз, әріптестерді ескерттіңіз) — осында жазыңыз. Болмаса — бос қалдырыңыз.</span><br>
+        Если вы уже что-то сделали на месте (остановили работу, оградили, предупредили коллег) — опишите здесь. Если нет — оставьте пустым.
+      </div>
+      <textarea id="immediateActions" placeholder="Мысалы: аумақты таспамен қоршадым, бригадирге хабарладым..."></textarea>
+    </div>
+
+    <div class="card">
+      <div class="step-label">Фото (міндетті емес, бірақ өте көмектеседі)</div>
+      <div class="step-label-ru">Фото (не обязательно, но очень помогает)</div>
       <div id="photoArea">
         <div class="photo-box" onclick="document.getElementById('photoInput').click()">
-          📷 Нажмите, чтобы сделать фото или выбрать из галереи
+          📷 Фото түсіру немесе галереядан таңдау үшін басыңыз<br>
+          <span style="opacity:.7">Нажмите, чтобы сделать фото или выбрать из галереи</span>
         </div>
       </div>
       <input type="file" id="photoInput" accept="image/*" capture="environment" style="display:none" onchange="handlePhotoSelect(event)">
     </div>
 
     <div id="submitHint" class="hint" style="text-align:center"></div>
-    <button class="btn btn-gold" id="submitBtn" onclick="submitHazard()">Отправить сообщение</button>
+    <button class="btn btn-gold" id="submitBtn" onclick="submitHazard()">Хабарды жіберу / Отправить сообщение</button>
   </div>
 
   <div id="screenSuccess">
     <div class="card success-box">
       <div class="success-icon">✅</div>
-      <div class="success-title">Спасибо!</div>
-      <div class="success-sub">Сообщение об опасности зафиксировано и передано в работу.</div>
+      <div class="success-title">Рахмет! / Спасибо!</div>
+      <div class="success-sub">
+        Қауіп туралы хабар тіркеліп, жұмысқа берілді.<br>
+        Сообщение об опасности зафиксировано и передано в работу.
+      </div>
     </div>
-    <button class="btn btn-ghost" onclick="resetForm()">Сообщить ещё об одном</button>
+    <button class="btn btn-ghost" onclick="resetForm()">Тағы бір хабарлау / Сообщить ещё об одном</button>
   </div>
 
 </div>
@@ -212,6 +240,20 @@ function initials(name) {
 }
 
 const RISK_CLASS = { "Низкий":"risk-low", "Средний":"risk-mid", "Высокий":"risk-high", "Критический":"risk-crit" };
+const RISK_KZ = { "Низкий":"Төмен", "Средний":"Орташа", "Высокий":"Жоғары", "Критический":"Критикалық" };
+const CATEGORY_KZ = {
+  "Оборудование и техника": "Жабдық және техника",
+  "Электробезопасность": "Электр қауіпсіздігі",
+  "Работа на высоте": "Биіктікте жұмыс істеу",
+  "Транспорт и пешеходные зоны": "Көлік және жаяу жүргіншілер аймағы",
+  "Пожарная безопасность": "Өрт қауіпсіздігі",
+  "СИЗ": "ЖҚҚ",
+  "Рабочее место / территория": "Жұмыс орны / аумақ",
+  "Технологический процесс": "Технологиялық процесс",
+  "Экология": "Экология",
+  "Поведение / нарушение процедур": "Мінез-құлық / рәсімдерді бұзу",
+  "Другое": "Басқа",
+};
 
 async function init() {
   try {
@@ -228,12 +270,12 @@ async function init() {
     `).join("");
 
     document.getElementById("categoryChoices").innerHTML = META.categories.map(c => `
-      <button type="button" class="choice-btn" data-cat="${c}" onclick="pickCategory('${c}')">${c}</button>
+      <button type="button" class="choice-btn" data-cat="${c}" onclick="pickCategory('${c}')">${CATEGORY_KZ[c] || c} / ${c}</button>
     `).join("");
     document.getElementById("categoryChoices").classList.add("wide");
 
     document.getElementById("riskChoices").innerHTML = META.riskLevels.map(r => `
-      <button type="button" class="choice-btn ${RISK_CLASS[r]||""}" data-risk="${r}" onclick="pickRisk('${r}')">${r}</button>
+      <button type="button" class="choice-btn ${RISK_CLASS[r]||""}" data-risk="${r}" onclick="pickRisk('${r}')">${RISK_KZ[r] || r} / ${r}</button>
     `).join("");
 
     showScreen("Form");
@@ -263,10 +305,10 @@ function setIdentityMode(mode) {
   });
   const block = document.getElementById("identityBlock");
   if (mode === "anon") {
-    block.innerHTML = `<div class="hint" style="margin-top:10px">Сообщение будет отправлено без указания имени.</div>`;
+    block.innerHTML = `<div class="hint" style="margin-top:10px"><span class="hint-kz">Хабар атын көрсетусіз жіберіледі.</span><br>Сообщение будет отправлено без указания имени.</div>`;
   } else {
     block.innerHTML = `
-      <input type="text" id="empSearch" placeholder="🔍 Введите фамилию..." oninput="renderEmpList(this.value)" style="margin-top:10px">
+      <input type="text" id="empSearch" placeholder="🔍 Тегіңізді енгізіңіз... / Введите фамилию..." oninput="renderEmpList(this.value)" style="margin-top:10px">
       <div id="empList"></div>
     `;
   }
@@ -278,7 +320,7 @@ function renderEmpList(query) {
   if (!q) { list.innerHTML = ""; return; }
   const filtered = EMPLOYEES.filter(e => String(e.name||"").toLowerCase().includes(q)).slice(0, 8);
   if (filtered.length === 0) {
-    list.innerHTML = `<div style="padding:12px;color:var(--gray);font-size:13px;text-align:center">Не найдено. Можно отправить анонимно.</div>`;
+    list.innerHTML = `<div style="padding:12px;color:var(--gray);font-size:13px;text-align:center">Табылмады. Анонимді жіберуге болады.<br>Не найдено. Можно отправить анонимно.</div>`;
     return;
   }
   list.innerHTML = filtered.map(e => `
@@ -302,7 +344,7 @@ function pickEmployee(emp) {
         <div class="name">${emp.name}</div>
         <div style="font-size:11px;color:var(--gray)">${emp.position||"—"}</div>
       </div>
-      <span class="change" onclick="setIdentityMode('named')">изменить</span>
+      <span class="change" onclick="setIdentityMode('named')">өзгерту / изменить</span>
     </div>
   `;
 }
@@ -345,7 +387,7 @@ async function handlePhotoSelect(event) {
       </div>
     `;
   } catch (e) {
-    alert("Не удалось загрузить фото. Попробуйте ещё раз.");
+    alert("Фотоны жүктеу мүмкін болмады. Қайталап көріңіз.\nНе удалось загрузить фото. Попробуйте ещё раз.");
   }
 }
 
@@ -355,7 +397,8 @@ function removePhoto() {
   document.getElementById("photoInput").value = "";
   document.getElementById("photoArea").innerHTML = `
     <div class="photo-box" onclick="document.getElementById('photoInput').click()">
-      📷 Нажмите, чтобы сделать фото или выбрать из галереи
+      📷 Фото түсіру немесе галереядан таңдау үшін басыңыз<br>
+      <span style="opacity:.7">Нажмите, чтобы сделать фото или выбрать из галереи</span>
     </div>
   `;
 }
@@ -366,6 +409,7 @@ function resetForm() {
   document.getElementById("identityBlock").innerHTML = "";
   document.getElementById("location").value = "";
   document.getElementById("description").value = "";
+  document.getElementById("immediateActions").value = "";
   removePhoto();
   showScreen("Form");
 }
@@ -373,25 +417,26 @@ function resetForm() {
 async function submitHazard() {
   const hint = document.getElementById("submitHint");
   const description = document.getElementById("description").value.trim();
+  const immediateActions = document.getElementById("immediateActions").value.trim();
   const location = document.getElementById("location").value.trim();
 
-  if (!state.site) { hint.style.color = "var(--red)"; hint.textContent = "Выберите участок"; return; }
-  if (!state.identityMode) { hint.style.color = "var(--red)"; hint.textContent = "Укажите, кто сообщает (или выберите «Анонимно»)"; return; }
-  if (state.identityMode === "named" && !state.selectedEmp) { hint.style.color = "var(--red)"; hint.textContent = "Найдите себя в списке или выберите «Анонимно»"; return; }
-  if (!state.category) { hint.style.color = "var(--red)"; hint.textContent = "Выберите категорию опасности"; return; }
-  if (!state.risk) { hint.style.color = "var(--red)"; hint.textContent = "Выберите уровень риска"; return; }
-  if (!description) { hint.style.color = "var(--red)"; hint.textContent = "Опишите, что вы увидели"; return; }
+  if (!state.site) { hint.style.color = "var(--red)"; hint.innerHTML = "Кен орнын таңдаңыз / Выберите участок"; return; }
+  if (!state.identityMode) { hint.style.color = "var(--red)"; hint.innerHTML = "Хабарлаушыны көрсетіңіз (немесе «Анонимді» таңдаңыз)<br>Укажите, кто сообщает (или выберите «Анонимно»)"; return; }
+  if (state.identityMode === "named" && !state.selectedEmp) { hint.style.color = "var(--red)"; hint.innerHTML = "Тізімнен өзіңізді табыңыз немесе «Анонимді» таңдаңыз<br>Найдите себя в списке или выберите «Анонимно»"; return; }
+  if (!state.category) { hint.style.color = "var(--red)"; hint.innerHTML = "Қауіп санатын таңдаңыз / Выберите категорию опасности"; return; }
+  if (!state.risk) { hint.style.color = "var(--red)"; hint.innerHTML = "Тәуекел деңгейін таңдаңыз / Выберите уровень риска"; return; }
+  if (!description) { hint.style.color = "var(--red)"; hint.innerHTML = "Не көргеніңізді сипаттаңыз / Опишите, что вы увидели"; return; }
 
   hint.style.color = "var(--gray)";
   hint.textContent = "";
   const btn = document.getElementById("submitBtn");
   btn.disabled = true;
-  btn.textContent = "Отправка...";
+  btn.textContent = "Жіберілуде... / Отправка...";
 
   try {
     let photoUrl = "";
     if (state.photoBase64) {
-      btn.textContent = "Загрузка фото...";
+      btn.textContent = "Фото жүктелуде... / Загрузка фото...";
       const photoRes = await fetch(CFG.SHEET_URL, {
         method: "POST",
         body: JSON.stringify({ action: "uploadHazardPhoto", image: state.photoBase64, mimeType: state.photoMime }),
@@ -399,7 +444,7 @@ async function submitHazard() {
       if (photoRes.ok) photoUrl = photoRes.url;
     }
 
-    btn.textContent = "Отправка...";
+    btn.textContent = "Жіберілуде... / Отправка...";
     const res = await fetch(CFG.SHEET_URL, {
       method: "POST",
       body: JSON.stringify({
@@ -409,6 +454,7 @@ async function submitHazard() {
         category: state.category,
         riskLevel: state.risk,
         description,
+        immediateActions,
         anonymous: state.identityMode === "anon",
         reporterName: state.selectedEmp ? state.selectedEmp.name : "",
         reporterId: state.selectedEmp ? state.selectedEmp.id : "",
@@ -420,14 +466,14 @@ async function submitHazard() {
       showScreen("Success");
     } else {
       hint.style.color = "var(--red)";
-      hint.textContent = "Ошибка: " + (data.error || "неизвестная");
+      hint.innerHTML = "Қате: " + (data.error || "белгісіз") + " / Ошибка: " + (data.error || "неизвестная");
     }
   } catch (e) {
     hint.style.color = "var(--red)";
-    hint.textContent = "Ошибка сети. Проверьте интернет и попробуйте ещё раз.";
+    hint.innerHTML = "Желі қатесі. Интернетті тексеріп, қайта көріңіз.<br>Ошибка сети. Проверьте интернет и попробуйте ещё раз.";
   } finally {
     btn.disabled = false;
-    btn.textContent = "Отправить сообщение";
+    btn.textContent = "Хабарды жіберу / Отправить сообщение";
   }
 }
 
