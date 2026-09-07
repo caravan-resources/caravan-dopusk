@@ -583,6 +583,10 @@ td { padding:8px; border-bottom:1px solid var(--border); }
             </select>
           </div>
         </div>
+        <div class="field">
+          <label>Примечание (необязательно)</label>
+          <input type="text" id="archiveRosterNote" placeholder="Например: дневная смена — на случай если на одну дату будет два ростера">
+        </div>
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
           <label class="btn btn-ghost" style="cursor:pointer" for="archiveRosterFile">📋 Выбрать файл (фото или PDF)</label>
           <input type="file" id="archiveRosterFile" accept="image/*,application/pdf" style="display:none" onchange="submitRosterUpload(this)">
@@ -1321,6 +1325,7 @@ async function submitRosterUpload(input) {
   if (!course) { alert("Сначала выберите название курса"); input.value = ""; return; }
   const dateIso = document.getElementById("archiveRosterDate").value;
   const site = document.getElementById("archiveRosterSite").value;
+  const note = document.getElementById("archiveRosterNote").value.trim();
   const statusEl = document.getElementById("archiveRosterUploadStatus");
   if (statusEl) statusEl.textContent = "⏳ Загружаю...";
   try {
@@ -1332,11 +1337,12 @@ async function submitRosterUpload(input) {
       type: "ростер",
       title: course,
       date: dateIso ? isoToRuLocal(dateIso) : "",
-      site,
+      site, note,
     })});
     const val = await res.json();
     if (!val.ok) { if (statusEl) statusEl.textContent = ""; alert("Не удалось загрузить: " + (val.error||"")); return; }
     if (statusEl) statusEl.textContent = "✓ Загружено";
+    document.getElementById("archiveRosterNote").value = "";
     await loadAll(["archiveDocs"]);
   } catch (e) {
     if (statusEl) statusEl.textContent = "";
@@ -1428,7 +1434,7 @@ function renderArchiveList() {
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         ${typeBadge}
         <div class="emp-name">${escapeHtml(d.title||"—")}</div>
-        <span style="color:var(--gray)">${escapeHtml(d.date||"—")}${d.site?" · "+escapeHtml(d.site):""} — ${escapeHtml(d.fileName||"")}</span>
+        <span style="color:var(--gray)">${escapeHtml(d.date||"—")}${d.site?" · "+escapeHtml(d.site):""} — ${escapeHtml(d.fileName||"")}${d.note?` · <b>${escapeHtml(d.note)}</b>`:""}</span>
       </div>
       <a href="${encodeURI(d.fileUrl||"")}" target="_blank" class="btn btn-ghost" style="width:auto;padding:4px 12px;font-size:12px;text-decoration:none">Открыть</a>
     </div>`;
