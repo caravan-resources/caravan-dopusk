@@ -417,12 +417,14 @@ function removePhoto() {
 function renderSuccessMessage(data) {
   const el = document.getElementById("successCountMsg");
   const named = !data.isAnon && state.selectedEmp;
-  const n = named ? (data.reporterCount || 1) : (data.totalCount || 1);
+  const numBadge = `<div style="font-size:22px;font-weight:800;color:var(--navy);margin-bottom:8px">№${data.number||"—"}</div>`;
+  let personalLine = "";
   if (named) {
-    el.innerHTML = `Бұл — сіздің <b>${n}-ші</b> қауіп туралы хабарламаңыз.<br>Это ваше <b>${n}-е</b> сообщение о выявлении опасности.`;
-  } else {
-    el.innerHTML = `Бұл — жалпы есеп бойынша <b>${n}-ші</b> хабарлама.<br>Это <b>${n}-е</b> сообщение по общему счёту.`;
+    personalLine = `<div style="margin-top:6px">Бұл — сіздің <b>${data.reporterCount||1}-ші</b> қауіп туралы хабарламаңыз.<br>Это ваше <b>${data.reporterCount||1}-е</b> сообщение о выявлении опасности.</div>`;
   }
+  el.innerHTML = numBadge +
+    `<div>Хабарлама тіркелді. Нөмірін сақтап қойыңыз.<br>Сообщение зарегистрировано. Сохраните номер для справки.</div>` +
+    personalLine;
 }
 
 function resetForm() {
