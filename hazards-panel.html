@@ -362,7 +362,7 @@ function hazardCardHtml(h) {
       <div class="hz-row-flex">
         <div style="flex:1">
           <div class="hz-top">
-            <div class="hz-meta">${h.date} · ${h.site} · ${reporter}</div>
+            <div class="hz-meta"><b style="color:var(--navy)">№${h.number||"—"}</b> · ${h.date} · ${h.site} · ${reporter}</div>
           </div>
           <div class="hz-badges">
             <span class="badge ${riskClass(h.riskLevel)}">${h.riskLevel}</span>
@@ -387,7 +387,14 @@ function renderList() {
 
 function openHazardModal(h) {
   const reporter = h.anonymous === "да" ? "Аноним" : (h.reporterName || "Аноним");
+  const logHtml = h.statusLog
+    ? `<div class="field"><label>История статуса</label><div style="white-space:pre-wrap;font-size:12px;color:var(--gray);background:var(--light);border-radius:8px;padding:8px">${h.statusLog}</div></div>`
+    : "";
   document.getElementById("modalBox").innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <div style="font-size:18px;font-weight:800;color:var(--navy)">№${h.number||"—"}</div>
+      <span class="badge ${statusClass(h.status)}">${h.status}</span>
+    </div>
     ${h.photoUrl ? `<img class="modal-photo" src="${h.photoUrl.replace('sz=w800','sz=w1200')}">` : ""}
     <div class="hz-badges" style="margin-bottom:10px">
       <span class="badge ${riskClass(h.riskLevel)}">${h.riskLevel}</span>
@@ -412,6 +419,11 @@ function openHazardModal(h) {
       <label>Комментарий / как устранено</label>
       <textarea id="modalNote" placeholder="Что сделано для устранения...">${h.resolutionNote||""}</textarea>
     </div>
+    <div class="field">
+      <label>Кто меняет статус (для истории)</label>
+      <input type="text" id="modalChangedBy" placeholder="Ваше имя">
+    </div>
+    ${logHtml}
     <div style="display:flex;gap:8px;justify-content:flex-end">
       <button class="btn-ghost" onclick="closeModal()">Закрыть</button>
       <button class="btn-red" onclick="deleteHazardConfirm('${h.hazardId}')">Удалить</button>
@@ -426,10 +438,11 @@ async function saveHazardStatus(hazardId) {
   const status = document.getElementById("modalStatus").value;
   const assignedTo = document.getElementById("modalAssigned").value;
   const resolutionNote = document.getElementById("modalNote").value;
+  const changedBy = document.getElementById("modalChangedBy").value;
   try {
     const res = await fetch(CFG.SHEET_URL, {
       method: "POST",
-      body: JSON.stringify({ action: "updateHazardStatus", hazardId, status, assignedTo, resolutionNote }),
+      body: JSON.stringify({ action: "updateHazardStatus", hazardId, status, assignedTo, resolutionNote, changedBy }),
     }).then(r => r.json());
     if (res.ok) {
       closeModal();
