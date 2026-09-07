@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Выявление опасностей — Caravan Resources</title>
+<style>
+:root {
+  --navy:#0B1A35; --navy2:#1B3B6F; --gold:#F4A52A;
+  --red:#DC2626; --redbg:#FEF2F2;
+  --orange:#EA580C; --orangebg:#FFF7ED;
+  --yellow:#B45309; --yellowbg:#FFFBEB;
+  --green:#16A34A; --greenbg:#F0FDF4;
+  --gray:#64748B; --light:#F1F5F9; --border:#E2E8F0;
+}
+* { box-sizing:border-box; margin:0; padding:0; }
+body {
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+  background:var(--light); color:var(--navy); min-height:100vh;
+}
+.wrap { max-width:520px; margin:0 auto; padding:20px 16px 60px; }
+.header {
+  background:var(--navy); color:#fff; padding:20px 16px; margin:-20px -16px 20px;
+  text-align:center;
+}
+.header h1 { font-size:17px; font-weight:800; }
+.header p { font-size:12px; color:rgba(255,255,255,.6); margin-top:4px; }
+
+.card {
+  background:#fff; border-radius:14px; padding:18px; margin-bottom:14px;
+  box-shadow:0 2px 10px rgba(0,0,0,.06);
+}
+.card-title { font-size:15px; font-weight:800; color:var(--navy); margin-bottom:12px; }
+.hint { font-size:12px; color:var(--gray); margin-bottom:10px; line-height:1.5; }
+
+input, select, textarea {
+  width:100%; padding:13px 14px; border:1.5px solid var(--border); border-radius:10px;
+  font-size:15px; font-family:inherit; outline:none; margin-bottom:10px;
+}
+input:focus, select:focus, textarea:focus { border-color:var(--gold); }
+textarea { resize:vertical; min-height:90px; }
+
+.btn {
+  width:100%; padding:14px; border:none; border-radius:10px;
+  font-size:15px; font-weight:800; cursor:pointer; font-family:inherit;
+}
+.btn-gold { background:var(--gold); color:var(--navy); }
+.btn-ghost { background:var(--light); color:var(--navy); }
+.btn:disabled { opacity:.5; cursor:not-allowed; }
+
+.choice-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:10px; }
+.choice-grid.wide { grid-template-columns:1fr; }
+.choice-btn {
+  padding:13px 10px; border:1.5px solid var(--border); border-radius:10px;
+  background:#fff; font-size:14px; font-weight:700; cursor:pointer; text-align:center;
+  color:var(--navy); font-family:inherit;
+}
+.choice-btn.active { background:var(--navy); color:#fff; border-color:var(--navy); }
+.choice-btn.risk-low.active   { background:var(--green);  border-color:var(--green); }
+.choice-btn.risk-mid.active   { background:var(--yellow); border-color:var(--yellow); }
+.choice-btn.risk-high.active  { background:var(--orange); border-color:var(--orange); }
+.choice-btn.risk-crit.active  { background:var(--red);    border-color:var(--red); }
+
+.emp-item {
+  display:flex; align-items:center; gap:10px; width:100%;
+  padding:12px; border:1.5px solid var(--border); border-radius:10px;
+  background:#fff; cursor:pointer; margin-bottom:8px; text-align:left;
+  font-family:inherit; font-size:14px;
+}
+.emp-avatar {
+  width:36px; height:36px; border-radius:50%; background:var(--navy2); color:#fff;
+  display:flex; align-items:center; justify-content:center; font-weight:800; font-size:13px;
+  flex-shrink:0;
+}
+.emp-name { font-weight:700; color:var(--navy); }
+.emp-pos { font-size:12px; color:var(--gray); margin-top:1px; }
+.selected-box {
+  display:flex; align-items:center; gap:10px; padding:12px;
+  background:var(--greenbg); border:1.5px solid var(--green); border-radius:10px;
+  margin-bottom:14px;
+}
+.selected-box .name { font-weight:700; color:var(--navy); }
+.selected-box .change { margin-left:auto; font-size:12px; color:var(--navy2); cursor:pointer; text-decoration:underline; }
+
+.photo-box {
+  border:2px dashed var(--border); border-radius:12px; padding:20px;
+  text-align:center; cursor:pointer; color:var(--gray); font-size:13px;
+}
+.photo-preview-wrap { position:relative; margin-bottom:10px; }
+.photo-preview { width:100%; border-radius:12px; display:block; }
+.photo-remove {
+  position:absolute; top:8px; right:8px; background:rgba(0,0,0,.6); color:#fff;
+  border:none; border-radius:50%; width:30px; height:30px; font-size:16px; cursor:pointer;
+}
+
+.success-box { text-align:center; padding:40px 16px; }
+.success-icon { font-size:48px; margin-bottom:16px; }
+.success-title { font-size:18px; font-weight:800; color:var(--navy); margin-bottom:8px; }
+.success-sub { font-size:13px; color:var(--gray); line-height:1.6; }
+
+.step-label { font-size:12px; font-weight:800; color:var(--navy2); text-transform:uppercase;
+  letter-spacing:.03em; margin-bottom:8px; }
+
+#screenLoading, #screenForm, #screenSuccess, #screenError { display:none; }
+#screenLoading.active, #screenForm.active, #screenSuccess.active, #screenError.active { display:block; }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <div class="header">
+    <h1>⚠ Выявление опасностей</h1>
+    <p>Caravan Resources · сообщите об опасности или нарушении</p>
+  </div>
+
+  <div id="screenLoading" class="active">
+    <div class="card" style="text-align:center;color:var(--gray)">Загрузка...</div>
+  </div>
+
+  <div id="screenError">
+    <div class="card" style="text-align:center">
+      <div style="font-size:40px;margin-bottom:12px">⚠</div>
+      <div style="font-weight:800;color:var(--red);margin-bottom:6px">Ошибка соединения</div>
+      <div class="hint">Проверьте интернет и обновите страницу.</div>
+    </div>
+  </div>
+
+  <div id="screenForm">
+
+    <div class="card">
+      <div class="step-label">Участок</div>
+      <div class="choice-grid" id="siteChoices"></div>
+    </div>
+
+    <div class="card">
+      <div class="step-label">Кто сообщает</div>
+      <div class="choice-grid" id="identityChoices">
+        <button type="button" class="choice-btn" onclick="setIdentityMode('named')">Укажу себя</button>
+        <button type="button" class="choice-btn" onclick="setIdentityMode('anon')">Анонимно</button>
+      </div>
+      <div id="identityBlock"></div>
+    </div>
+
+    <div class="card">
+      <div class="step-label">Категория опасности</div>
+      <div class="choice-grid" id="categoryChoices"></div>
+    </div>
+
+    <div class="card">
+      <div class="step-label">Уровень риска</div>
+      <div class="choice-grid" id="riskChoices"></div>
+    </div>
+
+    <div class="card">
+      <div class="step-label">Место (участок работ, объект, где именно)</div>
+      <input type="text" id="location" placeholder="Например: карьер, борт №3, экскаватор ЕХ1200 №4">
+    </div>
+
+    <div class="card">
+      <div class="step-label">Описание</div>
+      <div class="hint">Что вы увидели? Что может произойти, если не устранить?</div>
+      <textarea id="description" placeholder="Опишите опасность или нарушение..."></textarea>
+    </div>
+
+    <div class="card">
+      <div class="step-label">Фото (не обязательно, но очень помогает)</div>
+      <div id="photoArea">
+        <div class="photo-box" onclick="document.getElementById('photoInput').click()">
+          📷 Нажмите, чтобы сделать фото или выбрать из галереи
+        </div>
+      </div>
+      <input type="file" id="photoInput" accept="image/*" capture="environment" style="display:none" onchange="handlePhotoSelect(event)">
+    </div>
+
+    <div id="submitHint" class="hint" style="text-align:center"></div>
+    <button class="btn btn-gold" id="submitBtn" onclick="submitHazard()">Отправить сообщение</button>
+  </div>
+
+  <div id="screenSuccess">
+    <div class="card success-box">
+      <div class="success-icon">✅</div>
+      <div class="success-title">Спасибо!</div>
+      <div class="success-sub">Сообщение об опасности зафиксировано и передано в работу.</div>
+    </div>
+    <button class="btn btn-ghost" onclick="resetForm()">Сообщить ещё об одном</button>
+  </div>
+
+</div>
+
+<script>
+const CFG = {
+  SHEET_URL: "https://script.google.com/macros/s/AKfycbwhdMV20k8US2BXUz1Xk2XCXE9MEwpHpQaadTF9xEfzbU1--dHL-Zuj06K2qXW-rFtKGw/exec",
+  SITES: ["Алмалы", "Ашыктас"],
+};
+
+let EMPLOYEES = [];
+let META = { categories: [], riskLevels: [] };
+let state = {
+  site: null, identityMode: null, selectedEmp: null,
+  category: null, risk: null, photoBase64: null, photoMime: null,
+};
+
+function showScreen(name) {
+  ["Loading","Error","Form","Success"].forEach(s => {
+    document.getElementById("screen"+s).classList.remove("active");
+  });
+  document.getElementById("screen"+name).classList.add("active");
+}
+
+function initials(name) {
+  return String(name||"").trim().split(/\s+/).slice(0,2).map(w=>w[0]||"").join("").toUpperCase();
+}
+
+const RISK_CLASS = { "Низкий":"risk-low", "Средний":"risk-mid", "Высокий":"risk-high", "Критический":"risk-crit" };
+
+async function init() {
+  try {
+    const [metaRes, empRes] = await Promise.all([
+      fetch(`${CFG.SHEET_URL}?action=getHazardMeta`).then(r=>r.json()),
+      fetch(`${CFG.SHEET_URL}?action=list`).then(r=>r.json()),
+    ]);
+    META.categories = (metaRes && metaRes.categories) || [];
+    META.riskLevels = (metaRes && metaRes.riskLevels) || [];
+    EMPLOYEES = (empRes||[]).map(e => ({ id:e.id, name:e.name, position:e.position }));
+
+    document.getElementById("siteChoices").innerHTML = CFG.SITES.map(s => `
+      <button type="button" class="choice-btn" data-site="${s}" onclick="pickSite('${s}')">${s}</button>
+    `).join("");
+
+    document.getElementById("categoryChoices").innerHTML = META.categories.map(c => `
+      <button type="button" class="choice-btn" data-cat="${c}" onclick="pickCategory('${c}')">${c}</button>
+    `).join("");
+    document.getElementById("categoryChoices").classList.add("wide");
+
+    document.getElementById("riskChoices").innerHTML = META.riskLevels.map(r => `
+      <button type="button" class="choice-btn ${RISK_CLASS[r]||""}" data-risk="${r}" onclick="pickRisk('${r}')">${r}</button>
+    `).join("");
+
+    showScreen("Form");
+  } catch(e) {
+    showScreen("Error");
+  }
+}
+
+function pickSite(site) {
+  state.site = site;
+  document.querySelectorAll("#siteChoices .choice-btn").forEach(b => b.classList.toggle("active", b.dataset.site === site));
+}
+function pickCategory(cat) {
+  state.category = cat;
+  document.querySelectorAll("#categoryChoices .choice-btn").forEach(b => b.classList.toggle("active", b.dataset.cat === cat));
+}
+function pickRisk(risk) {
+  state.risk = risk;
+  document.querySelectorAll("#riskChoices .choice-btn").forEach(b => b.classList.toggle("active", b.dataset.risk === risk));
+}
+
+function setIdentityMode(mode) {
+  state.identityMode = mode;
+  state.selectedEmp = null;
+  document.querySelectorAll("#identityChoices .choice-btn").forEach((b,i) => {
+    b.classList.toggle("active", (mode === "named" && i === 0) || (mode === "anon" && i === 1));
+  });
+  const block = document.getElementById("identityBlock");
+  if (mode === "anon") {
+    block.innerHTML = `<div class="hint" style="margin-top:10px">Сообщение будет отправлено без указания имени.</div>`;
+  } else {
+    block.innerHTML = `
+      <input type="text" id="empSearch" placeholder="🔍 Введите фамилию..." oninput="renderEmpList(this.value)" style="margin-top:10px">
+      <div id="empList"></div>
+    `;
+  }
+}
+
+function renderEmpList(query) {
+  const list = document.getElementById("empList");
+  const q = String(query||"").trim().toLowerCase();
+  if (!q) { list.innerHTML = ""; return; }
+  const filtered = EMPLOYEES.filter(e => String(e.name||"").toLowerCase().includes(q)).slice(0, 8);
+  if (filtered.length === 0) {
+    list.innerHTML = `<div style="padding:12px;color:var(--gray);font-size:13px;text-align:center">Не найдено. Можно отправить анонимно.</div>`;
+    return;
+  }
+  list.innerHTML = filtered.map(e => `
+    <button type="button" class="emp-item" onclick='pickEmployee(${JSON.stringify(e)})'>
+      <div class="emp-avatar">${initials(e.name)}</div>
+      <div>
+        <div class="emp-name">${e.name}</div>
+        <div class="emp-pos">${e.position||"—"}</div>
+      </div>
+    </button>
+  `).join("");
+}
+
+function pickEmployee(emp) {
+  state.selectedEmp = emp;
+  const block = document.getElementById("identityBlock");
+  block.innerHTML = `
+    <div class="selected-box" style="margin-top:10px">
+      <div class="emp-avatar">${initials(emp.name)}</div>
+      <div>
+        <div class="name">${emp.name}</div>
+        <div style="font-size:11px;color:var(--gray)">${emp.position||"—"}</div>
+      </div>
+      <span class="change" onclick="setIdentityMode('named')">изменить</span>
+    </div>
+  `;
+}
+
+function resizeImageForUpload(file, maxDim) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        let w = img.width, h = img.height;
+        if (w > maxDim || h > maxDim) {
+          if (w > h) { h = Math.round(h * maxDim / w); w = maxDim; }
+          else { w = Math.round(w * maxDim / h); h = maxDim; }
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = w; canvas.height = h;
+        canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL("image/jpeg", 0.85).split(",")[1]);
+      };
+      img.onerror = () => reject(new Error("Не удалось прочитать изображение"));
+      img.src = e.target.result;
+    };
+    reader.onerror = () => reject(new Error("Не удалось прочитать файл"));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function handlePhotoSelect(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  try {
+    const base64 = await resizeImageForUpload(file, 1600);
+    state.photoBase64 = base64;
+    state.photoMime = "image/jpeg";
+    document.getElementById("photoArea").innerHTML = `
+      <div class="photo-preview-wrap">
+        <img class="photo-preview" src="data:image/jpeg;base64,${base64}">
+        <button type="button" class="photo-remove" onclick="removePhoto()">✕</button>
+      </div>
+    `;
+  } catch (e) {
+    alert("Не удалось загрузить фото. Попробуйте ещё раз.");
+  }
+}
+
+function removePhoto() {
+  state.photoBase64 = null;
+  state.photoMime = null;
+  document.getElementById("photoInput").value = "";
+  document.getElementById("photoArea").innerHTML = `
+    <div class="photo-box" onclick="document.getElementById('photoInput').click()">
+      📷 Нажмите, чтобы сделать фото или выбрать из галереи
+    </div>
+  `;
+}
+
+function resetForm() {
+  state = { site: null, identityMode: null, selectedEmp: null, category: null, risk: null, photoBase64: null, photoMime: null };
+  document.querySelectorAll(".choice-btn").forEach(b => b.classList.remove("active"));
+  document.getElementById("identityBlock").innerHTML = "";
+  document.getElementById("location").value = "";
+  document.getElementById("description").value = "";
+  removePhoto();
+  showScreen("Form");
+}
+
+async function submitHazard() {
+  const hint = document.getElementById("submitHint");
+  const description = document.getElementById("description").value.trim();
+  const location = document.getElementById("location").value.trim();
+
+  if (!state.site) { hint.style.color = "var(--red)"; hint.textContent = "Выберите участок"; return; }
+  if (!state.identityMode) { hint.style.color = "var(--red)"; hint.textContent = "Укажите, кто сообщает (или выберите «Анонимно»)"; return; }
+  if (state.identityMode === "named" && !state.selectedEmp) { hint.style.color = "var(--red)"; hint.textContent = "Найдите себя в списке или выберите «Анонимно»"; return; }
+  if (!state.category) { hint.style.color = "var(--red)"; hint.textContent = "Выберите категорию опасности"; return; }
+  if (!state.risk) { hint.style.color = "var(--red)"; hint.textContent = "Выберите уровень риска"; return; }
+  if (!description) { hint.style.color = "var(--red)"; hint.textContent = "Опишите, что вы увидели"; return; }
+
+  hint.style.color = "var(--gray)";
+  hint.textContent = "";
+  const btn = document.getElementById("submitBtn");
+  btn.disabled = true;
+  btn.textContent = "Отправка...";
+
+  try {
+    let photoUrl = "";
+    if (state.photoBase64) {
+      btn.textContent = "Загрузка фото...";
+      const photoRes = await fetch(CFG.SHEET_URL, {
+        method: "POST",
+        body: JSON.stringify({ action: "uploadHazardPhoto", image: state.photoBase64, mimeType: state.photoMime }),
+      }).then(r => r.json());
+      if (photoRes.ok) photoUrl = photoRes.url;
+    }
+
+    btn.textContent = "Отправка...";
+    const res = await fetch(CFG.SHEET_URL, {
+      method: "POST",
+      body: JSON.stringify({
+        action: "submitHazard",
+        site: state.site,
+        location,
+        category: state.category,
+        riskLevel: state.risk,
+        description,
+        anonymous: state.identityMode === "anon",
+        reporterName: state.selectedEmp ? state.selectedEmp.name : "",
+        reporterId: state.selectedEmp ? state.selectedEmp.id : "",
+        photoUrl,
+      }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      showScreen("Success");
+    } else {
+      hint.style.color = "var(--red)";
+      hint.textContent = "Ошибка: " + (data.error || "неизвестная");
+    }
+  } catch (e) {
+    hint.style.color = "var(--red)";
+    hint.textContent = "Ошибка сети. Проверьте интернет и попробуйте ещё раз.";
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Отправить сообщение";
+  }
+}
+
+init();
+</script>
+</body>
+</html>
