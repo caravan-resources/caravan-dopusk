@@ -368,6 +368,7 @@ function hazardCardHtml(h) {
             <span class="badge ${riskClass(h.riskLevel)}">${h.riskLevel}</span>
             <span class="badge ${statusClass(h.status)}">${h.status}</span>
             <span class="badge" style="background:var(--light);color:var(--gray)">${h.category}</span>
+            ${h.immediateActions ? `<span class="badge" style="background:var(--greenbg);color:var(--green)">✓ меры приняты</span>` : ""}
           </div>
           <div class="hz-desc">${(h.location ? h.location + " — " : "") + h.description}</div>
         </div>
@@ -396,6 +397,7 @@ function openHazardModal(h) {
     <div class="field"><label>Участок / место</label><div>${h.site}${h.location ? " — " + h.location : ""}</div></div>
     <div class="field"><label>Сообщил(а)</label><div>${reporter}</div></div>
     <div class="field"><label>Описание</label><div style="white-space:pre-wrap">${h.description}</div></div>
+    ${h.immediateActions ? `<div class="field"><label>Принятые меры (на месте)</label><div style="white-space:pre-wrap">${h.immediateActions}</div></div>` : ""}
     <div class="field">
       <label>Статус</label>
       <select id="modalStatus">
