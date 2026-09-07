@@ -436,6 +436,37 @@ tr:hover td { background:#FAFBFD; }
         </div>
       </div>
 
+      <!-- ═══ ВЫЯВЛЕНИЕ ОПАСНОСТЕЙ ═══ -->
+      <div id="dashGroupHazards" class="dash-group">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:10px;flex-wrap:wrap">
+          <span style="font-size:15px;font-weight:800;color:var(--navy)">⚠ Выявление опасностей</span>
+          <button class="btn btn-ghost" style="width:auto;padding:6px 12px;font-size:12px" onclick="window.open('hazards-panel.html','_blank')">🔗 Открыть панель разбора →</button>
+        </div>
+        <div class="hint" style="margin-bottom:10px">
+          Сообщения приходят по QR-ссылке (hazard-report.html) от любого сотрудника, с фото.
+          Здесь — только сводка за 30 дней; статусы, история и полный список — в отдельной панели.
+        </div>
+        <div class="stats-grid" id="statsGridDashHazards"></div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+          <div class="panel">
+            <div class="panel-title">📂 По категориям</div>
+            <div id="dashHazardsByCategory"></div>
+          </div>
+          <div class="panel">
+            <div class="panel-title">📍 По участкам</div>
+            <div id="dashHazardsBySite"></div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title">
+            🕐 Последние сообщения
+          </div>
+          <div id="dashHazardsRecent"></div>
+        </div>
+      </div>
+
     </div>
 
     <!-- ══ РЕЗУЛЬТАТЫ ТЕСТОВ ══ -->
@@ -1381,7 +1412,7 @@ function escapeHtml(str) {
 // ══════════════════════════════════════════════════════
 // ДАННЫЕ
 // ══════════════════════════════════════════════════════
-let DATA = { employees: [], results: [], training: [], requirements: [], personnelEvents: [], surveys: [], equipment: [], checklistTemplates: [], checklistRecords: [], courseCatalog: [] };
+let DATA = { employees: [], results: [], training: [], requirements: [], personnelEvents: [], surveys: [], equipment: [], checklistTemplates: [], checklistRecords: [], courseCatalog: [], hazardStats: null };
 
 // Единые названия трёх блоков оценки — используются везде вместо "Блок 1/2/3"
 // (дашборд, личное дело). Совпадают с training.html — если меняете здесь,
@@ -1620,6 +1651,7 @@ async function loadAll() {
     { key: "fuel",              action: "getFuelRecords",          cb: "cb_fuel_records"                          },
 
     { key: "personnelEvents",   action: "getPersonnelEvents",      cb: "cb_personnel_events"                      },
+    { key: "hazardStats",       action: "getHazardStats",          cb: "cb_hazard_stats"                          },
   ];
 
   // Грузим пачками по 3, а не все 12 разом. Браузер держит к одному домену
@@ -1652,7 +1684,7 @@ async function loadAll() {
     res.forEach((r, j) => {
       const f = part[j];
       if (r.status !== "fulfilled") return;
-      if (f.key === "checklistStats" || f.key === "personnelStats") {
+      if (f.key === "checklistStats" || f.key === "personnelStats" || f.key === "hazardStats") {
         if (r.value && r.value.ok) DATA[f.key] = r.value;
       }
       else if (Array.isArray(r.value)) DATA[f.key] = r.value;
@@ -1664,7 +1696,7 @@ async function loadAll() {
   settled.forEach((res, i) => {
     const f = fetches[i];
     // Агрегаты (checklistStats, personnelStats) приходят объектом, остальное — массивами
-    const isObj = f.key === "checklistStats" || f.key === "personnelStats";
+    const isObj = f.key === "checklistStats" || f.key === "personnelStats" || f.key === "hazardStats";
     const val = res.status === "fulfilled" ? res.value : null;
     const ok = res.status === "fulfilled" &&
       (isObj ? (val && val.ok) : Array.isArray(val) && (f.critical ? val.length > 0 : true));
@@ -2250,7 +2282,7 @@ let DASH_ACTIVE_CAT = null; // null = всё свёрнуто
 
 function toggleDashCategory(name) {
   DASH_ACTIVE_CAT = (DASH_ACTIVE_CAT === name) ? null : name;
-  ["Inspections","Training","Fuel","Evaluations","Timing"].forEach(g => {
+  ["Inspections","Training","Fuel","Evaluations","Timing","Hazards"].forEach(g => {
     const el = document.getElementById("dashGroup"+g);
     if (el) el.classList.toggle("active", DASH_ACTIVE_CAT === g);
   });
@@ -2330,6 +2362,22 @@ function timingStatsForDashboard() {
   return { count: allRecords.length, avgCycle, badLoading };
 }
 
+// getHazardStats уже присылает готовые агрегаты (открытые/критические/по
+// категориям и т.д.) — здесь просто безопасно достаём их с дефолтами на
+// случай, если запрос ещё не пришёл или лист пока пуст ({ok:true, empty:true}).
+function hazardStatsForDashboard() {
+  const s = DATA.hazardStats && DATA.hazardStats.stats;
+  return {
+    total: s ? s.total : 0,
+    last7: s ? s.last7 : 0,
+    open: s ? s.open : 0,
+    openCritical: s ? s.openCritical : 0,
+    byCategory: s ? s.byCategory : {},
+    bySite: s ? s.bySite : {},
+    recent: s ? s.recent : [],
+  };
+}
+
 function renderDashCatRow() {
   const el = document.getElementById("dashCatRow");
   if (!el) return;
@@ -2341,6 +2389,7 @@ function renderDashCatRow() {
   const fuelLiters = fuel["Алмалы"].liters + fuel["Ашыктас"].liters;
   const ev = evalStatsForDashboard();
   const tm = timingStatsForDashboard();
+  const hz = hazardStatsForDashboard();
 
   const cats = [
     { key:"Inspections", icon:"🔧", title:"Осмотры техники",
@@ -2372,6 +2421,12 @@ function renderDashCatRow() {
       nums: [
         { val: tm.avgCycle!==null ? tm.avgCycle.toFixed(1)+"с" : "—", lbl:"средний цикл", color:"var(--navy)" },
         { val: tm.count, lbl:"замеров", color:"var(--navy)" },
+      ] },
+    { key:"Hazards", icon:"⚠", title:"Выявление опасностей",
+      dot: hz.openCritical ? "var(--red)" : (hz.open ? "var(--yellow)" : "var(--green)"),
+      nums: [
+        { val:hz.open, lbl:"открытых", color: hz.openCritical ? "var(--red)" : (hz.open ? "var(--yellow)" : "var(--navy)") },
+        { val:hz.last7, lbl:"за 7 дней", color:"var(--navy)" },
       ] },
   ];
 
@@ -2511,6 +2566,82 @@ function renderDashCategories() {
   renderDashFuelDetail();
   renderDashEvalDetail();
   renderDashTimingDetail();
+  renderDashHazardsDetail();
+}
+
+// Компактный разбор — категории/участки как горизонтальные бары (тот же
+// визуальный приём, что в hazards-panel.html), список последних сообщений
+// с бейджами риска/статуса. Полная работа (смена статуса, история, фото
+// крупно) — только в hazards-panel.html, сюда её не тащим.
+function hazardRiskBadgeClass(risk) {
+  return {
+    "Низкий":     { fg:"var(--green)",  bg:"var(--greenbg)" },
+    "Средний":    { fg:"var(--yellow)", bg:"var(--yellowbg)" },
+    "Высокий":    { fg:"#EA580C",       bg:"#FFF7ED" },
+    "Критический":{ fg:"var(--red)",    bg:"var(--redbg)" },
+  }[risk] || { fg:"var(--gray)", bg:"var(--light)" };
+}
+function hazardStatusBadgeClass(status) {
+  return {
+    "Новое":     { fg:"var(--red)",    bg:"var(--redbg)" },
+    "В работе":  { fg:"var(--yellow)", bg:"var(--yellowbg)" },
+    "Устранено": { fg:"var(--green)",  bg:"var(--greenbg)" },
+    "Отклонено": { fg:"var(--gray)",   bg:"var(--light)" },
+  }[status] || { fg:"var(--gray)", bg:"var(--light)" };
+}
+function renderHazardBars(elId, data) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  const entries = Object.entries(data || {}).sort((a,b) => b[1]-a[1]);
+  if (entries.length === 0) { el.innerHTML = `<div class="empty" style="padding:12px">Нет данных за период</div>`; return; }
+  const max = Math.max(...entries.map(e => e[1]));
+  el.innerHTML = entries.map(([label, count]) => `
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;font-size:13px">
+      <div style="width:170px;flex-shrink:0;color:var(--navy)">${escapeHtml(label)}</div>
+      <div style="flex:1;background:var(--light);border-radius:6px;height:14px;overflow:hidden">
+        <div style="height:100%;background:var(--navy2);border-radius:6px;width:${Math.round(count/max*100)}%"></div>
+      </div>
+      <div style="width:28px;text-align:right;font-weight:700;color:var(--gray)">${count}</div>
+    </div>
+  `).join("");
+}
+function renderDashHazardsDetail() {
+  const gridEl = document.getElementById("statsGridDashHazards");
+  if (!gridEl) return;
+  const hz = hazardStatsForDashboard();
+
+  gridEl.innerHTML = [
+    { lbl:"Всего за 30 дней", val: hz.total, acc:"var(--gold)" },
+    { lbl:"За последние 7 дней", val: hz.last7, acc:"var(--navy2)" },
+    { lbl:"Открытых (не устранено)", val: hz.open, acc: hz.open ? "var(--red)" : "var(--gray)" },
+    { lbl:"Критических открытых", val: hz.openCritical, acc: hz.openCritical ? "var(--red)" : "var(--gray)" },
+  ].map(s => `
+    <div class="stat-card" style="border-left-color:${s.acc}">
+      <div class="stat-val" style="color:${s.acc}">${s.val}</div>
+      <div class="stat-lbl">${s.lbl}</div>
+    </div>`).join("");
+
+  renderHazardBars("dashHazardsByCategory", hz.byCategory);
+  renderHazardBars("dashHazardsBySite", hz.bySite);
+
+  const recent = hz.recent || [];
+  document.getElementById("dashHazardsRecent").innerHTML = recent.length
+    ? recent.map(h => {
+        const reporter = h.anonymous === "да" ? "Аноним" : (h.reporterName || "Аноним");
+        return `
+        <div style="padding:10px 0;border-bottom:1px solid var(--border)">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+            <div style="font-size:11px;color:var(--gray)"><b style="color:var(--navy)">№${h.number||"—"}</b> · ${h.date} · ${h.site} · ${escapeHtml(reporter)}</div>
+            <div style="display:flex;gap:6px">
+              <span style="background:${hazardRiskBadgeClass(h.riskLevel).bg};color:${hazardRiskBadgeClass(h.riskLevel).fg};font-size:11px;font-weight:700;padding:2px 8px;border-radius:6px">${h.riskLevel}</span>
+              <span style="background:${hazardStatusBadgeClass(h.status).bg};color:${hazardStatusBadgeClass(h.status).fg};font-size:11px;font-weight:700;padding:2px 8px;border-radius:6px">${h.status}</span>
+            </div>
+          </div>
+          <div style="font-size:13px;color:var(--navy);margin-top:4px">${escapeHtml((h.location ? h.location + " — " : "") + h.description)}</div>
+        </div>
+      `;
+      }).join("")
+    : `<div class="empty"><div class="empty-icon">✓</div>Сообщений об опасностях за период нет</div>`;
 }
 
 // ══════════════════════════════════════════════════════
