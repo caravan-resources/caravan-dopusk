@@ -3540,8 +3540,13 @@ async function downloadCardsAsPdf(cardsHtmlArray, filename, btn) {
       area.remove();
 
       const imgData = canvas.toDataURL("image/jpeg", 0.92);
+      // Не растягиваем принудительно на все 297мм: если карточек меньше 10
+      // (неполная страница), высота реального контента меньше высоты листа —
+      // растяжка до 297мм тогда искажает пропорции (карточки "плывут").
+      // Вставляем с реальным соотношением сторон снимка.
+      const imgHeightMm = (canvas.height / canvas.width) * 210;
       if (p > 0) pdf.addPage();
-      pdf.addImage(imgData, "JPEG", 0, 0, 210, 297);
+      pdf.addImage(imgData, "JPEG", 0, 0, 210, imgHeightMm);
     }
 
     pdf.save(filename);
