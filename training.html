@@ -3480,6 +3480,35 @@ async function waitImagesLoaded(area) {
   }));
 }
 
+// html2canvas не всегда уважает CSS object-fit:cover — иногда просто
+// растягивает исходную картинку под размер бокса без сохранения пропорций,
+// отсюда сплющенные по горизонтали лица на скачанном PDF (при том что печать
+// через window.print() показывает всё нормально, т.к. там рисует сам браузер,
+// а не html2canvas). Обрезаем/масштабируем фото под точный размер контейнера
+// заранее на canvas — тогда кадрирование "зашито" в пиксели картинки и не
+// зависит от того, поддержит ли html2canvas object-fit.
+function coverCropDataUri(srcDataUri, targetW, targetH) {
+  return new Promise((resolve) => {
+    if (!targetW || !targetH) { resolve(srcDataUri); return; }
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = targetW;
+      canvas.height = targetH;
+      const ctx = canvas.getContext("2d");
+      const scale = Math.max(targetW / img.width, targetH / img.height);
+      const drawW = img.width * scale;
+      const drawH = img.height * scale;
+      const dx = (targetW - drawW) / 2;
+      const dy = (targetH - drawH) / 2;
+      ctx.drawImage(img, dx, dy, drawW, drawH);
+      resolve(canvas.toDataURL("image/jpeg", 0.92));
+    };
+    img.onerror = () => resolve(srcDataUri); // не смогли перекадрировать — оставляем как есть
+    img.src = srcDataUri;
+  });
+}
+
 async function resolvePhotosForCapture(area) {
   const imgs = Array.from(area.querySelectorAll("img"))
     .filter(img => img.src.includes("drive.google.com"));
@@ -3490,7 +3519,12 @@ async function resolvePhotosForCapture(area) {
       const res = await fetch(`${CFG.SHEET_URL}?action=getPhotoBase64&fileId=${encodeURIComponent(m[1])}`);
       const data = await res.json();
       if (data.ok && data.base64) {
-        img.src = `data:${data.mime || "image/jpeg"};base64,${data.base64}`;
+        const rawDataUri = `data:${data.mime || "image/jpeg"};base64,${data.base64}`;
+        // Целимся x2 от рендер-размера бокса — под стать scale:2 в html2canvas,
+        // чтобы фото не выглядело мыльным на итоговом снимке.
+        const targetW = Math.round((img.clientWidth || img.offsetWidth) * 2);
+        const targetH = Math.round((img.clientHeight || img.offsetHeight) * 2);
+        img.src = await coverCropDataUri(rawDataUri, targetW, targetH);
       }
       // Если сервер не смог отдать фото — оставляем старый src. html2canvas
       // просто не нарисует эту картинку (некритично), но остальная карточка
