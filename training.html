@@ -6,6 +6,8 @@
 <title>Обучение — Caravan Resources</title>
 <!-- SheetJS — для импорта хронометража из .xlsx и выгрузки шаблона. -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
 :root {
   --navy:#0B1A35; --navy2:#1B3B6F; --gold:#F4A52A;
@@ -697,6 +699,7 @@ td { padding:8px; border-bottom:1px solid var(--border); }
             <button class="btn-ghost" style="width:auto;padding:7px 12px" onclick="selectAllPrint()">Выбрать всех</button>
             <button class="btn-ghost" style="width:auto;padding:7px 12px" onclick="clearPrintSelect()">Сбросить</button>
             <button class="btn-gold" style="width:auto;padding:7px 14px" onclick="printCards()">🖨 Печать / PDF</button>
+            <button class="btn-ghost" style="width:auto;padding:7px 14px" onclick="downloadCards(this)">⬇ Скачать PDF</button>
           </div>
         </div>
         <div class="hint" style="margin-bottom:12px">
@@ -729,6 +732,7 @@ td { padding:8px; border-bottom:1px solid var(--border); }
           <div style="display:flex;gap:8px">
             <button class="btn-ghost" style="width:auto;padding:7px 12px" onclick="clearDrivingPrintSelect()">Сбросить</button>
             <button class="btn-gold" style="width:auto;padding:7px 14px" onclick="printDrivingCards()">🚗 Печать / PDF</button>
+            <button class="btn-ghost" style="width:auto;padding:7px 14px" onclick="downloadDrivingCards(this)">⬇ Скачать PDF</button>
           </div>
         </div>
         <input type="text" id="searchDrivingPrint" placeholder="🔍 Поиск по имени..." oninput="renderDrivingPrintSelect()" style="margin-bottom:12px">
@@ -752,6 +756,7 @@ td { padding:8px; border-bottom:1px solid var(--border); }
           <div style="display:flex;gap:8px">
             <button class="btn-ghost" style="width:auto;padding:7px 12px" onclick="clearCertPrintSelect('profession')">Сбросить</button>
             <button class="btn-gold" style="width:auto;padding:7px 14px" onclick="printCertCards('profession')">🎓 Печать / PDF</button>
+            <button class="btn-ghost" style="width:auto;padding:7px 14px" onclick="downloadCertCards('profession', this)">⬇ Скачать PDF</button>
           </div>
         </div>
         <div class="hint" style="margin-bottom:12px">
@@ -818,6 +823,7 @@ td { padding:8px; border-bottom:1px solid var(--border); }
         <div class="panel-title">
           Печать
           <button class="btn-gold" style="width:auto;padding:8px 16px" onclick="printRoster()">🖨 Печать / PDF</button>
+          <button class="btn-ghost" style="width:auto;padding:8px 16px" onclick="downloadRoster(this)">⬇ Скачать PDF</button>
         </div>
         <div class="hint">Пустое ФИО в строке при печати пропускается — можно оставить запас пустых строк на будущее.</div>
       </div>
@@ -3299,6 +3305,17 @@ function renderPrintPreview() {
 // влезают по ширине (длинное отчество переносится лишней строкой), раньше
 // лишняя строка просто обрезалась через overflow:hidden. Теперь вместо этого
 // уменьшаем font-size блока, пока весь текст не поместится в свой бюджет высоты.
+// Измеряем ширину слова на canvas — используется, чтобы поймать случай,
+// когда отдельное слово (обычно длинное отчество) шире доступного блока
+// само по себе. В этом случае word-break:break-word рвёт слово посередине
+// слога, что укладывается в бюджет высоты (3 строки) и раньше не считалось
+// переполнением — шрифт не уменьшался, хотя выглядело некрасиво.
+function textWidthPx(text, fontSpec) {
+  const ctx = textWidthPx._ctx || (textWidthPx._ctx = document.createElement("canvas").getContext("2d"));
+  ctx.font = fontSpec;
+  return ctx.measureText(text).width;
+}
+
 function fitCardNames(root) {
   const scope = root || document;
   scope.querySelectorAll(".card-name-fit").forEach(el => {
@@ -3310,8 +3327,29 @@ function fitCardNames(root) {
     }
     let size = parseFloat(el.dataset.baseSize);
     const minSize = size * 0.6; // не даём ужаться больше чем наполовину — иначе нечитаемо
+    const style = getComputedStyle(el);
+    // text-transform:uppercase меняет то, что реально рисуется на экране, но не
+    // el.textContent — меряем ширину именно отображаемого варианта, иначе строчные
+    // буквы дадут заниженную оценку ширины и проверка ложно решит, что влезло.
+    const toDisplay = style.textTransform === "uppercase"
+      ? (s) => s.toUpperCase()
+      : style.textTransform === "lowercase"
+        ? (s) => s.toLowerCase()
+        : (s) => s;
+    const words = el.textContent.trim().split(/\s+/).filter(Boolean).map(toDisplay);
+    const boxWidth = el.clientWidth || el.getBoundingClientRect().width;
+    const fontFamily = style.fontFamily;
+    const fontWeight = style.fontWeight;
+
+    const fits = (curSize) => {
+      if (el.scrollHeight > el.clientHeight + 1) return false;
+      const fontSpec = `${fontWeight} ${curSize}px ${fontFamily}`;
+      // небольшой запас (2px) на letter-spacing, который canvas.measureText не учитывает
+      return words.every(w => textWidthPx(w, fontSpec) <= boxWidth - 2);
+    };
+
     el.style.fontSize = size + "px";
-    while (el.scrollHeight > el.clientHeight + 1 && size > minSize) {
+    while (!fits(size) && size > minSize) {
       size -= 0.5;
       el.style.fontSize = size + "px";
     }
@@ -3418,6 +3456,108 @@ function cardHTML(emp) {
   </div>`;
 }
 
+
+// ══════════════════════════════════════════════════════
+// СКАЧИВАНИЕ КАРТОЧЕК В PDF (html2canvas + jsPDF)
+// Отдельный путь от печати (window.print()) — печать рисует DOM напрямую,
+// у браузера нет ограничений. Для скачивания приходится рендерить в canvas
+// и паковать в PDF, а тут вступает в игру CORS: фото с drive.google.com/
+// thumbnail не отдают Access-Control-Allow-Origin, поэтому canvas с таким
+// <img> становится "tainted" и canvas.toDataURL() падает с SecurityError.
+// Решение — resolvePhotosForCapture() подменяет src на data URI, полученный
+// через getPhotoBase64 (сервер сам скачивает файл с Drive, без CORS).
+// ══════════════════════════════════════════════════════
+
+async function waitImagesLoaded(area) {
+  const images = Array.from(area.querySelectorAll("img"));
+  await Promise.all(images.map(img => {
+    if (img.complete) return Promise.resolve();
+    return new Promise(resolve => {
+      img.addEventListener("load", resolve, { once:true });
+      img.addEventListener("error", resolve, { once:true });
+      setTimeout(resolve, 4000);
+    });
+  }));
+}
+
+async function resolvePhotosForCapture(area) {
+  const imgs = Array.from(area.querySelectorAll("img"))
+    .filter(img => img.src.includes("drive.google.com"));
+  await Promise.all(imgs.map(async img => {
+    const m = img.src.match(/[?&]id=([^&]+)/);
+    if (!m) return;
+    try {
+      const res = await fetch(`${CFG.SHEET_URL}?action=getPhotoBase64&fileId=${encodeURIComponent(m[1])}`);
+      const data = await res.json();
+      if (data.ok && data.base64) {
+        img.src = `data:${data.mime || "image/jpeg"};base64,${data.base64}`;
+      }
+      // Если сервер не смог отдать фото — оставляем старый src. html2canvas
+      // просто не нарисует эту картинку (некритично), но остальная карточка
+      // и PDF в целом соберутся нормально.
+    } catch(e) { /* см. комментарий выше */ }
+  }));
+}
+
+// Собирает карточки (уже готовый HTML от cardHTML/certCardHTML) в PDF,
+// по 10 штук на страницу А4 (2 колонки × 5 рядов — тот же расчёт, что и в
+// renderPrintPreview), каждая страница — отдельный html2canvas-снимок.
+// Отдельный снимок на страницу, а не один длинный на всё — чтобы карточка
+// физически не могла разрезаться пополам между страницами PDF.
+async function downloadCardsAsPdf(cardsHtmlArray, filename, btn) {
+  if (cardsHtmlArray.length === 0) { alert("Нечего скачивать — выборка пуста"); return; }
+  if (typeof html2canvas === "undefined" || typeof window.jspdf === "undefined") {
+    alert("Не удалось загрузить библиотеку для PDF. Проверьте интернет и попробуйте снова.");
+    return;
+  }
+  const origText = btn ? btn.textContent : null;
+  if (btn) { btn.disabled = true; }
+
+  try {
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
+    const CARDS_PER_PAGE = 10;
+    const pages = [];
+    for (let i = 0; i < cardsHtmlArray.length; i += CARDS_PER_PAGE) {
+      pages.push(cardsHtmlArray.slice(i, i + CARDS_PER_PAGE));
+    }
+
+    for (let p = 0; p < pages.length; p++) {
+      if (btn) btn.textContent = `Готовлю PDF... (${p + 1}/${pages.length})`;
+
+      const area = document.createElement("div");
+      area.style.cssText = "position:fixed;left:-9999px;top:0;background:#fff;" +
+        "display:grid;grid-template-columns:85.6mm 85.6mm;gap:3mm;padding:5mm;width:210mm;box-sizing:border-box;";
+      area.innerHTML = pages[p].join("");
+      document.body.appendChild(area);
+
+      fitCardNames(area);
+      await resolvePhotosForCapture(area);
+      await waitImagesLoaded(area);
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+      const canvas = await html2canvas(area, { scale: 2, backgroundColor: "#ffffff", useCORS: true });
+      area.remove();
+
+      const imgData = canvas.toDataURL("image/jpeg", 0.92);
+      if (p > 0) pdf.addPage();
+      pdf.addImage(imgData, "JPEG", 0, 0, 210, 297);
+    }
+
+    pdf.save(filename);
+  } catch (err) {
+    alert("Не получилось собрать PDF: " + err.message + ". Попробуйте ещё раз или воспользуйтесь печатью.");
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = origText; }
+  }
+}
+
+async function downloadCards(btn) {
+  if (printSelected.size === 0) { alert("Выберите сотрудников для печати"); return; }
+  const selected = DATA.employees.filter(e=>printSelected.has(e.id));
+  const cardsHtml = selected.map(e=>cardHTML(e));
+  await downloadCardsAsPdf(cardsHtml, "Допуски.pdf", btn);
+}
 
 async function printCards() {
   if (printSelected.size === 0) { alert("Выберите сотрудников для печати"); return; }
@@ -3549,6 +3689,14 @@ function renderDrivingPrintPreview() {
     </div>`)
   ].join("");
   fitCardNames(sheet);
+}
+
+async function downloadDrivingCards(btn) {
+  if (printSelectedDriving.size === 0) { alert("Выберите удостоверения для печати"); return; }
+  const pool = drivingCertPool();
+  const selected = pool.filter(t => printSelectedDriving.has(trainingKeyDriving(t)));
+  const cardsHtml = selected.map(t => certCardHTML(t));
+  await downloadCardsAsPdf(cardsHtml, "Вождение.pdf", btn);
 }
 
 async function printDrivingCards() {
@@ -3882,6 +4030,15 @@ function certCardHTML(t) {
   </div>`;
 }
 
+async function downloadCertCards(kind, btn) {
+  const selSet = certSelectedSet(kind);
+  if (selSet.size === 0) { alert("Выберите удостоверения для печати"); return; }
+  const pool = certPoolFor(kind);
+  const selected = pool.filter(t => selSet.has(trainingKey(t)));
+  const cardsHtml = selected.map(t => certCardHTML(t));
+  await downloadCardsAsPdf(cardsHtml, "Удостоверения.pdf", btn);
+}
+
 async function printCertCards(kind) {
   const selSet = certSelectedSet(kind);
   if (selSet.size === 0) { alert("Выберите удостоверения для печати"); return; }
@@ -3993,6 +4150,110 @@ function addRosterEmpFromInput() {
   ROSTER_ROWS.push({ name, position: emp ? (emp.position||"") : "", department: emp ? (emp.department||"") : "" });
   input.value = "";
   renderRosterRows();
+}
+
+// Ростер — таблица переменной длины, а не сетка карточек фиксированного
+// размера, поэтому нарезаем один длинный canvas на страницы А4 по высоте,
+// а не считаем карточки на странице. Изредка может разрезать строку
+// таблицы пополам между страницами (в отличие от карточек, где это
+// исключено расчётом по 10 шт/лист) — для листа подписи это не критично.
+async function downloadTableAsPdf(innerHtml, filename, btn) {
+  if (typeof html2canvas === "undefined" || typeof window.jspdf === "undefined") {
+    alert("Не удалось загрузить библиотеку для PDF. Проверьте интернет и попробуйте снова.");
+    return;
+  }
+  const origText = btn ? btn.textContent : null;
+  if (btn) { btn.disabled = true; btn.textContent = "Готовлю PDF..."; }
+
+  try {
+    const area = document.createElement("div");
+    area.style.cssText = "position:fixed;left:-9999px;top:0;background:#fff;width:210mm;padding:10mm;box-sizing:border-box;";
+    area.innerHTML = innerHtml;
+    document.body.appendChild(area);
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+    const canvas = await html2canvas(area, { scale: 2, backgroundColor: "#ffffff" });
+    area.remove();
+
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
+    const pageWidthMm = 210, pageHeightMm = 297;
+    const pxPerMm = canvas.width / pageWidthMm;
+    const pageHeightPx = Math.floor(pageHeightMm * pxPerMm);
+
+    let renderedPx = 0;
+    let first = true;
+    while (renderedPx < canvas.height) {
+      const sliceHeightPx = Math.min(pageHeightPx, canvas.height - renderedPx);
+      const pageCanvas = document.createElement("canvas");
+      pageCanvas.width = canvas.width;
+      pageCanvas.height = sliceHeightPx;
+      pageCanvas.getContext("2d").drawImage(
+        canvas, 0, renderedPx, canvas.width, sliceHeightPx, 0, 0, canvas.width, sliceHeightPx
+      );
+      const imgData = pageCanvas.toDataURL("image/jpeg", 0.92);
+      if (!first) pdf.addPage();
+      pdf.addImage(imgData, "JPEG", 0, 0, pageWidthMm, sliceHeightPx / pxPerMm);
+      renderedPx += sliceHeightPx;
+      first = false;
+    }
+
+    pdf.save(filename);
+  } catch (err) {
+    alert("Не получилось собрать PDF: " + err.message + ". Попробуйте ещё раз или воспользуйтесь печатью.");
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = origText; }
+  }
+}
+
+async function downloadRoster(btn) {
+  const type = document.getElementById("rosterType").value;
+  const course = document.getElementById("rosterCourseSelect").value;
+  const instructor = document.getElementById("rosterInstructor").value.trim();
+  const dateIso = document.getElementById("rosterDate").value;
+  if (!course) { alert("Выберите название курса"); return; }
+  if (!instructor) { alert("Укажите фамилию инструктора"); return; }
+
+  const rows = ROSTER_ROWS.filter(r => r.name.trim());
+  if (!rows.length) { alert("Добавьте хотя бы одного обучаемого"); return; }
+
+  const dateRu = dateIso ? isoToRuLocal(dateIso) : "";
+
+  // Та же логика колонок, что и в printRoster() — держим в синхроне вручную,
+  // так как это разные пути вывода (canvas-снимок вместо window.print()).
+  const headCols = type === "profession"
+    ? ["№","ФИО","Должность","Департамент","Дата","Подпись","Практика/Дата","Подпись"]
+    : ["№","ФИО","Должность","Департамент","Подпись"];
+  const colWidths = type === "profession"
+    ? [4, 27, 13, 6, 10, 10, 10, 10]
+    : [5, 44, 20, 9, 22];
+  const rowCols = (r,i) => type === "profession"
+    ? [i+1, escapeHtml(r.name), escapeHtml(r.position), escapeHtml(r.department), "", "", "", ""]
+    : [i+1, escapeHtml(r.name), escapeHtml(r.position), escapeHtml(r.department), ""];
+
+  const innerHtml = `
+    <div style="font-family:Arial,sans-serif;color:#111">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;border-bottom:2px solid #0B1A35;padding-bottom:10px">
+        <div style="background:#0B1A35;padding:3mm 4mm;border-radius:2mm;flex-shrink:0">
+          <img src="${CR_LOGO_SRC}" style="height:12mm;width:auto;object-fit:contain;display:block">
+        </div>
+        <div style="font-size:15px;font-weight:800;color:#0B1A35;letter-spacing:.02em">CARAVAN RESOURCES</div>
+      </div>
+      <div style="font-size:13px;margin-bottom:4px"><b>Участок:</b> ${escapeHtml(CURRENT_SITE)}</div>
+      <div style="font-size:13px;margin-bottom:4px"><b>Инструктор:</b> ${escapeHtml(instructor)}</div>
+      <div style="font-size:13px;margin-bottom:4px"><b>Название курса:</b> ${escapeHtml(course)}</div>
+      <div style="font-size:13px;margin-bottom:12px"><b>Дата:</b> ${escapeHtml(dateRu||"—")}</div>
+      <table style="width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed">
+        <colgroup>${colWidths.map(w => `<col style="width:${w}%">`).join("")}</colgroup>
+        <thead>
+          <tr>${headCols.map(h => `<th style="border:1px solid #333;padding:3px;font-size:4px;text-transform:none;font-weight:700;color:#111;overflow-wrap:break-word">${h}</th>`).join("")}</tr>
+        </thead>
+        <tbody>
+          ${rows.map((r,i) => `<tr>${rowCols(r,i).map((v,ci) => `<td style="border:1px solid #333;padding:4px;overflow-wrap:break-word${ci===0?';text-align:center':''}">${v}</td>`).join("")}</tr>`).join("")}
+        </tbody>
+      </table>
+    </div>`;
+  await downloadTableAsPdf(innerHtml, "Ростер.pdf", btn);
 }
 
 function printRoster() {
