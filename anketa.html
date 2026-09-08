@@ -531,24 +531,52 @@ async function submitForm() {
   // "" для нового человека), а имя точно заполнено (форма не пропустила
   // бы валидацию выше) — то есть матчинг на бэкенде получит настоящие
   // данные, а не пустышку.
+  //
+  // Если человек приложил фото — анкета обязана уйти именно с ним. Раньше
+  // сбой загрузки фото тихо проглатывался (catch без действия), и анкета
+  // всё равно отправлялась без фото — человек и инструктор узнавали об
+  // этом только когда фото требовалось для печати допуска, спустя недели.
+  // Теперь: 3 попытки с паузой, и если фото так и не загрузилось —
+  // ОСТАНАВЛИВАЕМ отправку целиком, а не отправляем без фото молча.
   let photoUrl = "";
   if (pendingPhotoBase64) {
-    btn.textContent = "Загрузка фото...";
-    try {
-      const photoRes = await fetch(CFG.SHEET_URL, {
-        method: "POST",
-        body: JSON.stringify({
-          action: "uploadPhoto",
-          empId: selected && selected.id ? selected.id : "",
-          empName: name,
-          base64: pendingPhotoBase64,
-          mime: "image/jpeg",
-        })
-      });
-      const photoData = await photoRes.json();
-      if (photoData.ok && photoData.url) photoUrl = photoData.url;
-    } catch(e) {
-      // Не блокируем отправку анкеты из-за сбоя фото — просто отправится без него.
+    const status = document.getElementById("photoStatus");
+    let uploaded = false;
+    let lastErr = "";
+    for (let attempt = 1; attempt <= 3 && !uploaded; attempt++) {
+      btn.textContent = attempt === 1 ? "Загрузка фото..." : `Загрузка фото... (попытка ${attempt} из 3)`;
+      try {
+        const photoRes = await fetch(CFG.SHEET_URL, {
+          method: "POST",
+          body: JSON.stringify({
+            action: "uploadPhoto",
+            empId: selected && selected.id ? selected.id : "",
+            empName: name,
+            base64: pendingPhotoBase64,
+            mime: "image/jpeg",
+          })
+        });
+        const photoData = await photoRes.json();
+        if (photoData.ok && photoData.url) {
+          photoUrl = photoData.url;
+          uploaded = true;
+        } else {
+          lastErr = photoData.error || "фото не сохранилось";
+        }
+      } catch(e) {
+        lastErr = "проблема с сетью";
+      }
+      if (!uploaded && attempt < 3) {
+        if (status) { status.textContent = `Не получилось загрузить фото, пробую ещё раз (${attempt}/3)...`; status.style.color = "var(--gray)"; }
+        await new Promise(r => setTimeout(r, 1500));
+      }
+    }
+    if (!uploaded) {
+      if (status) { status.textContent = "Фото не загрузилось (" + lastErr + "). Анкета НЕ отправлена."; status.style.color = "var(--red)"; }
+      alert("Не удалось загрузить фото (" + lastErr + "). Анкета не отправлена, чтобы фото не потерялось. Проверьте интернет и нажмите «Отправить анкету» ещё раз.");
+      btn.disabled = false;
+      btn.textContent = "Отправить анкету";
+      return;
     }
     btn.textContent = "Отправка...";
   }
