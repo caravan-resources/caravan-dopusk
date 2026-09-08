@@ -51,6 +51,7 @@ function doGet(e) {
 
   let result;
   if (action === "list")            result = getEmployees(e.parameter.site);
+  else if (action === "getPhotoBase64") result = getPhotoBase64(e.parameter.fileId);
   else if (action === "getPersonnelStats") result = getPersonnelStats();
   else if (action === "getTests")   result = getTests();
   else if (action === "getResults") result = getResults();
@@ -162,6 +163,26 @@ function doPost(e) {
     if (d.action === "deleteHazard") return deleteHazard(d);
     return json({ ok: false, error: "unknown action" });
   } catch(err) {
+    return json({ ok: false, error: err.toString() });
+  }
+}
+
+// ── Отдаём фото сотрудника в base64 ─────────────────────────
+// Нужно для скачивания карточек допуска в PDF на фронте: html2canvas не
+// может нарисовать <img> с drive.google.com/thumbnail в canvas (CORS —
+// у этого эндпоинта нет Access-Control-Allow-Origin), canvas.toDataURL()
+// падает с SecurityError. Через это действие сервер сам скачивает файл
+// с Drive (тот же аккаунт, доступ есть) и отдаёт как data URI — тогда
+// html2canvas получает уже "чистую" картинку без кросс-доменных проблем.
+function getPhotoBase64(fileId) {
+  try {
+    if (!fileId) return json({ ok: false, error: "no fileId" });
+    const file = DriveApp.getFileById(fileId);
+    const blob = file.getBlob();
+    const base64 = Utilities.base64Encode(blob.getBytes());
+    const mime = blob.getContentType() || "image/jpeg";
+    return json({ ok: true, base64, mime });
+  } catch (err) {
     return json({ ok: false, error: err.toString() });
   }
 }
