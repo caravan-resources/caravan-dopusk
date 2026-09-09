@@ -1652,7 +1652,7 @@ function renderAll() {
 // ══════════════════════════════════════════════════════
 const NAV_GROUPS = {
   dash:     ["dash"],
-  training: ["tests","trainingPlan","import","access","print"],
+  training: ["trainingPlan","access"],
   admin:    ["personnel","surveys","equipmentAlmaty","equipmentAshyktas","checklistTemplates"],
   perf:     ["fuelAlmaty","fuelAshyktas","reportsAlmaty","reportsAshyktas","operatorRating","shift1","shift2","shift1a","shift2a"],
 };
@@ -1660,7 +1660,7 @@ function groupOf(tabName) {
   return Object.keys(NAV_GROUPS).find(g => NAV_GROUPS[g].includes(tabName));
 }
 function showTab(name) {
-  ["dash","tests","access","print","personnel","surveys","equipmentAlmaty","equipmentAshyktas","checklistTemplates","fuelAlmaty","fuelAshyktas","reportsAlmaty","reportsAshyktas","operatorRating","trainingPlan","shift1","shift2","shift1a","shift2a","import"].forEach(t => {
+  ["dash","access","personnel","surveys","equipmentAlmaty","equipmentAshyktas","checklistTemplates","fuelAlmaty","fuelAshyktas","reportsAlmaty","reportsAshyktas","operatorRating","trainingPlan","shift1","shift2","shift1a","shift2a"].forEach(t => {
     document.getElementById("tab"+cap(t)).classList.remove("active");
     document.getElementById("nav"+cap(t))?.classList.remove("active");
   });
