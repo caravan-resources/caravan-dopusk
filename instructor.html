@@ -254,7 +254,6 @@ tr:hover td { background:#FAFBFD; }
   <nav class="nav-sub" id="subTraining" style="display:none">
     <button id="navTests"   onclick="showTab('tests')">📋 Результаты тестов</button>
     <button id="navTrainingPlan" onclick="showTab('trainingPlan')">📚 График обучения</button>
-    <button id="navImport"   onclick="showTab('import')">➕ Импорт теста</button>
     <button id="navAccess"  onclick="showTab('access')">🪪 Сроки допусков</button>
   </nav>
 
@@ -1267,36 +1266,6 @@ tr:hover td { background:#FAFBFD; }
         <div class="hint">Здесь вся вахта-2 целиком — и дневная, и ночная смена вместе. Вахта-1 в это время дома, смотрите на соседней вкладке. 🟡 Жёлтая карточка — осмотр или заправка были сегодня, серая — данных за сегодня ещё нет.</div>
       </div>
       <div id="shift2FormationAshyktas"></div>
-    </div>
-
-    <div id="tabImport" class="screen">
-      <div class="panel">
-        <div class="panel-title">Добавить новый тест</div>
-        <p style="font-size:13px;color:var(--gray);margin-bottom:12px;line-height:1.5">
-          Вставьте JSON с тестом (его готовит Клод по вашему запросу) и нажмите «Добавить».
-          Если тест с таким <code>testId</code> уже существует — он будет полностью заменён,
-          дублей не появится.
-        </p>
-        <textarea id="importTestJson" placeholder='{
-  "testTitle": "Оператор экскаватора Hitachi EX1200",
-  "site": "all",
-  "passingScore": 80,
-  "timeLimit": 25,
-  "testType": "profession",
-  "questions": [
-    { "text": "Текст вопроса?", "type": "single",
-      "options": ["Вариант A","Вариант B","Вариант C","Вариант D"],
-      "correct": [1], "explanation": "Почему так." }
-  ]
-}'
-          style="width:100%;min-height:320px;font-family:monospace;font-size:12px;
-            padding:14px;border:1.5px solid var(--border);border-radius:10px;
-            resize:vertical;box-sizing:border-box"></textarea>
-        <div style="display:flex;gap:10px;margin-top:12px;align-items:center">
-          <button class="btn btn-gold" onclick="submitTestImport()">➕ Добавить тест</button>
-          <span id="importStatus" style="font-size:13px"></span>
-        </div>
-      </div>
     </div>
 
     <div id="tabPersonnel" class="screen">
@@ -3785,51 +3754,8 @@ async function uploadPhoto(event, empId, empName) {
 }
 
 // ══════════════════════════════════════════════════════
-// ИМПОРТ ТЕСТА
+// ИМПОРТ ТЕСТА перенесён в training.html («📚 Каталог курсов» → «➕ Импорт теста»).
 // ══════════════════════════════════════════════════════
-async function submitTestImport() {
-  const ta     = document.getElementById("importTestJson");
-  const status = document.getElementById("importStatus");
-  status.textContent = "";
-  status.style.color = "var(--gray)";
-
-  let test;
-  try {
-    test = JSON.parse(ta.value);
-  } catch(err) {
-    status.style.color = "var(--red)";
-    status.textContent = "❌ Ошибка в JSON: " + err.message;
-    return;
-  }
-
-  if (!test.testTitle || !Array.isArray(test.questions) || test.questions.length === 0) {
-    status.style.color = "var(--red)";
-    status.textContent = "❌ Нужны как минимум testTitle и один вопрос в questions.";
-    return;
-  }
-
-  status.style.color = "var(--gray)";
-  status.textContent = "⏳ Отправка...";
-
-  try {
-    const res = await fetch(CFG.SHEET_URL, {
-      method: "POST",
-      body: JSON.stringify({ action: "importTest", test })
-    });
-    const data = await res.json();
-    if (data.ok) {
-      status.style.color = "var(--green)";
-      status.textContent = `✅ Тест «${test.testTitle}» сохранён как ${data.testId} — ${data.questions} вопросов.`;
-      ta.value = "";
-    } else {
-      status.style.color = "var(--red)";
-      status.textContent = "❌ Ошибка сервера: " + (data.error || "неизвестная ошибка");
-    }
-  } catch(err) {
-    status.style.color = "var(--red)";
-    status.textContent = "❌ Ошибка соединения: " + err.message;
-  }
-}
 
 // ══════════════════════════════════════════════════════
 // ПЕЧАТЬ ДОПУСКОВ/УДОСТОВЕРЕНИЙ/БЕЗОПАСНОГО ВОЖДЕНИЯ перенесена в training.html
