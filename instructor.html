@@ -253,7 +253,6 @@ tr:hover td { background:#FAFBFD; }
 
   <nav class="nav-sub" id="subTraining" style="display:none">
     <button id="navTrainingPlan" onclick="showTab('trainingPlan')">📚 График обучения</button>
-    <button id="navAccess"  onclick="showTab('access')">🪪 Сроки допусков</button>
   </nav>
 
   <nav class="nav-sub" id="subAdmin" style="display:none">
@@ -466,52 +465,6 @@ tr:hover td { background:#FAFBFD; }
 
     </div>
 
-    <!-- ══ СРОКИ ДОПУСКОВ ══ -->
-    <div id="tabAccess" class="screen">
-      <div class="panel">
-        <div class="panel-title">Сроки допусков</div>
-        <p style="font-size:13px;color:var(--gray);margin-bottom:12px;line-height:1.5">
-          Таблица допусков всех сотрудников по датам: кто просрочен, у кого истекает в ближайшие
-          дни, а у кого всё в порядке. Фильтруйте по участку, статусу или дате прохождения.
-        </p>
-        <div class="filters">
-          <input type="text" id="searchAccess" placeholder="🔍 Поиск по имени..."
-            oninput="renderAccessTable()">
-          <select id="filterSite" onchange="renderAccessTable()">
-            <option value="all">Все участки</option>
-            <option value="Алмалы">Алмалы</option>
-            <option value="Ашыктас">Ашыктас</option>
-          </select>
-          <select id="filterStatus" onchange="renderAccessTable()">
-            <option value="all">Все статусы</option>
-            <option value="expired">Просрочен</option>
-            <option value="warning">Истекает</option>
-            <option value="ok">Действителен</option>
-          </select>
-          <input type="date" id="filterPassDate" onchange="renderAccessTable()" style="max-width:160px" title="Дата прохождения">
-          <button class="btn btn-ghost" id="clearPassDateBtn" onclick="document.getElementById('filterPassDate').value='';renderAccessTable()" style="display:none">✕ Дата</button>
-          <button class="btn btn-ghost" onclick="exportAccessCSV()">📥 CSV</button>
-        </div>
-        <div class="tbl-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th></th><th>Сотрудник</th><th>Должность</th><th>Участок</th>
-                <th>Дата прохождения</th><th>Действителен до</th>
-                <th style="padding-left:8px;padding-right:8px">Статус</th><th style="padding-left:8px;padding-right:8px">Дней</th><th style="padding-left:8px;padding-right:8px">Вождение</th><th></th>
-              </tr>
-            </thead>
-            <tbody id="accessTableBody"></tbody>
-          </table>
-        </div>
-        <div id="accessEmpty" class="empty" style="display:none">
-          <div class="empty-icon">🪪</div>Нет сотрудников
-        </div>
-        <div style="margin-top:8px;font-size:12px;color:var(--gray)" id="accessCount"></div>
-      </div>
-    </div>
-
-    <!-- ══ ИМПОРТ ТЕСТА ══ -->
     <!-- ══ ТЕХНИКА — АЛМАЛЫ ══ -->
     <div id="tabEquipmentAlmaty" class="screen">
       <div class="panel">
@@ -1400,18 +1353,6 @@ function statusOf(emp) {
   return "ok";
 }
 
-// Периодический инструктаж сотрудника — любая запись из «Обучение», у которой
-// проставлен validUntil (это и есть признак «допуск-подобной» записи, как и в
-// instruktazhAsAccessLike). Берём самую свежую по дате, если их несколько.
-function periodicInstructionOf(empId, courseFilter) {
-  const records = (DATA.training||[]).filter(r =>
-    String(r.empId) === String(empId) && r.validUntil &&
-    (!courseFilter || courseFilter.test(r.course||""))
-  );
-  if (!records.length) return null;
-  records.sort((a,b) => new Date(b.date) - new Date(a.date));
-  return records[0];
-}
 function statusBadge(st) {
   const map = {
     expired: ['b-red',   '🔴 Просрочен'],
@@ -1621,7 +1562,6 @@ async function loadAll() {
 
 function renderAll() {
   renderDashboard();
-  renderAccessTable();
   renderPersonnelList();
   renderSurveysList();
   renderEquipmentList("Алмалы", "equipmentListAlmaty", "searchEquipmentAlmaty");
@@ -1652,7 +1592,7 @@ function renderAll() {
 // ══════════════════════════════════════════════════════
 const NAV_GROUPS = {
   dash:     ["dash"],
-  training: ["trainingPlan","access"],
+  training: ["trainingPlan"],
   admin:    ["personnel","surveys","equipmentAlmaty","equipmentAshyktas","checklistTemplates"],
   perf:     ["fuelAlmaty","fuelAshyktas","reportsAlmaty","reportsAshyktas","operatorRating","shift1","shift2","shift1a","shift2a"],
 };
@@ -1660,7 +1600,7 @@ function groupOf(tabName) {
   return Object.keys(NAV_GROUPS).find(g => NAV_GROUPS[g].includes(tabName));
 }
 function showTab(name) {
-  ["dash","access","personnel","surveys","equipmentAlmaty","equipmentAshyktas","checklistTemplates","fuelAlmaty","fuelAshyktas","reportsAlmaty","reportsAshyktas","operatorRating","trainingPlan","shift1","shift2","shift1a","shift2a"].forEach(t => {
+  ["dash","personnel","surveys","equipmentAlmaty","equipmentAshyktas","checklistTemplates","fuelAlmaty","fuelAshyktas","reportsAlmaty","reportsAshyktas","operatorRating","trainingPlan","shift1","shift2","shift1a","shift2a"].forEach(t => {
     document.getElementById("tab"+cap(t)).classList.remove("active");
     document.getElementById("nav"+cap(t))?.classList.remove("active");
   });
@@ -1722,19 +1662,6 @@ function fmtRecordDateTime(s) {
   const hh = String(d.getHours()).padStart(2,"0");
   const min = String(d.getMinutes()).padStart(2,"0");
   return `${dd}.${mm}.${yy} ${hh}:${min}`;
-}
-
-// Совпадает ли дата прохождения теста у сотрудника с выбранной датой в фильтре
-// «Сроки допусков». Раньше жила в блоке печати вместе с одноимённым использованием
-// в training.html — здесь нужна отдельно, renderAccessTable() её использует напрямую.
-function passDateMatches(emp, dateStr) {
-  if (!dateStr || !emp.passDate) return false;
-  const target = new Date(dateStr + "T00:00:00");
-  const actual = parseRecordDate(emp.passDate);
-  if (!actual || isNaN(target.getTime())) return false;
-  return target.getFullYear()===actual.getFullYear()
-      && target.getMonth()===actual.getMonth()
-      && target.getDate()===actual.getDate();
 }
 
 
@@ -3246,169 +3173,6 @@ function isPassed(r) {
 // competencyGap() (см. ниже, «График обучения») его использует для разрывов.
 
 // ══════════════════════════════════════════════════════
-// ТАБЛИЦА ДОПУСКОВ
-// ══════════════════════════════════════════════════════
-function renderAccessTable() {
-  const q  = document.getElementById("searchAccess").value.toLowerCase();
-  const fs = document.getElementById("filterSite").value;
-  const fst= document.getElementById("filterStatus").value;
-  const fpd= document.getElementById("filterPassDate").value;
-
-  document.getElementById("clearPassDateBtn").style.display = fpd ? "inline-block" : "none";
-
-  let emps = DATA.employees.filter(e => {
-    if (q && !(e.name||"").toLowerCase().includes(q)) return false;
-    if (fs!=="all" && (e.site||"").trim()!==fs) return false;
-    if (fst!=="all" && statusOf(e)!==fst) return false;
-    if (fpd && !passDateMatches(e, fpd)) return false;
-    return true;
-  }).sort((a,b)=>(daysLeft(a.validUntil)||999)-(daysLeft(b.validUntil)||999));
-
-  const body  = document.getElementById("accessTableBody");
-  const empty = document.getElementById("accessEmpty");
-  const count = document.getElementById("accessCount");
-
-  if (emps.length===0) {
-    body.innerHTML=""; empty.style.display="block";
-    count.textContent=""; return;
-  }
-  empty.style.display="none";
-  count.textContent=`Показано ${emps.length} сотрудников`;
-
-  body.innerHTML = emps.map(e => {
-    const st = statusOf(e);
-    const dl = daysLeft(e.validUntil);
-    const rowCls = st==="expired"?"row-red":st==="warning"?"row-yellow":"";
-    const daysStr = dl===null?"—":dl<0?`${Math.abs(dl)} дн. назад`:`${dl} дн.`;
-    const initials = (e.name||"?").split(" ").slice(0,2).map(w=>w[0]||"").join("");
-    const driving = periodicInstructionOf(e.id, /вожден/i);
-    const drivingSt = driving ? statusOf({validUntil: driving.validUntil}) : "nodate";
-    return `<tr class="${rowCls}">
-      <td style="padding:8px 12px">
-        <div style="display:flex;align-items:center;gap:6px">
-          ${e.photoUrl && e.photoUrl !== "—" && e.photoUrl !== ""
-            ? `<img src="${e.photoUrl}" loading="lazy" decoding="async" referrerpolicy="no-referrer"
-                 onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"
-                 style="width:36px;height:36px;border-radius:50%;object-fit:cover;border:2px solid var(--border)">
-               <div style="display:none;width:36px;height:36px;border-radius:50%;background:var(--light);border:2px solid var(--border);align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--gray)">${initials}</div>`
-            : `<div style="width:36px;height:36px;border-radius:50%;background:var(--light);border:2px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--gray)">${initials}</div>`
-          }
-          <label style="cursor:pointer;font-size:16px;line-height:1" title="Загрузить фото">
-            <input type="file" accept="image/*" style="display:none"
-              onchange="uploadPhoto(event,'${e.id}','${escapeHtml(e.name)}')">
-            📷
-          </label>
-        </div>
-      </td>
-      <td><div class="emp-name">${escapeHtml(e.name||"—")}</div></td>
-      <td style="color:var(--gray);font-size:12px">${escapeHtml(e.position||"—")}</td>
-      <td><span class="badge b-gray">${e.site||"—"}</span></td>
-      <td style="color:var(--gray)">${fmtDate(e.passDate)}</td>
-      <td style="font-weight:700;color:${st==="expired"?"var(--red)":st==="warning"?"var(--yellow)":"var(--navy)"}">
-        ${fmtDate(e.validUntil)}</td>
-      <td style="padding-left:8px;padding-right:8px">${statusBadge(st)}</td>
-      <td style="padding-left:8px;padding-right:8px;font-weight:700;color:${st==="expired"?"var(--red)":st==="warning"?"var(--yellow)":"var(--gray)"}">${daysStr}</td>
-      <td style="white-space:nowrap;font-size:12px;padding-left:8px;padding-right:8px">${driving ? compactStatusDot(drivingSt, daysLeft(driving.validUntil)) : `<span style="color:var(--gray)">—</span>`}</td>
-      <td style="padding-left:8px;padding-right:8px">
-        <button class="btn btn-ghost" style="width:auto;padding:4px 10px;font-size:11px" title="Ручной ввод даты допуска — аварийный путь, если сдача теста не записала дату сама"
-          onclick="openEditAccessDate('${e.id}','${escapeHtml(e.name).replace(/'/g,"\\'")}')">✏️</button>
-      </td>
-    </tr>`;
-  }).join("");
-}
-
-// Компактный вариант статуса — цветная точка + число дней, без длинного текста
-// бейджа. Нужен там, где ширины мало (доп. колонки в и без того широкой таблице).
-function compactStatusDot(status, days) {
-  const map = { expired: "🔴", warning: "🟡", ok: "🟢", nodate: "⚪" };
-  const dot = map[status] || "⚪";
-  if (days === null || days === undefined) return `${dot}`;
-  const txt = days < 0 ? `${Math.abs(days)}д назад` : `${days}д`;
-  return `${dot} ${txt}`;
-}
-
-function exportAccessCSV() {
-  const headers = ["ФИО","Должность","Участок","Дата прохождения","Действителен до","Статус","Дней","Безопасное вождение — действителен до","Безопасное вождение — статус"];
-  const rows = DATA.employees.map(e=>{
-    const driving = periodicInstructionOf(e.id, /вожден/i);
-    const drivingSt = driving ? statusOf({validUntil: driving.validUntil}) : "nodate";
-    return [
-      e.name,e.position,e.site,
-      fmtDate(e.passDate),fmtDate(e.validUntil),
-      {expired:"Просрочен",warning:"Истекает",ok:"Действителен",nodate:"Нет данных"}[statusOf(e)],
-      daysLeft(e.validUntil)??"",
-      driving ? fmtDate(driving.validUntil) : "",
-      driving ? {expired:"Просрочен",warning:"Истекает",ok:"Действителен"}[drivingSt] : "Не проходил",
-    ];
-  });
-  downloadCSV([headers,...rows],`Допуски_${today()}.csv`);
-}
-
-// ── Ручной ввод даты допуска ─────────────────────────────
-// Аварийный путь: обычно passDate/validUntil трогает только updateAccess
-// при сдаче теста (см. Код.gs, updateEmployee эти поля намеренно не
-// редактирует). Но если этот вызов не прошёл из-за сетевого сбоя (см.
-// syncFailWarning в index.html) — раньше единственным выходом было
-// пересдавать тест. Использует тот же updateAccess, что и сама сдача теста.
-function openEditAccessDate(empId, empName) {
-  const emp = (DATA.employees||[]).find(e => String(e.id) === String(empId));
-  const passVal = emp && emp.passDate ? toDateInputValue(emp.passDate) : "";
-  const validVal = emp && emp.validUntil ? toDateInputValue(emp.validUntil) : "";
-  openModal(`
-    <div style="font-size:16px;font-weight:800;color:var(--navy);margin-bottom:6px">✏️ Дата допуска вручную</div>
-    <div class="hint" style="margin-bottom:14px">
-      ${escapeHtml(empName)}. Аварийный путь — если сдача теста не записала дату сама
-      (см. предупреждение о сбое связи в приложении сдачи теста). Действителен до по умолчанию — плюс год от даты прохождения.
-    </div>
-    <div style="display:flex;flex-direction:column;gap:10px">
-      <label style="font-size:12px;font-weight:700;color:var(--gray)">Дата прохождения
-        <input type="date" id="editAccessPassDate" value="${passVal}" onchange="autofillEditAccessValidUntil()"
-          style="width:100%;margin-top:4px;padding:10px;border:1px solid var(--border);border-radius:8px">
-      </label>
-      <label style="font-size:12px;font-weight:700;color:var(--gray)">Действителен до
-        <input type="date" id="editAccessValidUntil" value="${validVal}"
-          style="width:100%;margin-top:4px;padding:10px;border:1px solid var(--border);border-radius:8px">
-      </label>
-    </div>
-    <div style="display:flex;gap:10px;margin-top:18px">
-      <button class="btn btn-gold" style="flex:1" onclick="saveEditAccessDate('${empId}')">Сохранить</button>
-      <button class="btn btn-ghost" style="flex:1" onclick="closeModal()">Отмена</button>
-    </div>
-  `);
-}
-
-// dd.mm.yyyy / Date-строка → yyyy-mm-dd для value инпута type=date —
-// см. toDateInputValue() ниже (уже была в файле, используется формой
-// редактирования личного дела; та же реализация, дублировать незачем).
-
-function autofillEditAccessValidUntil() {
-  const passEl = document.getElementById("editAccessPassDate");
-  const validEl = document.getElementById("editAccessValidUntil");
-  if (!passEl.value || validEl.value) return; // не перетираем, если уже что-то стоит
-  const d = new Date(passEl.value + "T00:00:00");
-  d.setFullYear(d.getFullYear() + 1);
-  validEl.value = d.toISOString().split("T")[0];
-}
-
-async function saveEditAccessDate(empId) {
-  const passDate = document.getElementById("editAccessPassDate").value;
-  const validUntil = document.getElementById("editAccessValidUntil").value;
-  if (!passDate) { alert("Укажите дату прохождения"); return; }
-  try {
-    const res = await fetch(CFG.SHEET_URL, { method:"POST", body: JSON.stringify({
-      action: "updateAccess",
-      empName: "", passDate, validUntil, position: "", site: "", empId,
-    })});
-    const data = await res.json();
-    if (!data.ok) { alert("Не удалось сохранить: " + (data.error||"неизвестная ошибка")); return; }
-    closeModal();
-    await loadAll();
-  } catch (e) {
-    alert("Ошибка сети: " + e.message);
-  }
-}
-
-// ══════════════════════════════════════════════════════
 // УВЕДОМЛЕНИЯ
 // ══════════════════════════════════════════════════════
 function copyAttentionList() {
@@ -3495,7 +3259,6 @@ async function uploadPhoto(event, empId, empName) {
         if (data.ok && data.url) {
           const emp = DATA.employees.find(e => String(e.id) === String(empId));
           if (emp) emp.photoUrl = data.url;
-          renderAccessTable();
           if (CURRENT_PROFILE_ID && String(CURRENT_PROFILE_ID) === String(empId)) {
             selectPersonnelEmployee(CURRENT_PROFILE_ID);
           }
