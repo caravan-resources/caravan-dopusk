@@ -79,6 +79,10 @@ td { padding:8px; border-bottom:1px solid var(--border); }
 .emp-name { font-weight:700; color:var(--navy); }
 .b-red    { background:var(--redbg);    color:var(--red);   border:1px solid var(--red);   }
 .b-green  { background:var(--greenbg); color:var(--green);  border:1px solid var(--green);  }
+.b-yellow { background:var(--yellowbg); color:var(--yellow); border:1px solid var(--yellow); }
+.b-gray   { background:var(--light);   color:var(--gray);   border:1px solid var(--border); }
+.row-red    td { background:#FFF5F5 !important; }
+.row-yellow td { background:#FFFDF0 !important; }
 .filters { display:flex; gap:10px; margin-bottom:14px; flex-wrap:wrap; }
 .filters input, .filters select {
   padding:9px 12px; border:1.5px solid var(--border); border-radius:8px; font-size:13px;
@@ -153,6 +157,7 @@ td { padding:8px; border-bottom:1px solid var(--border); }
     <button id="navCatalog" onclick="showScreen('catalog')">📚 Каталог курсов</button>
     <button id="navImport" onclick="showScreen('import')">➕ Импорт теста</button>
     <button id="navTestResults" onclick="showScreen('testResults')">📋 Результаты тестов</button>
+    <button id="navAccess" onclick="showScreen('access')">🪪 Сроки допусков</button>
     <button id="navEval" onclick="showScreen('eval')">🎯 Оценка</button>
     <button id="navTiming" onclick="showScreen('timing')">⏱ Хронометраж</button>
     <button id="navArchive" onclick="showScreen('archive')">🗂 Архив</button>
@@ -346,6 +351,52 @@ td { padding:8px; border-bottom:1px solid var(--border); }
           <div class="empty-icon">📋</div>Нет результатов
         </div>
         <div style="margin-top:8px;font-size:12px;color:var(--gray)" id="testsCount"></div>
+      </div>
+    </div>
+
+    <!-- ══ СРОКИ ДОПУСКОВ ══
+         Перенесено из instructor.html («🎓 Обучение» → «🪪 Сроки допусков»).
+         Внутренний фильтр «Участок» из оригинала убран — DATA.employees здесь
+         уже отфильтрован текущим участком через глобальный переключатель
+         наверху страницы (renderSiteSwitch/CURRENT_SITE), как и остальные
+         вкладки. Дублирующий, потенциально сбивающий с толку фильтр внутри
+         таблицы был бы нерабочим (второй раз фильтровать нечего). -->
+    <div id="screenAccess" class="screen">
+      <div class="panel">
+        <div class="panel-title">Сроки допусков</div>
+        <p style="font-size:13px;color:var(--gray);margin-bottom:12px;line-height:1.5">
+          Таблица допусков сотрудников текущего участка по датам: кто просрочен, у кого истекает
+          в ближайшие дни, а у кого всё в порядке. Фильтруйте по статусу или дате прохождения.
+        </p>
+        <div class="filters">
+          <input type="text" id="searchAccess" placeholder="🔍 Поиск по имени..."
+            oninput="renderAccessTable()">
+          <select id="filterStatus" onchange="renderAccessTable()">
+            <option value="all">Все статусы</option>
+            <option value="expired">Просрочен</option>
+            <option value="warning">Истекает</option>
+            <option value="ok">Действителен</option>
+          </select>
+          <input type="date" id="filterPassDate" onchange="renderAccessTable()" style="max-width:160px" title="Дата прохождения">
+          <button class="btn-ghost" id="clearPassDateBtn" onclick="document.getElementById('filterPassDate').value='';renderAccessTable()" style="display:none">✕ Дата</button>
+          <button class="btn-ghost" style="width:auto;padding:9px 16px" onclick="exportAccessCSV()">📥 CSV</button>
+        </div>
+        <div class="tbl-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th></th><th>Сотрудник</th><th>Должность</th><th>Участок</th>
+                <th>Дата прохождения</th><th>Действителен до</th>
+                <th style="padding-left:8px;padding-right:8px">Статус</th><th style="padding-left:8px;padding-right:8px">Дней</th><th style="padding-left:8px;padding-right:8px">Вождение</th><th></th>
+              </tr>
+            </thead>
+            <tbody id="accessTableBody"></tbody>
+          </table>
+        </div>
+        <div id="accessEmpty" class="empty" style="display:none">
+          <div class="empty-icon">🪪</div>Нет сотрудников
+        </div>
+        <div style="margin-top:8px;font-size:12px;color:var(--gray)" id="accessCount"></div>
       </div>
     </div>
 
@@ -939,6 +990,7 @@ td { padding:8px; border-bottom:1px solid var(--border); }
 const CFG = {
   PIN: "2508",
   SHEET_URL: "https://script.google.com/macros/s/AKfycbwhdMV20k8US2BXUz1Xk2XCXE9MEwpHpQaadTF9xEfzbU1--dHL-Zuj06K2qXW-rFtKGw/exec",
+  WARN_DAYS: 30,
 };
 
 let DATA = { employees: [], trainingPlan: [], trainingHistory: [], courseCatalog: [], evaluationEquipmentTypes: [], archiveDocs: [], tests: [], requirements: [] };
@@ -1061,6 +1113,7 @@ function renderAll() {
   renderArchiveList();
   renderRequirementsPanel();
   renderTestsTable();
+  renderAccessTable();
   renderPrintSelect();
   renderDrivingPrintSelect();
   renderCertPrintSelect("profession");
@@ -2148,6 +2201,275 @@ function exportTestsCSV() {
     r["Время (мин)"]||r.duration||"",
   ]);
   downloadCSV([headers,...rows], `Результаты_тестов_${today()}.csv`);
+}
+
+// Общая функция открытия модалки (тот же modalOverlay/modalBox, что уже
+// использует «Отметить пройденным» на вкладке «План», просто без дублирования
+// двух строк на каждый новый вызов).
+function openModal(html) {
+  document.getElementById("modalBox").innerHTML = html;
+  document.getElementById("modalOverlay").style.display = "flex";
+}
+
+// ══════════════════════════════════════════════════════
+// СРОКИ ДОПУСКОВ — перенесено из instructor.html, логика не менялась
+// (кроме: DATA.training → DATA.trainingHistory — то же самое поле называется
+// иначе здесь; и uploadPhoto — убрана синхронизация с личным делом
+// instructor.html, которого в training.html нет).
+// daysLeft/statusOf/statusBadge/toDateInputValue — те же утилиты, что были
+// в instructor.html; там свои копии остаются (используются в дашборде и
+// личном деле, не только здесь).
+// ══════════════════════════════════════════════════════
+function daysLeft(dateStr) {
+  if (!dateStr) return null;
+  try {
+    let d = dateStr;
+    // dd.mm.yyyy → yyyy-mm-dd
+    if (String(d).includes(".")) {
+      const parts = String(d).split(".");
+      if (parts.length === 3) d = `${parts[2]}-${parts[1]}-${parts[0]}`;
+    }
+    const diff = new Date(d) - new Date(today());
+    if (isNaN(diff)) return null;
+    return Math.ceil(diff / 86400000);
+  } catch { return null; }
+}
+function statusOf(emp) {
+  const d = daysLeft(emp.validUntil);
+  if (d === null) return "nodate";
+  if (d < 0) return "expired";
+  if (d <= CFG.WARN_DAYS) return "warning";
+  return "ok";
+}
+function statusBadge(st) {
+  const map = {
+    expired: ['b-red',   '🔴 Просрочен'],
+    warning: ['b-yellow','🟡 Истекает'],
+    ok:      ['b-green', '✓ Действителен'],
+    nodate:  ['b-gray',  '— Нет данных'],
+  };
+  const [cls, lbl] = map[st] || map.nodate;
+  return `<span class="badge ${cls}">${lbl}</span>`;
+}
+function toDateInputValue(s) {
+  const d = parseRecordDate(s);
+  if (!d) return "";
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth()+1).padStart(2,"0");
+  const dd = String(d.getDate()).padStart(2,"0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+// Периодический инструктаж сотрудника — любая запись из «Обучение», у которой
+// проставлен validUntil. Берём самую свежую по дате, если их несколько.
+function periodicInstructionOf(empId, courseFilter) {
+  const records = (DATA.trainingHistory||[]).filter(r =>
+    String(r.empId) === String(empId) && r.validUntil &&
+    (!courseFilter || courseFilter.test(r.course||""))
+  );
+  if (!records.length) return null;
+  records.sort((a,b) => new Date(b.date) - new Date(a.date));
+  return records[0];
+}
+// Компактный вариант статуса — цветная точка + число дней, без длинного текста
+// бейджа. Нужен там, где ширины мало (доп. колонка «Вождение»).
+function compactStatusDot(status, days) {
+  const map = { expired: "🔴", warning: "🟡", ok: "🟢", nodate: "⚪" };
+  const dot = map[status] || "⚪";
+  if (days === null || days === undefined) return `${dot}`;
+  const txt = days < 0 ? `${Math.abs(days)}д назад` : `${days}д`;
+  return `${dot} ${txt}`;
+}
+
+function renderAccessTable() {
+  const searchEl = document.getElementById("searchAccess");
+  if (!searchEl) return; // экран ещё не отрисован в DOM
+  const q  = searchEl.value.toLowerCase();
+  const fst= document.getElementById("filterStatus").value;
+  const fpd= document.getElementById("filterPassDate").value;
+
+  document.getElementById("clearPassDateBtn").style.display = fpd ? "inline-block" : "none";
+
+  let emps = (DATA.employees||[]).filter(e => {
+    if (q && !(e.name||"").toLowerCase().includes(q)) return false;
+    if (fst!=="all" && statusOf(e)!==fst) return false;
+    if (fpd && !passDateMatches(e, fpd)) return false;
+    return true;
+  }).sort((a,b)=>(daysLeft(a.validUntil)||999)-(daysLeft(b.validUntil)||999));
+
+  const body  = document.getElementById("accessTableBody");
+  const empty = document.getElementById("accessEmpty");
+  const count = document.getElementById("accessCount");
+
+  if (emps.length===0) {
+    body.innerHTML=""; empty.style.display="block";
+    count.textContent=""; return;
+  }
+  empty.style.display="none";
+  count.textContent=`Показано ${emps.length} сотрудников`;
+
+  body.innerHTML = emps.map(e => {
+    const st = statusOf(e);
+    const dl = daysLeft(e.validUntil);
+    const rowCls = st==="expired"?"row-red":st==="warning"?"row-yellow":"";
+    const daysStr = dl===null?"—":dl<0?`${Math.abs(dl)} дн. назад`:`${dl} дн.`;
+    const initials = (e.name||"?").split(" ").slice(0,2).map(w=>w[0]||"").join("");
+    const driving = periodicInstructionOf(e.id, /вожден/i);
+    const drivingSt = driving ? statusOf({validUntil: driving.validUntil}) : "nodate";
+    return `<tr class="${rowCls}">
+      <td style="padding:8px 12px">
+        <div style="display:flex;align-items:center;gap:6px">
+          ${e.photoUrl && e.photoUrl !== "—" && e.photoUrl !== ""
+            ? `<img src="${e.photoUrl}" loading="lazy" decoding="async" referrerpolicy="no-referrer"
+                 onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"
+                 style="width:36px;height:36px;border-radius:50%;object-fit:cover;border:2px solid var(--border)">
+               <div style="display:none;width:36px;height:36px;border-radius:50%;background:var(--light);border:2px solid var(--border);align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--gray)">${initials}</div>`
+            : `<div style="width:36px;height:36px;border-radius:50%;background:var(--light);border:2px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--gray)">${initials}</div>`
+          }
+          <label style="cursor:pointer;font-size:16px;line-height:1" title="Загрузить фото">
+            <input type="file" accept="image/*" style="display:none"
+              onchange="uploadPhoto(event,'${e.id}','${escapeHtml(e.name)}')">
+            📷
+          </label>
+        </div>
+      </td>
+      <td><div class="emp-name">${escapeHtml(e.name||"—")}</div></td>
+      <td style="color:var(--gray);font-size:12px">${escapeHtml(e.position||"—")}</td>
+      <td><span class="badge b-gray">${e.site||"—"}</span></td>
+      <td style="color:var(--gray)">${fmtDate(e.passDate)}</td>
+      <td style="font-weight:700;color:${st==="expired"?"var(--red)":st==="warning"?"var(--yellow)":"var(--navy)"}">
+        ${fmtDate(e.validUntil)}</td>
+      <td style="padding-left:8px;padding-right:8px">${statusBadge(st)}</td>
+      <td style="padding-left:8px;padding-right:8px;font-weight:700;color:${st==="expired"?"var(--red)":st==="warning"?"var(--yellow)":"var(--gray)"}">${daysStr}</td>
+      <td style="white-space:nowrap;font-size:12px;padding-left:8px;padding-right:8px">${driving ? compactStatusDot(drivingSt, daysLeft(driving.validUntil)) : `<span style="color:var(--gray)">—</span>`}</td>
+      <td style="padding-left:8px;padding-right:8px">
+        <button class="btn-ghost" style="width:auto;padding:4px 10px;font-size:11px" title="Ручной ввод даты допуска — аварийный путь, если сдача теста не записала дату сама"
+          onclick="openEditAccessDate('${e.id}','${escapeHtml(e.name).replace(/'/g,"\\'")}')">✏️</button>
+      </td>
+    </tr>`;
+  }).join("");
+}
+
+function exportAccessCSV() {
+  const headers = ["ФИО","Должность","Участок","Дата прохождения","Действителен до","Статус","Дней","Безопасное вождение — действителен до","Безопасное вождение — статус"];
+  const rows = (DATA.employees||[]).map(e=>{
+    const driving = periodicInstructionOf(e.id, /вожден/i);
+    const drivingSt = driving ? statusOf({validUntil: driving.validUntil}) : "nodate";
+    return [
+      e.name,e.position,e.site,
+      fmtDate(e.passDate),fmtDate(e.validUntil),
+      {expired:"Просрочен",warning:"Истекает",ok:"Действителен",nodate:"Нет данных"}[statusOf(e)],
+      daysLeft(e.validUntil)??"",
+      driving ? fmtDate(driving.validUntil) : "",
+      driving ? {expired:"Просрочен",warning:"Истекает",ok:"Действителен"}[drivingSt] : "Не проходил",
+    ];
+  });
+  downloadCSV([headers,...rows],`Допуски_${today()}.csv`);
+}
+
+// ── Ручной ввод даты допуска ─────────────────────────────
+// Аварийный путь: обычно passDate/validUntil трогает только updateAccess
+// при сдаче теста. Но если этот вызов не прошёл из-за сетевого сбоя —
+// можно поправить руками, не пересдавая тест.
+function openEditAccessDate(empId, empName) {
+  const emp = (DATA.employees||[]).find(e => String(e.id) === String(empId));
+  const passVal = emp && emp.passDate ? toDateInputValue(emp.passDate) : "";
+  const validVal = emp && emp.validUntil ? toDateInputValue(emp.validUntil) : "";
+  openModal(`
+    <div style="font-size:16px;font-weight:800;color:var(--navy);margin-bottom:6px">✏️ Дата допуска вручную</div>
+    <div class="hint" style="margin-bottom:14px">
+      ${escapeHtml(empName)}. Аварийный путь — если сдача теста не записала дату сама.
+      Действителен до по умолчанию — плюс год от даты прохождения.
+    </div>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <label style="font-size:12px;font-weight:700;color:var(--gray)">Дата прохождения
+        <input type="date" id="editAccessPassDate" value="${passVal}" onchange="autofillEditAccessValidUntil()"
+          style="width:100%;margin-top:4px;padding:10px;border:1px solid var(--border);border-radius:8px">
+      </label>
+      <label style="font-size:12px;font-weight:700;color:var(--gray)">Действителен до
+        <input type="date" id="editAccessValidUntil" value="${validVal}"
+          style="width:100%;margin-top:4px;padding:10px;border:1px solid var(--border);border-radius:8px">
+      </label>
+    </div>
+    <div style="display:flex;gap:10px;margin-top:18px">
+      <button class="btn-gold" style="flex:1" onclick="saveEditAccessDate('${empId}')">Сохранить</button>
+      <button class="btn-ghost" style="flex:1" onclick="closeModal()">Отмена</button>
+    </div>
+  `);
+}
+function autofillEditAccessValidUntil() {
+  const passEl = document.getElementById("editAccessPassDate");
+  const validEl = document.getElementById("editAccessValidUntil");
+  if (!passEl.value || validEl.value) return; // не перетираем, если уже что-то стоит
+  const d = new Date(passEl.value + "T00:00:00");
+  d.setFullYear(d.getFullYear() + 1);
+  validEl.value = d.toISOString().split("T")[0];
+}
+async function saveEditAccessDate(empId) {
+  const passDate = document.getElementById("editAccessPassDate").value;
+  const validUntil = document.getElementById("editAccessValidUntil").value;
+  if (!passDate) { alert("Укажите дату прохождения"); return; }
+  try {
+    const res = await fetch(CFG.SHEET_URL, { method:"POST", body: JSON.stringify({
+      action: "updateAccess",
+      empName: "", passDate, validUntil, position: "", site: "", empId,
+    })});
+    const data = await res.json();
+    if (!data.ok) { alert("Не удалось сохранить: " + (data.error||"неизвестная ошибка")); return; }
+    closeModal();
+    await loadAll(["employees"]);
+  } catch (e) {
+    alert("Ошибка сети: " + e.message);
+  }
+}
+
+// Загрузка фото сотрудника прямо из таблицы допусков (камера рядом с именем).
+async function uploadPhoto(event, empId, empName) {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  const MAX_SIZE = 800;
+  const reader = new FileReader();
+
+  reader.onload = async (e) => {
+    const img = new Image();
+    img.onload = async () => {
+      const canvas = document.createElement("canvas");
+      let w = img.width, h = img.height;
+      if (w > MAX_SIZE || h > MAX_SIZE) {
+        if (w > h) { h = Math.round(h * MAX_SIZE/w); w = MAX_SIZE; }
+        else        { w = Math.round(w * MAX_SIZE/h); h = MAX_SIZE; }
+      }
+      canvas.width = w; canvas.height = h;
+      canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+      const base64 = canvas.toDataURL("image/jpeg", 0.85).split(",")[1];
+
+      try {
+        const res = await fetch(CFG.SHEET_URL, {
+          method: "POST",
+          body: JSON.stringify({
+            action: "uploadPhoto",
+            empId, empName, base64, mime: "image/jpeg"
+          })
+        });
+        const data = await res.json();
+        if (data.ok && data.url) {
+          const emp = (DATA.employees||[]).find(e => String(e.id) === String(empId));
+          if (emp) emp.photoUrl = data.url;
+          renderAccessTable();
+          alert("✅ Фото загружено успешно!");
+        } else {
+          console.error("uploadPhoto error:", data);
+          alert("❌ Ошибка загрузки: " + (data.error || "неизвестная ошибка"));
+        }
+      } catch(err) {
+        console.error("uploadPhoto catch:", err);
+        alert("❌ Ошибка соединения: " + err.message);
+      }
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
 }
 
 function renderCatalogList() {
