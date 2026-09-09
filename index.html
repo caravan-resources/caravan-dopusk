@@ -1175,6 +1175,26 @@ async function saveResultToSheets(result) {
           const validDate = new Date(today);
           validDate.setFullYear(validDate.getFullYear() + 1);
           const validUntil = validDate.toISOString().split("T")[0];
+          // Дублируем факт в «Обучение» — тем же способом, что ветки profession/
+          // instruktazh выше. Раньше базовый допуск писал только updateAccess
+          // (passDate/validUntil в «Сотрудники»), и такие прохождения не могли
+          // появиться на вкладке «История» training.html — она читает только
+          // лист «Обучение». Формат дат для saveTraining — dd.MM.yyyy, как у
+          // остальных записей в этом листе (в updateAccess ниже формат другой,
+          // ISO — тот код не трогаем).
+          const dateStr = today.toLocaleDateString("ru-RU", {day:"2-digit",month:"2-digit",year:"numeric"});
+          const validUntilStr = validDate.toLocaleDateString("ru-RU", {day:"2-digit",month:"2-digit",year:"numeric"});
+          await fetch(CFG.SHEET_URL, {
+            method:"POST",
+            body: JSON.stringify({
+              action:     "saveTraining",
+              empId:      state.selectedEmp?.id || "",
+              empName:    result.empName,
+              course:     result.testTitle,
+              date:       dateStr,
+              validUntil: validUntilStr,
+            })
+          });
           const r = await fetch(CFG.SHEET_URL, {
             method:"POST",
             body: JSON.stringify({
