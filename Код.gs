@@ -772,12 +772,21 @@ function bulkAddTrainingFacts(records) {
 // ══════════════════════════════════════════════════════════
 const SHEET_ROSTER_DRAFTS = "ЧерновикиРостеров";
 
+// Google Sheets сам конвертирует текст вида "02.02.2030" в объект Date при
+// записи через appendRow/setValues (тот же эффект, что уже встречался с
+// датами в листе «Обучение») — поэтому сравнивать сохранённое значение со
+// строкой напрямую нельзя. Приводим обе стороны к единому текстовому виду.
+function normalizeDraftDate(v) {
+  if (v instanceof Date) return Utilities.formatDate(v, "Asia/Almaty", "dd.MM.yyyy");
+  return String(v||"").trim();
+}
+
 function findRosterDraftRow(sheet, course, date) {
   const rows = sheet.getDataRange().getValues();
   const c = String(course||"").trim().toLowerCase();
-  const d = String(date||"").trim();
+  const d = normalizeDraftDate(date);
   for (let i = 1; i < rows.length; i++) {
-    if (String(rows[i][0]).trim().toLowerCase() === c && String(rows[i][1]).trim() === d) {
+    if (String(rows[i][0]).trim().toLowerCase() === c && normalizeDraftDate(rows[i][1]) === d) {
       return i + 1; // 1-based номер строки листа
     }
   }
@@ -800,6 +809,11 @@ function saveRosterDraft(p) {
     sheet.setFrozenRows(1);
     sheet.setColumnWidth(1, 260);
     sheet.setColumnWidth(3, 400);
+    // Колонка "date" (B) — принудительно текстовый формат, чтобы Sheets не
+    // конвертировал "dd.MM.yyyy" в объект Date молча (см. normalizeDraftDate
+    // выше — сравнение всё равно устойчиво к этому, но лучше не плодить
+    // причину для путаницы при ручном просмотре листа).
+    sheet.getRange("B:B").setNumberFormat("@");
   }
 
   const rowsJson = JSON.stringify(rows || []);
