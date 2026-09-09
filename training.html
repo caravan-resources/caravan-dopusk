@@ -139,6 +139,7 @@ td { padding:8px; border-bottom:1px solid var(--border); }
     <button id="navGroup" onclick="showScreen('group')">👥 Группа</button>
     <button id="navHistory" onclick="showScreen('history')">✅ История</button>
     <button id="navCatalog" onclick="showScreen('catalog')">📚 Каталог курсов</button>
+    <button id="navImport" onclick="showScreen('import')">➕ Импорт теста</button>
     <button id="navEval" onclick="showScreen('eval')">🎯 Оценка</button>
     <button id="navTiming" onclick="showScreen('timing')">⏱ Хронометраж</button>
     <button id="navArchive" onclick="showScreen('archive')">🗂 Архив</button>
@@ -266,6 +267,39 @@ td { padding:8px; border-bottom:1px solid var(--border); }
       <div class="panel">
         <div class="panel-title">Каталог (<span id="catalogCount">0</span>)</div>
         <div id="catalogList"></div>
+      </div>
+    </div>
+
+    <!-- ══ ИМПОРТ ТЕСТА ══
+         Перенесено из instructor.html («🎓 Обучение» → «➕ Импорт теста») —
+         функция и разметка идентичны исходнику, только CFG.SHEET_URL общий. -->
+    <div id="screenImport" class="screen">
+      <div class="panel">
+        <div class="panel-title">Добавить новый тест</div>
+        <p style="font-size:13px;color:var(--gray);margin-bottom:12px;line-height:1.5">
+          Вставьте JSON с тестом (его готовит Клод по вашему запросу) и нажмите «Добавить».
+          Если тест с таким <code>testId</code> уже существует — он будет полностью заменён,
+          дублей не появится.
+        </p>
+        <textarea id="importTestJson" placeholder='{
+  "testTitle": "Оператор экскаватора Hitachi EX1200",
+  "site": "all",
+  "passingScore": 80,
+  "timeLimit": 25,
+  "testType": "profession",
+  "questions": [
+    { "text": "Текст вопроса?", "type": "single",
+      "options": ["Вариант A","Вариант B","Вариант C","Вариант D"],
+      "correct": [1], "explanation": "Почему так." }
+  ]
+}'
+          style="width:100%;min-height:320px;font-family:monospace;font-size:12px;
+            padding:14px;border:1.5px solid var(--border);border-radius:10px;
+            resize:vertical;box-sizing:border-box"></textarea>
+        <div style="display:flex;gap:10px;margin-top:12px;align-items:center">
+          <button class="btn-gold" style="width:auto;padding:8px 16px" onclick="submitTestImport()">➕ Добавить тест</button>
+          <span id="importStatus" style="font-size:13px"></span>
+        </div>
       </div>
     </div>
 
@@ -1913,6 +1947,54 @@ async function deleteCatalogItem(name) {
     await loadAll(["courseCatalog"]);
   } catch (e) { alert("Ошибка сети: " + e.message); }
 }
+
+// ══════════════════════════════════════════════════════
+// ИМПОРТ ТЕСТА — перенесено из instructor.html, логика не менялась.
+// ══════════════════════════════════════════════════════
+async function submitTestImport() {
+  const ta     = document.getElementById("importTestJson");
+  const status = document.getElementById("importStatus");
+  status.textContent = "";
+  status.style.color = "var(--gray)";
+
+  let test;
+  try {
+    test = JSON.parse(ta.value);
+  } catch(err) {
+    status.style.color = "var(--red)";
+    status.textContent = "❌ Ошибка в JSON: " + err.message;
+    return;
+  }
+
+  if (!test.testTitle || !Array.isArray(test.questions) || test.questions.length === 0) {
+    status.style.color = "var(--red)";
+    status.textContent = "❌ Нужны как минимум testTitle и один вопрос в questions.";
+    return;
+  }
+
+  status.style.color = "var(--gray)";
+  status.textContent = "⏳ Отправка...";
+
+  try {
+    const res = await fetch(CFG.SHEET_URL, {
+      method: "POST",
+      body: JSON.stringify({ action: "importTest", test })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      status.style.color = "var(--green)";
+      status.textContent = `✅ Тест «${test.testTitle}» сохранён как ${data.testId} — ${data.questions} вопросов.`;
+      ta.value = "";
+    } else {
+      status.style.color = "var(--red)";
+      status.textContent = "❌ Ошибка сервера: " + (data.error || "неизвестная ошибка");
+    }
+  } catch(err) {
+    status.style.color = "var(--red)";
+    status.textContent = "❌ Ошибка соединения: " + err.message;
+  }
+}
+
 function renderCatalogList() {
   const el = document.getElementById("catalogList");
   const cnt = document.getElementById("catalogCount");
