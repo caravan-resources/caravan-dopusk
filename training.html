@@ -781,11 +781,14 @@ td { padding:8px; border-bottom:1px solid var(--border); }
       <div class="panel">
         <div class="panel-title">📋 Ростер обучения</div>
         <div class="hint" style="margin-bottom:12px">
-          Печать бланка на подпись — сама печать никуда не пишет в базе. Подписанный скан
-          после занятия загружается как обычно во вкладке «🗂 Архив» (тип «ростер»).
+          Печать бланка на подпись сама по себе в базу не пишет. Для сотрудников, которых
+          удалось сопоставить с базой (см. статус в списке ниже), можно дополнительно
+          зафиксировать факт обучения кнопкой «💾 Записать в историю» — тогда он попадёт
+          на вкладку «История» и учитывается один раз, независимо от числа распечаток.
+          Подписанный скан после занятия загружается как обычно во вкладке «🗂 Архив» (тип «ростер»).
           Участок в шапке — по переключателю вверху страницы.
         </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr 200px;gap:12px;margin-bottom:12px">
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr 150px 150px;gap:12px;margin-bottom:12px">
           <div class="field" style="margin-bottom:0">
             <label>Тип ростера</label>
             <select id="rosterType">
@@ -805,6 +808,14 @@ td { padding:8px; border-bottom:1px solid var(--border); }
             <label>Дата</label>
             <input type="date" id="rosterDate">
           </div>
+          <div class="field" style="margin-bottom:0">
+            <label>Действует до (необяз.)</label>
+            <input type="date" id="rosterValidUntil">
+          </div>
+        </div>
+        <div class="hint" style="margin-top:-4px;margin-bottom:12px">
+          «Действует до» — только для периодических инструктажей (например, безопасное вождение).
+          Заполняется, если хотите записать факт в историю (см. ниже) как периодический, а не разовый.
         </div>
       </div>
 
@@ -824,8 +835,11 @@ td { padding:8px; border-bottom:1px solid var(--border); }
           Печать
           <button class="btn-gold" style="width:auto;padding:8px 16px" onclick="printRoster()">🖨 Печать / PDF</button>
           <button class="btn-ghost" style="width:auto;padding:8px 16px" onclick="downloadRoster(this)">⬇ Скачать PDF</button>
+          <button class="btn-ghost" id="rosterSaveHistoryBtn" style="width:auto;padding:8px 16px" onclick="saveRosterToHistory()">💾 Записать в историю</button>
         </div>
-        <div class="hint">Пустое ФИО в строке при печати пропускается — можно оставить запас пустых строк на будущее.</div>
+        <div class="hint">Пустое ФИО в строке при печати пропускается — можно оставить запас пустых строк на будущее.
+          «Записать в историю» учитывает только строки со статусом «✓ в базе» и не зависит от того,
+          печатали вы бланк или нет.</div>
       </div>
     </div>
   </div>
@@ -4134,6 +4148,23 @@ function professionTraining() {
 // ══════════════════════════════════════════════════════════
 let ROSTER_ROWS = [];
 
+// Строка «привязана к базе» (и попадёт в bulkAddTrainingFacts при
+// «Записать в историю»), только если empId указан И текущее ФИО в строке
+// всё ещё совпадает с карточкой сотрудника — если ФИО подправили вручную
+// после добавления, считаем привязку сорванной и не пишем в базу вслепую.
+function rosterRowIsBound(r) {
+  if (!r.empId) return false;
+  const emp = empById(r.empId);
+  return !!emp && emp.name.trim() === String(r.name||"").trim();
+}
+
+function rosterBadgeHtml(r) {
+  if (!r.name.trim()) return "";
+  return rosterRowIsBound(r)
+    ? `<span class="badge" style="background:var(--greenbg);color:var(--green)">✓ в базе</span>`
+    : `<span class="badge" style="background:var(--light);color:var(--gray)">вручную</span>`;
+}
+
 function renderRosterRows() {
   const el = document.getElementById("rosterRowsList");
   if (!el) return;
@@ -4142,13 +4173,14 @@ function renderRosterRows() {
     return;
   }
   el.innerHTML = `<div style="overflow-x:auto"><table>
-    <thead><tr><th style="width:36px">№</th><th>ФИО</th><th>Должность</th><th>Департамент</th><th style="width:36px"></th></tr></thead>
+    <thead><tr><th style="width:36px">№</th><th>ФИО</th><th>Должность</th><th>Департамент</th><th style="width:110px">В базе</th><th style="width:36px"></th></tr></thead>
     <tbody>${ROSTER_ROWS.map((r,i) => `
       <tr>
         <td>${i+1}</td>
         <td><input type="text" value="${escapeHtml(r.name)}" oninput="updateRosterRow(${i},'name',this.value)" style="width:100%"></td>
         <td><input type="text" value="${escapeHtml(r.position)}" oninput="updateRosterRow(${i},'position',this.value)" style="width:100%" placeholder="Подставится само из базы"></td>
         <td><input type="text" value="${escapeHtml(r.department)}" oninput="updateRosterRow(${i},'department',this.value)" style="width:100%" placeholder="Подставится само из базы"></td>
+        <td id="rosterBadge${i}">${rosterBadgeHtml(r)}</td>
         <td><button class="btn-ghost" style="width:auto;padding:4px 10px" onclick="removeRosterRow(${i})">✕</button></td>
       </tr>`).join("")}</tbody>
   </table></div>`;
@@ -4157,6 +4189,13 @@ function renderRosterRows() {
 function updateRosterRow(i, field, value) {
   if (!ROSTER_ROWS[i]) return;
   ROSTER_ROWS[i][field] = value;
+  // Статус «в базе» зависит от ФИО — обновляем только ячейку статуса точечно
+  // (не всю таблицу через renderRosterRows), иначе поле ввода теряет фокус
+  // и курсор после каждого набранного символа.
+  if (field === "name") {
+    const badgeEl = document.getElementById(`rosterBadge${i}`);
+    if (badgeEl) badgeEl.innerHTML = rosterBadgeHtml(ROSTER_ROWS[i]);
+  }
 }
 
 function removeRosterRow(i) {
@@ -4171,14 +4210,15 @@ function clearRosterRows() {
 }
 
 function addRosterEmptyRow() {
-  ROSTER_ROWS.push({ name: "", position: "", department: "" });
+  ROSTER_ROWS.push({ name: "", position: "", department: "", empId: null });
   renderRosterRows();
 }
 
 // Добавление из существующих сотрудников — тот же datalist ("planEmpList"),
 // что и на вкладке «План». Должность и департамент подставляются из карточки
 // сотрудника (личное дело) — для людей не из базы оба поля остаются пустыми
-// и вписываются вручную.
+// и вписываются вручную. empId запоминаем отдельно (раньше терялся) —
+// именно по нему «Записать в историю» потом сможет создать факт обучения.
 function addRosterEmpFromInput() {
   const input = document.getElementById("rosterEmpInput");
   const raw = String(input.value||"").trim();
@@ -4186,7 +4226,7 @@ function addRosterEmpFromInput() {
   const empId = empIdFromInput(raw);
   const emp = empId ? (DATA.employees||[]).find(e => String(e.id) === String(empId)) : null;
   const name = emp ? emp.name : raw.replace(/\s*\[[^\]]*\]\s*$/, "").trim();
-  ROSTER_ROWS.push({ name, position: emp ? (emp.position||"") : "", department: emp ? (emp.department||"") : "" });
+  ROSTER_ROWS.push({ name, position: emp ? (emp.position||"") : "", department: emp ? (emp.department||"") : "", empId: emp ? emp.id : null });
   input.value = "";
   renderRosterRows();
 }
@@ -4354,6 +4394,55 @@ function printRoster() {
   document.body.appendChild(area);
   area.style.cssText = "";
   requestAnimationFrame(() => requestAnimationFrame(() => window.print()));
+}
+
+// Фиксация факта обучения по текущему списку «Ростера» — отдельно от
+// печати/скачивания, чтобы повторная распечатка того же бланка (лишняя
+// копия, замена испорченного листа) не плодила дубли записей в «Обучение».
+// Пишет ТОЛЬКО строки со статусом «✓ в базе» (см. rosterRowIsBound) —
+// вручную вписанные ФИО людей не из базы по-прежнему только печатаются,
+// это осознанный компромисс варианта 2 (см. обсуждение с Мастером).
+// Использует тот же bulkAddTrainingFacts, что и групповое зачисление на
+// вкладке «Группа» — один и тот же путь записи, один и тот же batchId
+// на всю группу, никаких новых экшенов в Код.gs не потребовалось.
+async function saveRosterToHistory() {
+  const course = document.getElementById("rosterCourseSelect").value;
+  if (!course) { alert("Выберите название курса"); return; }
+  const instructor = document.getElementById("rosterInstructor").value.trim();
+  if (!instructor) { alert("Укажите фамилию инструктора"); return; }
+  const dateIso = document.getElementById("rosterDate").value;
+  const validIso = document.getElementById("rosterValidUntil").value;
+  const dateRu = dateIso ? isoToRu(dateIso) : "";
+  const validRu = validIso ? isoToRu(validIso) : "";
+
+  const bound = ROSTER_ROWS.filter(r => r.name.trim() && rosterRowIsBound(r));
+  const manualCount = ROSTER_ROWS.filter(r => r.name.trim() && !rosterRowIsBound(r)).length;
+
+  if (!bound.length) {
+    alert("Нет ни одной строки со статусом «✓ в базе» — записывать в историю нечего.\n" +
+      "Добавляйте обучаемых через поле «Начните вводить имя сотрудника...», чтобы привязка сохранилась.");
+    return;
+  }
+
+  let msg = `Записать в историю ${bound.length} чел. по курсу «${course}»`
+    + (dateRu ? ` от ${dateRu}` : "") + (validRu ? `, действует до ${validRu}` : "") + "?";
+  if (manualCount) msg += `\n\n${manualCount} чел. вписаны вручную (не из базы) — они НЕ будут записаны, только распечатаны.`;
+  if (!confirm(msg)) return;
+
+  const records = bound.map(r => ({ empId: r.empId, empName: r.name, course, date: dateRu, validUntil: validRu }));
+  const btn = document.getElementById("rosterSaveHistoryBtn");
+  if (btn) { btn.disabled = true; btn.textContent = "Записываю..."; }
+  try {
+    const res = await fetch(CFG.SHEET_URL, { method: "POST", body: JSON.stringify({ action: "bulkAddTrainingFacts", records }) });
+    const val = await res.json();
+    if (!val.ok) { alert("Не удалось записать: " + (val.error||"")); return; }
+    await loadAll(["trainingHistory"]);
+    alert(`Готово: записано ${val.added} чел. в историю.`);
+  } catch (e) {
+    alert("Ошибка сети: " + e.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "💾 Записать в историю"; }
+  }
 }
 
 </script>
