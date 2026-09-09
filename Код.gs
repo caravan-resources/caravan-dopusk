@@ -57,7 +57,7 @@ function doGet(e) {
   else if (action === "getResults") result = getResults();
   else if (action === "getTraining") result = getTraining();
   else if (action === "getRequirements") result = getRequirements();
-  else if (action === "getDocuments") result = getDocuments(e.parameter.linkedId);
+  else if (action === "getDocuments") result = getDocuments(e.parameter.linkedId, e.parameter.type, e.parameter.title, e.parameter.date);
   else if (action === "getTrainingPlan") result = getTrainingPlan(e.parameter.site);
   else if (action === "getCourseCatalog") result = getCourseCatalog();
   else if (action === "getPersonnelEvents") result = getPersonnelEvents();
@@ -987,7 +987,11 @@ function uploadDocument(p) {
 }
 
 // linkedId необязателен — без него отдаёт весь архив (для будущего общего просмотра).
-function getDocuments(linkedId) {
+// type/title/date — резервный поиск, когда по linkedId ничего не нашлось: покрывает
+// сканы, загруженные до появления привязки по batchId (linkedIds пустой), или когда
+// курс/дата в форме загрузки на тот момент не совпали с «Ростером». Дата сравнивается
+// устойчиво к автоконвертации Google Sheets в Date (см. normalizeDraftDate выше).
+function getDocuments(linkedId, type, title, date) {
   const ss    = SpreadsheetApp.openById(SHEET_ID);
   const sheet = ss.getSheetByName(SHEET_DOCUMENTS);
   if (!sheet) return json([]);
@@ -997,11 +1001,25 @@ function getDocuments(linkedId) {
   const data = rows.slice(1).filter(r => r[0]).map(r => {
     const o = {}; headers.forEach((h,i) => { o[h] = r[i]; }); return o;
   });
+
+  if (linkedId) {
+    const byLink = data.filter(d =>
+      String(d.linkedIds||"").split(",").map(s=>s.trim()).includes(String(linkedId).trim())
+    );
+    if (byLink.length) return json(byLink);
+  }
+  if (type && title && date) {
+    const t = String(title).trim().toLowerCase();
+    const d = normalizeDraftDate(date);
+    const byMeta = data.filter(doc =>
+      String(doc.type||"").trim() === String(type).trim() &&
+      String(doc.title||"").trim().toLowerCase() === t &&
+      normalizeDraftDate(doc.date) === d
+    );
+    return json(byMeta);
+  }
   if (!linkedId) return json(data);
-  const filtered = data.filter(d =>
-    String(d.linkedIds||"").split(",").map(s=>s.trim()).includes(String(linkedId).trim())
-  );
-  return json(filtered);
+  return json([]);
 }
 
 // ══════════════════════════════════════════════════════
