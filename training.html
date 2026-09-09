@@ -562,10 +562,14 @@ td { padding:8px; border-bottom:1px solid var(--border); }
       <div class="panel">
         <div class="panel-title">📋 Прикрепить скан ростера</div>
         <div class="hint" style="margin-bottom:12px">
-          Для ростеров, напечатанных во вкладке «📋 Ростер» (в том числе с людьми, которых ещё
-          нет в базе — зачисления группы тут не было, привязывать скан не к чему, кроме курса
-          и даты). Если ростер шёл через обычное зачисление группы на вкладке «👥 Группа» —
-          та форма архивирует скан сама, эта не нужна.
+          Для ростеров, напечатанных во вкладке «📋 Ростер». Если курс и дата здесь совпадают
+          с тем, что было указано на «Ростере», а список обучаемых там ещё не сброшен —
+          при загрузке скана факт обучения автоматически запишется в «Обучение» для всех строк
+          со статусом «✓ в базе» (спросим подтверждение перед записью), а скан привяжется к этой
+          записи. Если совпадения нет (список уже сброшен, другой день, курс с людьми, которых
+          ещё нет в базе) — скан просто архивируется, как раньше, без фактов. Если ростер шёл
+          через обычное зачисление группы на вкладке «👥 Группа» — та форма архивирует скан сама,
+          эта не нужна.
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px">
           <div class="field" style="margin-bottom:0">
@@ -781,41 +785,43 @@ td { padding:8px; border-bottom:1px solid var(--border); }
       <div class="panel">
         <div class="panel-title">📋 Ростер обучения</div>
         <div class="hint" style="margin-bottom:12px">
-          Печать бланка на подпись сама по себе в базу не пишет. Для сотрудников, которых
-          удалось сопоставить с базой (см. статус в списке ниже), можно дополнительно
-          зафиксировать факт обучения кнопкой «💾 Записать в историю» — тогда он попадёт
-          на вкладку «История» и учитывается один раз, независимо от числа распечаток.
-          Подписанный скан после занятия загружается как обычно во вкладке «🗂 Архив» (тип «ростер»).
+          Печать бланка на подпись сама по себе в базу не пишет. Факт обучения появится
+          в «Обучение»/«История» позже — при загрузке подписанного скана во вкладке
+          «🗂 Архив» («Прикрепить скан ростера»): для сотрудников, которых удалось сопоставить
+          с базой (см. статус в списке ниже), запись создастся автоматически вместе со сканом,
+          если курс и дата там совпадут с указанными здесь. Так факт всегда подкреплён документом,
+          а не появляется раньше, чем занятие фактически проведено и подписано.
           Участок в шапке — по переключателю вверху страницы.
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr 150px 150px;gap:12px;margin-bottom:12px">
           <div class="field" style="margin-bottom:0">
             <label>Тип ростера</label>
-            <select id="rosterType">
+            <select id="rosterType" onchange="scheduleRosterDraftSave()">
               <option value="dopusk">Допуск / инструктаж</option>
               <option value="profession">Обучение по профессии (теория + практика)</option>
             </select>
           </div>
           <div class="field" style="margin-bottom:0">
             <label>Название курса</label>
-            <select id="rosterCourseSelect"></select>
+            <select id="rosterCourseSelect" onchange="scheduleRosterDraftSave()"></select>
           </div>
           <div class="field" style="margin-bottom:0">
             <label>Инструктор</label>
-            <input type="text" id="rosterInstructor" placeholder="Фамилия Имя Отчество">
+            <input type="text" id="rosterInstructor" placeholder="Фамилия Имя Отчество" onchange="scheduleRosterDraftSave()">
           </div>
           <div class="field" style="margin-bottom:0">
             <label>Дата</label>
-            <input type="date" id="rosterDate">
+            <input type="date" id="rosterDate" onchange="scheduleRosterDraftSave()">
           </div>
           <div class="field" style="margin-bottom:0">
             <label>Действует до (необяз.)</label>
-            <input type="date" id="rosterValidUntil">
+            <input type="date" id="rosterValidUntil" onchange="scheduleRosterDraftSave()">
           </div>
         </div>
         <div class="hint" style="margin-top:-4px;margin-bottom:12px">
           «Действует до» — только для периодических инструктажей (например, безопасное вождение).
-          Заполняется, если хотите записать факт в историю (см. ниже) как периодический, а не разовый.
+          Заполняется, если потом (при загрузке скана в «Архиве») нужно записать факт как
+          периодический, а не разовый.
         </div>
       </div>
 
@@ -835,11 +841,9 @@ td { padding:8px; border-bottom:1px solid var(--border); }
           Печать
           <button class="btn-gold" style="width:auto;padding:8px 16px" onclick="printRoster()">🖨 Печать / PDF</button>
           <button class="btn-ghost" style="width:auto;padding:8px 16px" onclick="downloadRoster(this)">⬇ Скачать PDF</button>
-          <button class="btn-ghost" id="rosterSaveHistoryBtn" style="width:auto;padding:8px 16px" onclick="saveRosterToHistory()">💾 Записать в историю</button>
         </div>
         <div class="hint">Пустое ФИО в строке при печати пропускается — можно оставить запас пустых строк на будущее.
-          «Записать в историю» учитывает только строки со статусом «✓ в базе» и не зависит от того,
-          печатали вы бланк или нет.</div>
+          Сам список (кто «в базе», кто «вручную») используется позже — при загрузке скана в «Архиве».</div>
       </div>
     </div>
   </div>
@@ -1338,15 +1342,80 @@ function isoToRuLocal(iso) {
 // Загрузка скана ростера без привязки к зачислению группы (когда часть или
 // все обучаемые ещё не в базе — batchId неоткуда взять). Тот же archiveDocs,
 // просто linkedIds пустой — привязка только по курсу/дате/участку в метаданных.
+// Ищет совпадение текущей формы загрузки скана с списком обучаемых: сначала
+// в памяти браузера (ROSTER_ROWS, если это та же сессия и вкладка «Ростер»
+// ещё не сброшена), а если там пусто/не совпало — идёт на бэкенд за
+// черновиком (лист «ЧерновикиРостеров»), который сохраняется автоматически
+// при заполнении «Ростера», даже если сессия/день были другими.
+// Возвращает { rows, validUntil } или null.
+async function matchRosterForArchiveUpload(course, dateIso, dateRu) {
+  const rosterCourse = document.getElementById("rosterCourseSelect")?.value || "";
+  const rosterDateIso = document.getElementById("rosterDate")?.value || "";
+  if (course && course === rosterCourse && (!dateIso || !rosterDateIso || dateIso === rosterDateIso)) {
+    const bound = (typeof ROSTER_ROWS !== "undefined" ? ROSTER_ROWS : [])
+      .filter(r => r.name.trim() && rosterRowIsBound(r));
+    if (bound.length) {
+      const validIso = document.getElementById("rosterValidUntil")?.value || "";
+      return { rows: bound, validUntil: validIso ? isoToRuLocal(validIso) : "" };
+    }
+  }
+  // В памяти не нашли — пробуем черновик на бэкенде по курсу+дате.
+  if (!course || !dateRu) return null;
+  try {
+    const res = await fetch(`${CFG.SHEET_URL}?action=getRosterDraft&course=${encodeURIComponent(course)}&date=${encodeURIComponent(dateRu)}`);
+    const val = await res.json();
+    if (!val.found || !Array.isArray(val.rows)) return null;
+    const bound = val.rows.filter(r => r.name && r.name.trim() && rosterRowIsBound(r));
+    return bound.length ? { rows: bound, validUntil: val.validUntil || "" } : null;
+  } catch (e) {
+    console.error("Не удалось проверить черновик ростера:", e);
+    return null;
+  }
+}
+
 async function submitRosterUpload(input) {
   const file = input.files[0];
   if (!file) return;
   const course = document.getElementById("archiveRosterCourseSelect").value;
   if (!course) { alert("Сначала выберите название курса"); input.value = ""; return; }
   const dateIso = document.getElementById("archiveRosterDate").value;
+  const dateRu = dateIso ? isoToRuLocal(dateIso) : "";
   const site = document.getElementById("archiveRosterSite").value;
   const note = document.getElementById("archiveRosterNote").value.trim();
   const statusEl = document.getElementById("archiveRosterUploadStatus");
+
+  // Совпал ли этот скан со списком обучаемых (в памяти или в черновике на
+  // бэкенде) — если да, перед архивацией спрашиваем подтверждение и пишем
+  // факты в «Обучение».
+  if (statusEl) statusEl.textContent = "⏳ Проверяю список...";
+  const matched = await matchRosterForArchiveUpload(course, dateIso, dateRu);
+  let linkedIds = "";
+  let matchedCount = 0;
+  if (matched) {
+    matchedCount = matched.rows.length;
+    let msg = `Скан совпал со списком обучаемых: ${matchedCount} чел. со статусом «✓ в базе».\n` +
+      `Записать их в «Обучение» по курсу «${course}»` +
+      (dateRu ? ` от ${dateRu}` : "") + (matched.validUntil ? `, действует до ${matched.validUntil}` : "") +
+      ` вместе со сканом?`;
+    if (confirm(msg)) {
+      if (statusEl) statusEl.textContent = "⏳ Записываю факты...";
+      try {
+        const records = matched.rows.map(r => ({ empId: r.empId, empName: r.name, course, date: dateRu, validUntil: matched.validUntil }));
+        const factRes = await fetch(CFG.SHEET_URL, { method: "POST", body: JSON.stringify({ action: "bulkAddTrainingFacts", records }) });
+        const factVal = await factRes.json();
+        if (!factVal.ok) { alert("Не удалось записать факты: " + (factVal.error||"") + "\nСкан всё равно будет загружен, но без привязки к записям."); }
+        else {
+          linkedIds = factVal.batchId || "";
+          await loadAll(["trainingHistory"]);
+          // Черновик использован — убираем, чтобы не подхватился повторно.
+          fetch(CFG.SHEET_URL, { method: "POST", body: JSON.stringify({ action: "deleteRosterDraft", course, date: dateRu }) }).catch(()=>{});
+        }
+      } catch (e) {
+        alert("Ошибка сети при записи фактов: " + e.message + "\nСкан всё равно будет загружен, но без привязки к записям.");
+      }
+    }
+  }
+
   if (statusEl) statusEl.textContent = "⏳ Загружаю...";
   try {
     const { base64, mimeType } = await prepareFileForUpload(file);
@@ -1356,12 +1425,13 @@ async function submitRosterUpload(input) {
       fileName: file.name,
       type: "ростер",
       title: course,
-      date: dateIso ? isoToRuLocal(dateIso) : "",
+      date: dateRu,
       site, note,
+      linkedIds,
     })});
     const val = await res.json();
     if (!val.ok) { if (statusEl) statusEl.textContent = ""; alert("Не удалось загрузить: " + (val.error||"")); return; }
-    if (statusEl) statusEl.textContent = "✓ Загружено";
+    if (statusEl) statusEl.textContent = linkedIds ? `✓ Загружено и записано (${matchedCount} чел.)` : "✓ Загружено";
     document.getElementById("archiveRosterNote").value = "";
     await loadAll(["archiveDocs"]);
   } catch (e) {
@@ -4196,17 +4266,49 @@ function updateRosterRow(i, field, value) {
     const badgeEl = document.getElementById(`rosterBadge${i}`);
     if (badgeEl) badgeEl.innerHTML = rosterBadgeHtml(ROSTER_ROWS[i]);
   }
+  scheduleRosterDraftSave();
+}
+
+// Черновик списка «Ростера» — сохраняется на бэкенд (лист «ЧерновикиРостеров»),
+// чтобы список не пропадал при закрытии вкладки/перезагрузке страницы и был
+// доступен позже при загрузке скана в «Архиве», даже в другой день или другой
+// сессии браузера. Дебаунс — чтобы не слать запрос на каждое нажатие клавиши.
+let rosterDraftSaveTimer = null;
+function scheduleRosterDraftSave() {
+  if (rosterDraftSaveTimer) clearTimeout(rosterDraftSaveTimer);
+  rosterDraftSaveTimer = setTimeout(saveRosterDraftNow, 900);
+}
+async function saveRosterDraftNow() {
+  const course = document.getElementById("rosterCourseSelect")?.value || "";
+  const dateIso = document.getElementById("rosterDate")?.value || "";
+  if (!course || !dateIso) return; // без курса и даты черновик не с чем связать
+  const dateRu = isoToRuLocal(dateIso);
+  const type = document.getElementById("rosterType")?.value || "";
+  const instructor = document.getElementById("rosterInstructor")?.value.trim() || "";
+  const validIso = document.getElementById("rosterValidUntil")?.value || "";
+  const validRu = validIso ? isoToRuLocal(validIso) : "";
+  const rows = ROSTER_ROWS.filter(r => r.name.trim());
+  try {
+    await fetch(CFG.SHEET_URL, { method: "POST", body: JSON.stringify({
+      action: "saveRosterDraft",
+      course, date: dateRu, rows, type, instructor, validUntil: validRu, site: CURRENT_SITE,
+    })});
+  } catch (e) {
+    console.error("Не удалось сохранить черновик ростера:", e);
+  }
 }
 
 function removeRosterRow(i) {
   ROSTER_ROWS.splice(i, 1);
   renderRosterRows();
+  scheduleRosterDraftSave();
 }
 
 function clearRosterRows() {
   if (ROSTER_ROWS.length && !confirm("Очистить весь список?")) return;
   ROSTER_ROWS = [];
   renderRosterRows();
+  scheduleRosterDraftSave();
 }
 
 function addRosterEmptyRow() {
@@ -4218,7 +4320,7 @@ function addRosterEmptyRow() {
 // что и на вкладке «План». Должность и департамент подставляются из карточки
 // сотрудника (личное дело) — для людей не из базы оба поля остаются пустыми
 // и вписываются вручную. empId запоминаем отдельно (раньше терялся) —
-// именно по нему «Записать в историю» потом сможет создать факт обучения.
+// именно по нему потом при загрузке скана можно будет создать факт обучения.
 function addRosterEmpFromInput() {
   const input = document.getElementById("rosterEmpInput");
   const raw = String(input.value||"").trim();
@@ -4229,6 +4331,7 @@ function addRosterEmpFromInput() {
   ROSTER_ROWS.push({ name, position: emp ? (emp.position||"") : "", department: emp ? (emp.department||"") : "", empId: emp ? emp.id : null });
   input.value = "";
   renderRosterRows();
+  scheduleRosterDraftSave();
 }
 
 // Ростер — таблица переменной длины, а не сетка карточек фиксированного
@@ -4292,6 +4395,7 @@ async function downloadRoster(btn) {
   const dateIso = document.getElementById("rosterDate").value;
   if (!course) { alert("Выберите название курса"); return; }
   if (!instructor) { alert("Укажите фамилию инструктора"); return; }
+  saveRosterDraftNow(); // не ждём — печать не должна блокироваться на сети
 
   const rows = ROSTER_ROWS.filter(r => r.name.trim());
   if (!rows.length) { alert("Добавьте хотя бы одного обучаемого"); return; }
@@ -4342,6 +4446,7 @@ function printRoster() {
   const dateIso = document.getElementById("rosterDate").value;
   if (!course) { alert("Выберите название курса"); return; }
   if (!instructor) { alert("Укажите фамилию инструктора"); return; }
+  saveRosterDraftNow(); // не ждём — печать не должна блокироваться на сети
 
   const rows = ROSTER_ROWS.filter(r => r.name.trim());
   if (!rows.length) { alert("Добавьте хотя бы одного обучаемого"); return; }
@@ -4394,55 +4499,6 @@ function printRoster() {
   document.body.appendChild(area);
   area.style.cssText = "";
   requestAnimationFrame(() => requestAnimationFrame(() => window.print()));
-}
-
-// Фиксация факта обучения по текущему списку «Ростера» — отдельно от
-// печати/скачивания, чтобы повторная распечатка того же бланка (лишняя
-// копия, замена испорченного листа) не плодила дубли записей в «Обучение».
-// Пишет ТОЛЬКО строки со статусом «✓ в базе» (см. rosterRowIsBound) —
-// вручную вписанные ФИО людей не из базы по-прежнему только печатаются,
-// это осознанный компромисс варианта 2 (см. обсуждение с Мастером).
-// Использует тот же bulkAddTrainingFacts, что и групповое зачисление на
-// вкладке «Группа» — один и тот же путь записи, один и тот же batchId
-// на всю группу, никаких новых экшенов в Код.gs не потребовалось.
-async function saveRosterToHistory() {
-  const course = document.getElementById("rosterCourseSelect").value;
-  if (!course) { alert("Выберите название курса"); return; }
-  const instructor = document.getElementById("rosterInstructor").value.trim();
-  if (!instructor) { alert("Укажите фамилию инструктора"); return; }
-  const dateIso = document.getElementById("rosterDate").value;
-  const validIso = document.getElementById("rosterValidUntil").value;
-  const dateRu = dateIso ? isoToRu(dateIso) : "";
-  const validRu = validIso ? isoToRu(validIso) : "";
-
-  const bound = ROSTER_ROWS.filter(r => r.name.trim() && rosterRowIsBound(r));
-  const manualCount = ROSTER_ROWS.filter(r => r.name.trim() && !rosterRowIsBound(r)).length;
-
-  if (!bound.length) {
-    alert("Нет ни одной строки со статусом «✓ в базе» — записывать в историю нечего.\n" +
-      "Добавляйте обучаемых через поле «Начните вводить имя сотрудника...», чтобы привязка сохранилась.");
-    return;
-  }
-
-  let msg = `Записать в историю ${bound.length} чел. по курсу «${course}»`
-    + (dateRu ? ` от ${dateRu}` : "") + (validRu ? `, действует до ${validRu}` : "") + "?";
-  if (manualCount) msg += `\n\n${manualCount} чел. вписаны вручную (не из базы) — они НЕ будут записаны, только распечатаны.`;
-  if (!confirm(msg)) return;
-
-  const records = bound.map(r => ({ empId: r.empId, empName: r.name, course, date: dateRu, validUntil: validRu }));
-  const btn = document.getElementById("rosterSaveHistoryBtn");
-  if (btn) { btn.disabled = true; btn.textContent = "Записываю..."; }
-  try {
-    const res = await fetch(CFG.SHEET_URL, { method: "POST", body: JSON.stringify({ action: "bulkAddTrainingFacts", records }) });
-    const val = await res.json();
-    if (!val.ok) { alert("Не удалось записать: " + (val.error||"")); return; }
-    await loadAll(["trainingHistory"]);
-    alert(`Готово: записано ${val.added} чел. в историю.`);
-  } catch (e) {
-    alert("Ошибка сети: " + e.message);
-  } finally {
-    if (btn) { btn.disabled = false; btn.textContent = "💾 Записать в историю"; }
-  }
 }
 
 </script>
