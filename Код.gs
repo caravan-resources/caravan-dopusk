@@ -90,6 +90,7 @@ function doGet(e) {
   else if (action === "getHazards") result = getHazards(e.parameter);
   else if (action === "getHazardStats") result = getHazardStats(e.parameter);
   else if (action === "getHazardMeta") result = getHazardMeta();
+  else if (action === "getRosterDraft") result = getRosterDraft(e.parameter.course, e.parameter.date);
   else result = json({ ok: false, error: "unknown action" });
 
   if (callback) {
@@ -118,6 +119,8 @@ function doPost(e) {
     if (d.action === "saveRequirement") return saveRequirement(d.position, d.requiredTests, d.requiredCourses);
     if (d.action === "addTrainingPlan") return addTrainingPlan(d.empId, d.empName, d.course, d.dueDate, d.site);
     if (d.action === "bulkAddTrainingFacts") return bulkAddTrainingFacts(d.records);
+    if (d.action === "saveRosterDraft")   return saveRosterDraft(d);
+    if (d.action === "deleteRosterDraft") return deleteRosterDraft(d.course, d.date);
     if (d.action === "recognizeRoster") return recognizeRoster(d.image, d.mimeType);
     if (d.action === "uploadDocument") return uploadDocument(d);
     if (d.action === "completeTrainingPlan") return completeTrainingPlan(d);
@@ -756,6 +759,100 @@ function bulkAddTrainingFacts(records) {
   ensureCapacity(sheet, rows.length);
   sheet.getRange(sheet.getLastRow()+1, 1, rows.length, 6).setValues(rows);
   return json({ ok: true, added: rows.length, batchId });
+}
+
+// ══════════════════════════════════════════════════════════
+// ЧЕРНОВИКИ РОСТЕРА — чтобы список обучаемых из вкладки «Ростер» не
+// пропадал при закрытии вкладки/перезагрузке страницы и был доступен
+// позже, когда подписанный скан принесут на загрузку (возможно, в другой
+// день, в другой сессии браузера). Ключ — курс+дата (совпадают буквально,
+// как строки, в том же формате dd.MM.yyyy, что и в «Обучение»). Один
+// черновик на пару курс+дата — повторное сохранение того же курса/даты
+// просто заменяет прежний список (обновили ростер — обновился черновик).
+// ══════════════════════════════════════════════════════════
+const SHEET_ROSTER_DRAFTS = "ЧерновикиРостеров";
+
+function findRosterDraftRow(sheet, course, date) {
+  const rows = sheet.getDataRange().getValues();
+  const c = String(course||"").trim().toLowerCase();
+  const d = String(date||"").trim();
+  for (let i = 1; i < rows.length; i++) {
+    if (String(rows[i][0]).trim().toLowerCase() === c && String(rows[i][1]).trim() === d) {
+      return i + 1; // 1-based номер строки листа
+    }
+  }
+  return -1;
+}
+
+// p: { course, date, rows (массив {name, position, department, empId}),
+//      type, instructor, validUntil, site }
+function saveRosterDraft(p) {
+  const { course, date, rows, type, instructor, validUntil, site } = p || {};
+  if (!course || !date) return json({ ok: false, error: "Нужны course и date" });
+
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  let sheet = ss.getSheetByName(SHEET_ROSTER_DRAFTS);
+  if (!sheet) {
+    sheet = ss.insertSheet(SHEET_ROSTER_DRAFTS);
+    sheet.appendRow(["course","date","rowsJson","type","instructor","validUntil","site","updatedDate"]);
+    sheet.getRange(1,1,1,8)
+      .setBackground("#0D1B3E").setFontColor("#F4A52A").setFontWeight("bold");
+    sheet.setFrozenRows(1);
+    sheet.setColumnWidth(1, 260);
+    sheet.setColumnWidth(3, 400);
+  }
+
+  const rowsJson = JSON.stringify(rows || []);
+  const updatedDate = Utilities.formatDate(new Date(), "Asia/Almaty", "dd.MM.yyyy HH:mm");
+  const values = [course, date, rowsJson, type||"", instructor||"", validUntil||"", site||"", updatedDate];
+
+  const existingRow = findRosterDraftRow(sheet, course, date);
+  if (existingRow > 0) {
+    sheet.getRange(existingRow, 1, 1, values.length).setValues([values]);
+  } else {
+    ensureCapacity(sheet, 1);
+    sheet.appendRow(values);
+  }
+  return json({ ok: true });
+}
+
+// GET — course/date из query-параметров. Возвращает { found:false } или
+// { found:true, rows, type, instructor, validUntil, site, updatedDate }.
+function getRosterDraft(course, date) {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName(SHEET_ROSTER_DRAFTS);
+  if (!sheet) return json({ found: false });
+
+  const rowNum = findRosterDraftRow(sheet, course, date);
+  if (rowNum < 0) return json({ found: false });
+
+  const row = sheet.getRange(rowNum, 1, 1, 8).getValues()[0];
+  let rows = [];
+  try { rows = JSON.parse(row[2] || "[]"); } catch (e) { rows = []; }
+  return json({
+    found: true,
+    rows,
+    type: row[3] || "",
+    instructor: row[4] || "",
+    validUntil: row[5] || "",
+    site: row[6] || "",
+    updatedDate: row[7] || "",
+  });
+}
+
+// Вызывается после того, как черновик успешно применён (факты записаны
+// вместе со сканом) — убираем его, чтобы не подхватился ещё раз для
+// нового, не связанного с этим курса/даты события в будущем.
+function deleteRosterDraft(course, date) {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName(SHEET_ROSTER_DRAFTS);
+  if (!sheet) return json({ ok: true, deleted: false });
+
+  const rowNum = findRosterDraftRow(sheet, course, date);
+  if (rowNum < 0) return json({ ok: true, deleted: false });
+
+  sheet.deleteRow(rowNum);
+  return json({ ok: true, deleted: true });
 }
 
 // ══════════════════════════════════════════════════════════
