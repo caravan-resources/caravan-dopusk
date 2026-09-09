@@ -1822,15 +1822,16 @@ function renderHistory() {
   }
 
   const shown = list.slice(0, 100);
+  HISTORY_SHOWN_ROWS = shown; // для viewScan по индексу — не подставляем сырой текст в onclick
   el.innerHTML = `<div style="overflow-x:auto"><table>
     <thead><tr><th>Сотрудник</th><th>Курс</th><th>Дата</th><th>Действует до</th><th></th></tr></thead>
-    <tbody>${shown.map(r => `
+    <tbody>${shown.map((r,i) => `
       <tr>
         <td><b>${escapeHtml(r.empName)}</b></td>
         <td style="color:var(--gray)">${escapeHtml(r.course)}</td>
         <td>${formatRu(parseAnyDate(r.date))}</td>
         <td>${r.validUntil ? formatRu(parseAnyDate(r.validUntil)) : "—"}</td>
-        <td>${r.batchId ? `<button class="btn-ghost" style="padding:3px 10px;font-size:11px" onclick="viewScan('${r.batchId}')">📎 Скан</button>` : ""}</td>
+        <td><button class="btn-ghost" style="padding:3px 10px;font-size:11px" onclick="viewScanForHistoryRow(${i})">📎 Скан</button></td>
       </tr>`).join("")}</tbody>
   </table></div>` + (list.length>100 ? `<div style="text-align:center;color:var(--gray);font-size:12px;padding-top:10px">Показаны последние 100 из ${list.length} — уточните поиск</div>` : "");
 }
@@ -1856,10 +1857,31 @@ function exportTrainingCSV() {
 
 // Скан ищем по требованию (по клику), а не заранее для всей истории —
 // незачем гонять лишний запрос на каждую запись при простой прокрутке списка.
-async function viewScan(batchId) {
+// Строки, отрисованные последним renderHistory() — viewScanForHistoryRow
+// берёт данные по индексу, а не по сырому тексту в onclick (курс может
+// содержать кавычки/спецсимволы, которые сломали бы инлайн-обработчик).
+let HISTORY_SHOWN_ROWS = [];
+function viewScanForHistoryRow(i) {
+  const r = HISTORY_SHOWN_ROWS[i];
+  if (!r) return;
+  viewScan(r.batchId, r.course, formatRu(parseAnyDate(r.date)));
+}
+
+// Ищем скан сначала по batchId (точная привязка при записи факта), а если
+// не нашли — резервно по типу+курсу+дате: это покрывает сканы, загруженные
+// до появления привязки по batchId, или когда на момент загрузки курс/дата
+// в форме не совпали с «Ростером» (см. matchRosterForArchiveUpload).
+async function viewScan(batchId, course, dateRu) {
   try {
-    const res = await fetch(`${CFG.SHEET_URL}?action=getDocuments&linkedId=${encodeURIComponent(batchId)}`);
-    const docs = await res.json();
+    let docs = [];
+    if (batchId) {
+      const res = await fetch(`${CFG.SHEET_URL}?action=getDocuments&linkedId=${encodeURIComponent(batchId)}`);
+      docs = await res.json();
+    }
+    if ((!Array.isArray(docs) || !docs.length) && course && dateRu) {
+      const res2 = await fetch(`${CFG.SHEET_URL}?action=getDocuments&type=${encodeURIComponent("ростер")}&title=${encodeURIComponent(course)}&date=${encodeURIComponent(dateRu)}`);
+      docs = await res2.json();
+    }
     if (!Array.isArray(docs) || !docs.length) { alert("Скан не найден в архиве"); return; }
     window.open(docs[0].fileUrl, "_blank");
   } catch (e) {
