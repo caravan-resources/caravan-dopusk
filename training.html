@@ -76,6 +76,18 @@ th { text-align:left; padding:8px; color:var(--gray); font-size:11px; text-trans
   border-bottom:2px solid var(--border); }
 td { padding:8px; border-bottom:1px solid var(--border); }
 .badge { font-weight:700; font-size:12px; padding:3px 8px; border-radius:6px; white-space:nowrap; }
+.emp-name { font-weight:700; color:var(--navy); }
+.b-red    { background:var(--redbg);    color:var(--red);   border:1px solid var(--red);   }
+.b-green  { background:var(--greenbg); color:var(--green);  border:1px solid var(--green);  }
+.filters { display:flex; gap:10px; margin-bottom:14px; flex-wrap:wrap; }
+.filters input, .filters select {
+  padding:9px 12px; border:1.5px solid var(--border); border-radius:8px; font-size:13px;
+}
+.filters input { flex:1; min-width:160px; }
+.filters input:focus, .filters select:focus { border-color:var(--gold); }
+.tbl-wrap { overflow-x:auto; }
+.empty { text-align:center; padding:40px; color:var(--gray); }
+.empty-icon { font-size:36px; margin-bottom:8px; }
 .eval-opt-btn { border:1.5px solid var(--border); background:#fff; border-radius:8px; padding:6px 13px;
   font-size:13px; font-weight:700; cursor:pointer; color:var(--gray); }
 .eval-opt-btn.active { background:var(--gold); color:var(--navy); border-color:var(--gold); }
@@ -140,6 +152,7 @@ td { padding:8px; border-bottom:1px solid var(--border); }
     <button id="navHistory" onclick="showScreen('history')">✅ История</button>
     <button id="navCatalog" onclick="showScreen('catalog')">📚 Каталог курсов</button>
     <button id="navImport" onclick="showScreen('import')">➕ Импорт теста</button>
+    <button id="navTestResults" onclick="showScreen('testResults')">📋 Результаты тестов</button>
     <button id="navEval" onclick="showScreen('eval')">🎯 Оценка</button>
     <button id="navTiming" onclick="showScreen('timing')">⏱ Хронометраж</button>
     <button id="navArchive" onclick="showScreen('archive')">🗂 Архив</button>
@@ -300,6 +313,39 @@ td { padding:8px; border-bottom:1px solid var(--border); }
           <button class="btn-gold" style="width:auto;padding:8px 16px" onclick="submitTestImport()">➕ Добавить тест</button>
           <span id="importStatus" style="font-size:13px"></span>
         </div>
+      </div>
+    </div>
+
+    <!-- ══ РЕЗУЛЬТАТЫ ТЕСТОВ ══
+         Перенесено из instructor.html («🎓 Обучение» → «📋 Результаты тестов») —
+         разметка и функции (renderTestsTable/exportTestsCSV) идентичны исходнику. -->
+    <div id="screenTestResults" class="screen">
+      <div class="panel">
+        <div class="filters">
+          <input type="text" id="searchTest" placeholder="🔍 Поиск по имени..."
+            oninput="renderTestsTable()">
+          <select id="filterResult" onchange="renderTestsTable()">
+            <option value="all">Все результаты</option>
+            <option value="pass">Сдали</option>
+            <option value="fail">Не сдали</option>
+          </select>
+          <button class="btn-ghost" style="width:auto;padding:9px 16px" onclick="exportTestsCSV()">📥 CSV</button>
+        </div>
+        <div class="tbl-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Дата</th><th>Время</th><th>Сотрудник</th><th>Тест</th>
+                <th>Результат</th><th>Балл</th><th>Правильных</th><th>Время (мин)</th>
+              </tr>
+            </thead>
+            <tbody id="testsTableBody"></tbody>
+          </table>
+        </div>
+        <div id="testsEmpty" class="empty" style="display:none">
+          <div class="empty-icon">📋</div>Нет результатов
+        </div>
+        <div style="margin-top:8px;font-size:12px;color:var(--gray)" id="testsCount"></div>
       </div>
     </div>
 
@@ -975,6 +1021,7 @@ async function loadAll(onlyKeys) {
     { key: "courseCatalog",   action: "getCourseCatalog" },
     { key: "archiveDocs",     action: "getDocuments" },
     { key: "tests",           action: "getTests" },
+    { key: "results",         action: "getResults" },
     { key: "requirements",    action: "getRequirements" },
   ];
   const fetches = onlyKeys ? fetchDefs.filter(f => onlyKeys.includes(f.key)) : fetchDefs;
@@ -1013,6 +1060,7 @@ function renderAll() {
   renderArchiveTestSelect();
   renderArchiveList();
   renderRequirementsPanel();
+  renderTestsTable();
   renderPrintSelect();
   renderDrivingPrintSelect();
   renderCertPrintSelect("profession");
@@ -1993,6 +2041,113 @@ async function submitTestImport() {
     status.style.color = "var(--red)";
     status.textContent = "❌ Ошибка соединения: " + err.message;
   }
+}
+
+// ══════════════════════════════════════════════════════
+// РЕЗУЛЬТАТЫ ТЕСТОВ — перенесено из instructor.html, логика не менялась.
+// today/resultBadge/getField/isPassed/downloadCSV — те же утилиты, что были
+// там; в instructor.html свои копии остаются (используются в дашборде и
+// личном деле, не только здесь).
+// ══════════════════════════════════════════════════════
+function today() { return new Date().toISOString().split("T")[0]; }
+
+function resultBadge(passed) {
+  return passed
+    ? `<span class="badge b-green">✓ Сдал</span>`
+    : `<span class="badge b-red">✗ Не сдал</span>`;
+}
+
+function getField(r, ...keys) {
+  for (const k of keys) {
+    if (r[k]!==undefined && r[k]!==null && String(r[k]).trim()!=="") return r[k];
+  }
+  return "—";
+}
+function isPassed(r) {
+  // Поддержка обоих форматов: старого (русские ключи) и нового (английские)
+  const v = r.result||r["Результат"]||r.passed||"";
+  return String(v).includes("Сдал") && !String(v).includes("Не сдал");
+}
+
+function downloadCSV(rows, filename) {
+  const csv = "\uFEFF" + rows.map(r=>
+    r.map(v=>`"${String(v??"").replace(/"/g,'""')}"`).join(";")
+  ).join("\n");
+  const a = document.createElement("a");
+  a.href = "data:text/csv;charset=utf-8," + encodeURIComponent(csv);
+  a.download = filename; a.click();
+}
+
+function renderTestsTable() {
+  const searchEl = document.getElementById("searchTest");
+  const filterEl = document.getElementById("filterResult");
+  if (!searchEl || !filterEl) return; // экран ещё не отрисован в DOM
+  const q = searchEl.value.toLowerCase();
+  const f = filterEl.value;
+
+  let rows = [...(DATA.results||[])].reverse().filter(r => {
+    const name = String(getField(r,"empName","Сотрудник")).toLowerCase();
+    if (q && !name.includes(q)) return false;
+    const pass = isPassed(r);
+    if (f==="pass" && !pass) return false;
+    if (f==="fail" && pass) return false;
+    return true;
+  });
+
+  const body = document.getElementById("testsTableBody");
+  const empty = document.getElementById("testsEmpty");
+  const count = document.getElementById("testsCount");
+  if (!body) return;
+
+  if (rows.length === 0) {
+    body.innerHTML = ""; empty.style.display = "block";
+    count.textContent = "";
+    return;
+  }
+  empty.style.display = "none";
+  count.textContent = `Показано ${rows.length} записей`;
+
+  body.innerHTML = rows.map(r => {
+    const pass  = isPassed(r);
+    const date  = getField(r,"date","Дата");
+    const time  = getField(r,"time","Время");
+    const name  = getField(r,"empName","Сотрудник");
+    const test  = getField(r,"testTitle","Тест");
+    const score = getField(r,"score","Балл (%)");
+    const corr  = getField(r,"correctQ","Правильных");
+    const total = getField(r,"totalQ","Всего вопросов");
+    const dur   = getField(r,"duration","Время (мин)");
+    // У настоящего теста всегда totalQ > 0 — если 0, значит запись восстановлена
+    // задним числом (протокол/потерянные результаты 15.07–02.08.2026), а не
+    // взята из реального прохождения. Показываем «—», а не обманчивый «0%».
+    const hasRealData = total && total !== "0" && total !== "—";
+    return `<tr>
+      <td>${date}</td>
+      <td>${time}</td>
+      <td><div class="emp-name">${name}</div></td>
+      <td style="font-size:12px;color:var(--gray)">${test}</td>
+      <td>${resultBadge(pass)}</td>
+      <td style="font-weight:800;color:${hasRealData?(pass?"var(--green)":"var(--red)"):"var(--gray)"}">${hasRealData?score+"%":"—"}</td>
+      <td style="color:var(--gray)">${hasRealData?corr+(total!=="—"?"/"+total:""):"—"}</td>
+      <td style="color:var(--gray)">${hasRealData?dur:"—"}</td>
+    </tr>`;
+  }).join("");
+}
+
+function exportTestsCSV() {
+  const headers = ["Дата","Время","Сотрудник","Тест","Результат","Балл (%)","Правильных","Всего","Время (мин)"];
+  const rows = (DATA.results||[]).map(r=>[
+    r["Дата"]||r.date||"",
+    r["Время"]||r.time||"",
+    r["Сотрудник"]||r.empName||"",
+    r["Тест"]||r.testTitle||"",
+    r["Результат"]||r.result||"",
+    r["Балл (%)"]||r.score||"",
+    r["Правильных"]||r.correctQ||"",
+    r["Всего вопросов"]||r.totalQ||"",
+    r["Время (мин)"]||r.duration||"",
+  ]);
+  downloadCSV([headers,...rows], `Результаты_тестов_${today()}.csv`);
 }
 
 function renderCatalogList() {
