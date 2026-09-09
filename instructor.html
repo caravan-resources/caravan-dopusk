@@ -256,7 +256,6 @@ tr:hover td { background:#FAFBFD; }
     <button id="navTrainingPlan" onclick="showTab('trainingPlan')">📚 График обучения</button>
     <button id="navImport"   onclick="showTab('import')">➕ Импорт теста</button>
     <button id="navAccess"  onclick="showTab('access')">🪪 Сроки допусков</button>
-    <button id="navPrint"    onclick="showTab('print')">🖨 Печать допусков/удостоверений</button>
   </nav>
 
   <nav class="nav-sub" id="subAdmin" style="display:none">
@@ -1296,18 +1295,6 @@ tr:hover td { background:#FAFBFD; }
         <div style="display:flex;gap:10px;margin-top:12px;align-items:center">
           <button class="btn btn-gold" onclick="submitTestImport()">➕ Добавить тест</button>
           <span id="importStatus" style="font-size:13px"></span>
-        </div>
-      </div>
-    </div>
-
-    <!-- ══ ПЕЧАТЬ ДОПУСКОВ/УДОСТОВЕРЕНИЙ ══ -->
-    <div id="tabPrint" class="screen">
-      <div class="panel">
-        <div class="panel-title">🖨 Печать допусков и удостоверений</div>
-        <div class="hint">
-          Печать допусков, безопасного вождения и удостоверений по профессии перенесена
-          в приложение обучения — <a href="training.html" target="_blank">training.html</a>,
-          вкладки «🖨 Допуски» и «🎓 Удостоверения».
         </div>
       </div>
     </div>
