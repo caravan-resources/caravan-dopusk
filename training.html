@@ -412,11 +412,6 @@ td { padding:8px; border-bottom:1px solid var(--border); }
         <div class="panel-title">
           📚 График обучения на год
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-            <select id="planSite" onchange="renderTrainingPlan()" style="max-width:150px">
-              <option value="all">Оба участка</option>
-              <option value="Алмалы">Алмалы</option>
-              <option value="Ашыктас">Ашыктас</option>
-            </select>
             <select id="planShift" onchange="renderTrainingPlan()" style="max-width:150px">
               <option value="all">Обе смены</option>
               <option value="1">Смена 1 (день)</option>
@@ -473,7 +468,7 @@ td { padding:8px; border-bottom:1px solid var(--border); }
           </div>
         </div>
         <div class="hint" style="margin-bottom:10px">
-          Использует те же фильтры «Участок» и «Вахта» выше. Порог — 6 месяцев без оценки (или ни разу).
+          Использует тот же фильтр «Вахта» выше. Порог — 6 месяцев без оценки (или ни разу).
           Помесячного плана здесь нет — вместо этого живая очередь по приоритету: сначала кто не оценивался
           ни разу, затем кто дольше всех без оценки. Переключил участок/вахту наверху — очередь обновилась под то место, где ты сейчас.
         </div>
@@ -2615,9 +2610,11 @@ function isTrainedFor(courses, eqType) {
   return false;
 }
 
-// Собираем строки графика: один человек + одна единица техники
+// Собираем строки графика: один человек + одна единица техники.
+// Фильтра «Участок» здесь нет — DATA.shiftAssignments/equipment уже
+// отфильтрованы текущим участком через глобальный переключатель наверху,
+// как и везде в training.html (см. аналогичное решение в «Сроках допусков»).
 function buildTrainingPlan() {
-  const site  = document.getElementById("planSite")?.value  || "all";
   const shift = document.getElementById("planShift")?.value || "all";
   const vahta = document.getElementById("planVahta")?.value || "all";
   const q     = (document.getElementById("planSearch")?.value||"").toLowerCase();
@@ -2628,7 +2625,6 @@ function buildTrainingPlan() {
   (DATA.shiftAssignments||[]).forEach(a => {
     if (a.status !== "активен") return;
     if (!a.empName || String(a.empName).toLowerCase() === "вакансия") return;
-    if (site  !== "all" && String(a.site||"").trim() !== site) return;
     if (shift !== "all" && String(a.smena) !== shift) return;
     if (vahta !== "all" && a.vahta !== vahta) return;
 
@@ -2839,7 +2835,6 @@ function lastEvalOf(map, empId, empName) {
 const EVAL_OVERDUE_MS = 183 * 24 * 60 * 60 * 1000;   // 6 месяцев
 
 function buildEvaluationQueue() {
-  const site  = document.getElementById("planSite")?.value  || "all";
   const vahta = document.getElementById("planVahta")?.value || "all";
   const map = lastEvalByEmployee();
   const now = Date.now();
@@ -2848,7 +2843,6 @@ function buildEvaluationQueue() {
   (DATA.shiftAssignments||[]).forEach(a => {
     if (a.status !== "активен") return;
     if (!a.empName || String(a.empName).toLowerCase() === "вакансия") return;
-    if (site  !== "all" && String(a.site||"").trim() !== site) return;
     if (vahta !== "all" && a.vahta !== vahta) return;
 
     const ts = lastEvalOf(map, a.empId, a.empName);
