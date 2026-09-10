@@ -224,6 +224,43 @@ input:focus, select:focus, textarea:focus { border-color:var(--gold); }
 
       <label class="label">Курсы</label>
       <textarea id="fCourses" rows="2" placeholder="Например: курсы повышения квалификации, 2023"></textarea>
+
+      <label class="label">Размер одежды</label>
+      <select id="fClothingSize">
+        <option value="">— выберите —</option>
+        <option value="44">44</option>
+        <option value="46">46</option>
+        <option value="48">48</option>
+        <option value="50">50</option>
+        <option value="52">52</option>
+        <option value="54">54</option>
+        <option value="56">56</option>
+        <option value="58">58</option>
+        <option value="60">60</option>
+        <option value="62">62</option>
+        <option value="64">64</option>
+        <option value="66">66</option>
+        <option value="68">68</option>
+        <option value="70">70</option>
+      </select>
+
+      <label class="label">Размер обуви</label>
+      <select id="fShoeSize">
+        <option value="">— выберите —</option>
+        <option value="36">36</option>
+        <option value="37">37</option>
+        <option value="38">38</option>
+        <option value="39">39</option>
+        <option value="40">40</option>
+        <option value="41">41</option>
+        <option value="42">42</option>
+        <option value="43">43</option>
+        <option value="44">44</option>
+        <option value="45">45</option>
+        <option value="46">46</option>
+        <option value="47">47</option>
+        <option value="48">48</option>
+      </select>
     </div>
 
     <div class="card">
@@ -602,6 +639,8 @@ async function submitForm() {
     additionalSkills: document.getElementById("fAdditionalSkills").value.trim(),
     certificates: document.getElementById("fCertificates").value.trim(),
     courses: document.getElementById("fCourses").value.trim(),
+    clothingSize: document.getElementById("fClothingSize").value,
+    shoeSize: document.getElementById("fShoeSize").value,
     photoUrl,
   };
 
