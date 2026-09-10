@@ -3441,6 +3441,8 @@ function selectPersonnelEmployee(id) {
         <div style="grid-column:1/-1"><span style="color:var(--gray)">Специальности:</span> <b>${escapeHtml(emp.specialties||"—")}</b></div>
         <div style="grid-column:1/-1"><span style="color:var(--gray)">Доп. компетенции:</span> <b>${escapeHtml(emp.additionalSkills||"—")}</b></div>
         <div><span style="color:var(--gray)">Почта:</span> <b>${escapeHtml(emp.email||"—")}</b></div>
+        <div><span style="color:var(--gray)">Размер одежды:</span> <b>${escapeHtml(emp.clothingSize||"—")}</b></div>
+        <div><span style="color:var(--gray)">Размер обуви:</span> <b>${escapeHtml(emp.shoeSize||"—")}</b></div>
         <div style="grid-column:1/-1"><span style="color:var(--gray)">Сертификаты:</span> <b>${escapeHtml(emp.certificates||"—")}</b></div>
         <div style="grid-column:1/-1"><span style="color:var(--gray)">Курсы:</span> <b>${escapeHtml(emp.courses||"—")}</b></div>
       </div>
@@ -3737,6 +3739,8 @@ function openHireModal() {
       <textarea id="hireAdditionalSkills" placeholder="Доп. компетенции: тренер, инженер, кат. Б и т.п." rows="2" style="padding:10px;border:1px solid var(--border);border-radius:8px;font-family:inherit;resize:vertical"></textarea>
       <textarea id="hireCertificates" placeholder="Сертификаты" rows="2" style="padding:10px;border:1px solid var(--border);border-radius:8px;font-family:inherit;resize:vertical"></textarea>
       <textarea id="hireCourses" placeholder="Курсы" rows="2" style="padding:10px;border:1px solid var(--border);border-radius:8px;font-family:inherit;resize:vertical"></textarea>
+      <input id="hireClothingSize" placeholder="Размер одежды" style="padding:10px;border:1px solid var(--border);border-radius:8px">
+      <input id="hireShoeSize" placeholder="Размер обуви" style="padding:10px;border:1px solid var(--border);border-radius:8px">
       <label style="font-size:11px;color:var(--gray)">Дата приёма
         <input id="hireDate" type="date" value="${today()}" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;margin-top:4px">
       </label>
@@ -3771,6 +3775,8 @@ async function submitHire(force) {
     additionalSkills: document.getElementById("hireAdditionalSkills").value.trim(),
     certificates: document.getElementById("hireCertificates").value.trim(),
     courses: document.getElementById("hireCourses").value.trim(),
+    clothingSize: document.getElementById("hireClothingSize").value.trim(),
+    shoeSize: document.getElementById("hireShoeSize").value.trim(),
     force: !!force,
   };
 
@@ -3915,6 +3921,8 @@ function openEditEmployeeModal(id) {
       <textarea id="editAdditionalSkills" placeholder="Доп. компетенции: тренер, инженер, кат. Б и т.п." rows="2" style="padding:10px;border:1px solid var(--border);border-radius:8px;font-family:inherit;resize:vertical">${escapeHtml(emp.additionalSkills||"")}</textarea>
       <textarea id="editCertificates" placeholder="Сертификаты" rows="2" style="padding:10px;border:1px solid var(--border);border-radius:8px;font-family:inherit;resize:vertical">${escapeHtml(emp.certificates||"")}</textarea>
       <textarea id="editCourses" placeholder="Курсы" rows="2" style="padding:10px;border:1px solid var(--border);border-radius:8px;font-family:inherit;resize:vertical">${escapeHtml(emp.courses||"")}</textarea>
+      <input id="editClothingSize" placeholder="Размер одежды" value="${esc(emp.clothingSize)}" style="padding:10px;border:1px solid var(--border);border-radius:8px">
+      <input id="editShoeSize" placeholder="Размер обуви" value="${esc(emp.shoeSize)}" style="padding:10px;border:1px solid var(--border);border-radius:8px">
       <label style="font-size:11px;color:var(--gray)">Дата приёма
         <input id="editHireDate" type="date" value="${toDateInputValue(emp.hireDate)}" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;margin-top:4px">
       </label>
@@ -3949,6 +3957,8 @@ async function submitEditEmployee(id) {
     additionalSkills: document.getElementById("editAdditionalSkills").value.trim(),
     certificates: document.getElementById("editCertificates").value.trim(),
     courses: document.getElementById("editCourses").value.trim(),
+    clothingSize: document.getElementById("editClothingSize").value.trim(),
+    shoeSize: document.getElementById("editShoeSize").value.trim(),
   };
 
   try {
@@ -4094,6 +4104,8 @@ function renderSurveysList() {
         <div style="grid-column:1/-1"><span style="color:var(--gray)">Специальности:</span> <b>${escapeHtml(s.specialties||"—")}</b></div>
         <div style="grid-column:1/-1"><span style="color:var(--gray)">Доп. компетенции:</span> <b>${escapeHtml(s.additionalSkills||"—")}</b></div>
         <div><span style="color:var(--gray)">Почта:</span> <b>${escapeHtml(s.email||"—")}</b></div>
+        <div><span style="color:var(--gray)">Размер одежды:</span> <b>${escapeHtml(s.clothingSize||"—")}</b></div>
+        <div><span style="color:var(--gray)">Размер обуви:</span> <b>${escapeHtml(s.shoeSize||"—")}</b></div>
         <div style="grid-column:1/-1"><span style="color:var(--gray)">Сертификаты:</span> <b>${escapeHtml(s.certificates||"—")}</b></div>
         <div style="grid-column:1/-1"><span style="color:var(--gray)">Курсы:</span> <b>${escapeHtml(s.courses||"—")}</b></div>
       </div>
