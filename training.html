@@ -158,6 +158,7 @@ td { padding:8px; border-bottom:1px solid var(--border); }
     <button id="navImport" onclick="showScreen('import')">➕ Импорт теста</button>
     <button id="navTestResults" onclick="showScreen('testResults')">📋 Результаты тестов</button>
     <button id="navAccess" onclick="showScreen('access')">🪪 Сроки допусков</button>
+    <button id="navTrainingPlan" onclick="showScreen('trainingPlan')">📚 График обучения</button>
     <button id="navEval" onclick="showScreen('eval')">🎯 Оценка</button>
     <button id="navTiming" onclick="showScreen('timing')">⏱ Хронометраж</button>
     <button id="navArchive" onclick="showScreen('archive')">🗂 Архив</button>
@@ -397,6 +398,94 @@ td { padding:8px; border-bottom:1px solid var(--border); }
           <div class="empty-icon">🪪</div>Нет сотрудников
         </div>
         <div style="margin-top:8px;font-size:12px;color:var(--gray)" id="accessCount"></div>
+      </div>
+    </div>
+
+    <!-- ══ ГРАФИК ОБУЧЕНИЯ ══
+         Перенесено из instructor.html («🎓 Обучение» → «📚 График обучения»),
+         вместе со встроенной «Очередь на оценку». Разметка и функции почти не
+         менялись — единственная смысловая правка: ссылки на карточку сотрудника
+         (goToEmployeeProfile, ведёт на personnel-профиль instructor.html, которого
+         здесь нет) заменены на обычный текст без перехода. -->
+    <div id="screenTrainingPlan" class="screen">
+      <div class="panel">
+        <div class="panel-title">
+          📚 График обучения на год
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <select id="planSite" onchange="renderTrainingPlan()" style="max-width:150px">
+              <option value="all">Оба участка</option>
+              <option value="Алмалы">Алмалы</option>
+              <option value="Ашыктас">Ашыктас</option>
+            </select>
+            <select id="planShift" onchange="renderTrainingPlan()" style="max-width:150px">
+              <option value="all">Обе смены</option>
+              <option value="1">Смена 1 (день)</option>
+              <option value="2">Смена 2 (ночь)</option>
+            </select>
+            <select id="planVahta" onchange="renderTrainingPlan()" style="max-width:150px">
+              <option value="all">Обе вахты</option>
+              <option value="Вахта-1">Вахта-1</option>
+              <option value="Вахта-2">Вахта-2</option>
+            </select>
+            <button class="btn-ghost" style="width:auto;padding:9px 16px" onclick="exportTrainingPlanCSV()">📥 CSV</button>
+          </div>
+        </div>
+        <div class="hint">
+          Показано, кто на какой технике работает и обучен ли на неё. Одновременно со смены
+          можно снимать не более 8 человек — план распределён по месяцам с учётом этого ограничения,
+          чтобы техника не встала.
+        </div>
+      </div>
+
+      <div id="planSummary"></div>
+
+      <div class="panel">
+        <div class="panel-title">🔴 Работают без обучения на свою технику</div>
+        <div class="hint" style="margin-bottom:10px">Первоочередные кандидаты на учёбу</div>
+        <div id="planNoTraining"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">📅 Предлагаемый план по месяцам</div>
+        <div class="hint" style="margin-bottom:10px">
+          Распределено так, чтобы из одной смены одновременно училось не более 8 человек.
+          План — предложение, а не жёсткое расписание: правьте под реальные заезды вахт.
+        </div>
+        <div id="planByMonth"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">📋 Полная картина: кто чем обучен</div>
+        <div class="filters">
+          <input type="text" id="planSearch" placeholder="🔍 Поиск по имени или технике..." oninput="renderTrainingPlan()">
+        </div>
+        <div id="planTable"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">
+          🎯 Очередь на оценку
+          <div style="display:flex;gap:6px;align-items:center;font-weight:400">
+            <label style="font-size:12px;color:var(--gray)">На эту неделю:</label>
+            <input type="number" id="evalQueueTopN" value="4" min="1" max="20"
+              style="width:56px;padding:6px;border:1px solid var(--border);border-radius:6px" onchange="renderEvaluationQueue()">
+            <span style="font-size:12px;color:var(--gray)">чел.</span>
+          </div>
+        </div>
+        <div class="hint" style="margin-bottom:10px">
+          Использует те же фильтры «Участок» и «Вахта» выше. Порог — 6 месяцев без оценки (или ни разу).
+          Помесячного плана здесь нет — вместо этого живая очередь по приоритету: сначала кто не оценивался
+          ни разу, затем кто дольше всех без оценки. Переключил участок/вахту наверху — очередь обновилась под то место, где ты сейчас.
+        </div>
+        <div id="evalQueueSummary"></div>
+        <div style="margin-top:14px">
+          <div style="font-size:13px;font-weight:700;color:var(--navy);margin-bottom:8px">На эту неделю</div>
+          <div id="evalQueueTop"></div>
+        </div>
+        <div style="margin-top:18px">
+          <div style="font-size:13px;font-weight:700;color:var(--navy);margin-bottom:8px">Полная очередь</div>
+          <div id="evalQueueFull"></div>
+        </div>
       </div>
     </div>
 
@@ -993,7 +1082,7 @@ const CFG = {
   WARN_DAYS: 30,
 };
 
-let DATA = { employees: [], trainingPlan: [], trainingHistory: [], courseCatalog: [], evaluationEquipmentTypes: [], archiveDocs: [], tests: [], requirements: [] };
+let DATA = { employees: [], trainingPlan: [], trainingHistory: [], courseCatalog: [], evaluationEquipmentTypes: [], archiveDocs: [], tests: [], requirements: [], equipment: [], shiftAssignments: [] };
 let CURRENT_SITE = "Алмалы";
 
 function checkPin() {
@@ -1025,7 +1114,7 @@ function logout() {
 }
 
 function showScreen(name) {
-  ["plan","history","catalog","group","eval","timing","archive","requirements","print","certPrint","roster","import","testResults","access"].forEach(s => {
+  ["plan","history","catalog","group","eval","timing","archive","requirements","print","certPrint","roster","import","testResults","access","trainingPlan"].forEach(s => {
     document.getElementById("screen"+s.charAt(0).toUpperCase()+s.slice(1)).classList.remove("active");
     document.getElementById("nav"+s.charAt(0).toUpperCase()+s.slice(1)).classList.remove("active");
   });
@@ -1075,6 +1164,8 @@ async function loadAll(onlyKeys) {
     { key: "tests",           action: "getTests" },
     { key: "results",         action: "getResults" },
     { key: "requirements",    action: "getRequirements" },
+    { key: "equipment",       action: "getEquipment",     siteScoped: true },
+    { key: "shiftAssignments",action: "getShiftAssignments", siteScoped: true },
   ];
   const fetches = onlyKeys ? fetchDefs.filter(f => onlyKeys.includes(f.key)) : fetchDefs;
 
@@ -1114,6 +1205,7 @@ function renderAll() {
   renderRequirementsPanel();
   renderTestsTable();
   renderAccessTable();
+  renderTrainingPlan();
   renderPrintSelect();
   renderDrivingPrintSelect();
   renderCertPrintSelect("profession");
@@ -2470,6 +2562,378 @@ async function uploadPhoto(event, empId, empName) {
     img.src = e.target.result;
   };
   reader.readAsDataURL(file);
+}
+
+// ══════════════════════════════════════════════════════
+// ГРАФИК ОБУЧЕНИЯ + ОЧЕРЕДЬ НА ОЦЕНКУ — перенесено из instructor.html.
+// Логика не менялась, кроме: DATA.training → DATA.trainingHistory (то же
+// самое поле называется иначе здесь); jsonpFetchRetry → fetchWithRetry
+// (в training.html обычный fetch, JSONP-обёртки нет); goToEmployeeProfile
+// убран — он вёл на personnel-профиль instructor.html, которого здесь нет,
+// имя сотрудника просто текст без перехода.
+// ══════════════════════════════════════════════════════
+const TRAINING_MATCH = {
+  "Самосвал":          [/самосвал/i],
+  "Экскаватор":        [/экскаватор/i],
+  "Бульдозер":         [/бульдозер/i],
+  "Грейдер":           [/грейдер/i],
+  "Каток":             [/каток|виброкат/i],
+  "Буровой станок":    [/буров/i],
+  "Погрузчик":         [/погрузчик/i],
+  "Водовоз":           [/водовоз|полив/i],
+  "Легковой транспорт":[/вождени/i],
+};
+
+function normEqType(t) {
+  const s = String(t||"").trim();
+  return s.toLowerCase() === "каток" ? "Каток" : s;
+}
+
+// Обучение каждого сотрудника: empId -> Set(курсов)
+function trainingByEmployee() {
+  const map = {};
+  (DATA.trainingHistory||[]).forEach(r => {
+    const id = String(r.empId||"");
+    const nm = String(r.empName||"").trim().toLowerCase();
+    const course = String(r.course||"").split(":")[0].trim();
+    if (id) (map["id:"+id] = map["id:"+id] || new Set()).add(course);
+    if (nm) (map["nm:"+nm] = map["nm:"+nm] || new Set()).add(course);
+  });
+  return map;
+}
+
+function coursesOf(map, empId, empName) {
+  const a = map["id:"+String(empId||"")] || new Set();
+  const b = map["nm:"+String(empName||"").trim().toLowerCase()] || new Set();
+  return new Set([...a, ...b]);
+}
+
+function isTrainedFor(courses, eqType) {
+  const pats = TRAINING_MATCH[normEqType(eqType)];
+  if (!pats) return null;               // для типа профильного обучения не задано
+  for (const c of courses) if (pats.some(p => p.test(c))) return true;
+  return false;
+}
+
+// Собираем строки графика: один человек + одна единица техники
+function buildTrainingPlan() {
+  const site  = document.getElementById("planSite")?.value  || "all";
+  const shift = document.getElementById("planShift")?.value || "all";
+  const vahta = document.getElementById("planVahta")?.value || "all";
+  const q     = (document.getElementById("planSearch")?.value||"").toLowerCase();
+
+  const tmap = trainingByEmployee();
+  const rows = [];
+
+  (DATA.shiftAssignments||[]).forEach(a => {
+    if (a.status !== "активен") return;
+    if (!a.empName || String(a.empName).toLowerCase() === "вакансия") return;
+    if (site  !== "all" && String(a.site||"").trim() !== site) return;
+    if (shift !== "all" && String(a.smena) !== shift) return;
+    if (vahta !== "all" && a.vahta !== vahta) return;
+
+    const eq = (DATA.equipment||[]).find(e => String(e.equipmentId)===String(a.equipmentId));
+    const eqType = eq ? normEqType(eq.type) : null;
+    const courses = coursesOf(tmap, a.empId, a.empName);
+    const trained = eqType ? isTrainedFor(courses, eqType) : null;
+
+    if (q) {
+      const hay = `${a.empName} ${a.equipmentId||""} ${eq?eq.model:""} ${eqType||""}`.toLowerCase();
+      if (!hay.includes(q)) return;
+    }
+
+    rows.push({
+      empId: a.empId || "", empName: a.empName,
+      site: (a.site||"").trim(), vahta: a.vahta, smena: String(a.smena),
+      equipmentId: a.equipmentId || "", model: eq ? eq.model : "", eqType,
+      courses: [...courses], trained,
+      linked: !!a.empId,
+    });
+  });
+
+  rows.sort((a,b) => a.empName.localeCompare(b.empName));
+  return rows;
+}
+
+function renderTrainingPlan() {
+  // Если смены ещё не загрузились (или не дошли) — график будет пустым.
+  // Честно говорим об этом, а не показываем нули как реальное состояние.
+  const noShifts = !(DATA.shiftAssignments||[]).length;
+  const warnEl = document.getElementById("planSummary");
+  if (noShifts && warnEl) {
+    warnEl.innerHTML = `<div style="padding:12px;background:var(--yellowbg,#FFF8E1);
+      border-radius:8px;font-size:13px;color:var(--yellow);margin-bottom:16px">
+      ⏳ Данные по сменам ещё не загрузились. Если сообщение осталось после
+      полной загрузки — нажмите «Обновить» вверху страницы.
+    </div>`;
+    ["planNoTraining","planByMonth","planTable","evalQueueSummary","evalQueueTop","evalQueueFull"].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.innerHTML = "";
+    });
+    return;
+  }
+
+  const rows = buildTrainingPlan();
+  const sum  = document.getElementById("planSummary");
+  const noTr = document.getElementById("planNoTraining");
+  const byM  = document.getElementById("planByMonth");
+  const tbl  = document.getElementById("planTable");
+  if (!tbl) return;
+
+  const need    = rows.filter(r => r.trained === false);
+  const ok      = rows.filter(r => r.trained === true);
+  const unknown = rows.filter(r => r.trained === null);
+
+  if (sum) sum.innerHTML = `<div class="stats-grid" style="margin-bottom:16px">
+    ${[
+      {lbl:"Всего в графике", val:rows.length, acc:"var(--navy2)"},
+      {lbl:"Обучены на свою технику", val:ok.length, acc:"var(--green,#2E7D32)"},
+      {lbl:"Требуют обучения", val:need.length, acc:need.length?"var(--red)":"var(--green,#2E7D32)"},
+      {lbl:"Нет данных об обучении", val:unknown.length, acc:"var(--gray)"},
+    ].map(s=>`<div class="stat-card" style="border-left-color:${s.acc}">
+      <div class="stat-val" style="color:${s.acc}">${s.val}</div>
+      <div class="stat-lbl">${s.lbl}</div></div>`).join("")}
+  </div>`;
+
+  const link = (r, txt) => txt; // без карточки сотрудника — только текст
+
+  // 🔴 Без обучения на свою технику
+  if (noTr) {
+    noTr.innerHTML = need.length ? `<div class="tbl-wrap"><table style="font-size:13px">
+      <thead><tr><th>Сотрудник</th><th>Техника</th><th>Тип</th><th>Участок</th><th>Вахта / смена</th></tr></thead>
+      <tbody>${need.map(r=>`<tr>
+        <td><b>${link(r, escapeHtml(r.empName))}</b></td>
+        <td>${r.equipmentId} <span style="color:var(--gray);font-size:11px">${r.model||""}</span></td>
+        <td style="color:var(--red);font-weight:700">${r.eqType||"—"}</td>
+        <td>${r.site}</td>
+        <td style="font-size:12px;color:var(--gray)">${r.vahta} · ${r.smena==="1"?"день":"ночь"}</td>
+      </tr>`).join("")}</tbody></table></div>`
+      : `<div style="padding:10px 12px;background:var(--greenbg,#EAF7ED);border-radius:8px;font-size:13px;color:var(--green,#2E7D32);font-weight:700">
+          ✓ Все работают на технике, на которую обучены</div>`;
+  }
+
+  // 📅 План по месяцам: раскидываем нуждающихся так, чтобы из одной
+  // смены (участок+вахта+смена) одновременно училось не более 8 человек
+  if (byM) {
+    const LIMIT = 8;
+    const months = ["Январь","Февраль","Март","Апрель","Май","Июнь",
+                    "Июль","Август","Сентябрь","Октябрь","Ноябрь","Декабрь"];
+    const now = new Date();
+    const plan = Array.from({length:12}, () => []);
+    const perGroupMonth = {};   // группа+месяц -> сколько уже стоит
+
+    need.forEach(r => {
+      const g = `${r.site}|${r.vahta}|${r.smena}`;
+      for (let i=0;i<12;i++) {
+        const k = g+"|"+i;
+        if ((perGroupMonth[k]||0) < LIMIT) {
+          perGroupMonth[k] = (perGroupMonth[k]||0)+1;
+          plan[i].push(r);
+          return;
+        }
+      }
+      plan[11].push(r);   // если совсем не влезло — в последний месяц
+    });
+
+    const filled = plan.map((list,i)=>({ i, list })).filter(x=>x.list.length);
+    byM.innerHTML = filled.length ? filled.map(({i,list}) => {
+      const mDate = new Date(now.getFullYear(), now.getMonth()+i, 1);
+      const label = `${months[mDate.getMonth()]} ${mDate.getFullYear()}`;
+      const byGroup = {};
+      list.forEach(r => {
+        const g = `${r.site} · ${r.vahta} · ${r.smena==="1"?"день":"ночь"}`;
+        (byGroup[g] = byGroup[g]||[]).push(r);
+      });
+      return `<div style="margin-bottom:14px;padding:12px;border:1px solid var(--border);border-radius:10px">
+        <div style="font-size:14px;font-weight:800;color:var(--navy);margin-bottom:8px">
+          ${label} <span style="font-weight:400;color:var(--gray);font-size:12px">— ${list.length} чел.</span>
+        </div>
+        ${Object.entries(byGroup).map(([g,arr])=>`
+          <div style="margin-bottom:8px">
+            <div style="font-size:11px;font-weight:700;color:var(--gray);text-transform:uppercase;margin-bottom:3px">
+              ${g} <span style="color:${arr.length>=LIMIT?'var(--red)':'var(--gray)'}">(${arr.length} из ${LIMIT})</span>
+            </div>
+            ${arr.map(r=>`<div style="font-size:12px;padding:2px 0;color:var(--navy)">
+              • ${link(r, escapeHtml(r.empName))} — <span style="color:var(--gray)">${r.eqType} (${r.equipmentId})</span>
+            </div>`).join("")}
+          </div>`).join("")}
+      </div>`;
+    }).join("")
+      : `<div style="padding:10px 12px;background:var(--greenbg,#EAF7ED);border-radius:8px;font-size:13px;color:var(--green,#2E7D32)">
+          ✓ Планировать нечего — все обучены</div>`;
+  }
+
+  // 📋 Полная картина
+  tbl.innerHTML = rows.length ? `<div class="tbl-wrap"><table style="font-size:13px">
+    <thead><tr><th>Сотрудник</th><th>Техника</th><th>Тип</th><th>Участок</th>
+    <th>Вахта / смена</th><th>Обучение</th><th>Смежные</th></tr></thead>
+    <tbody>${rows.map(r=>{
+      const mark = r.trained === true
+        ? `<span style="color:var(--green,#2E7D32);font-weight:700">✓ обучен</span>`
+        : r.trained === false
+          ? `<span style="color:var(--red);font-weight:700">✗ не обучен</span>`
+          : `<span style="color:var(--gray)">— нет данных</span>`;
+      const other = r.courses.filter(cc => {
+        const pats = TRAINING_MATCH[r.eqType];
+        return !pats || !pats.some(p => p.test(cc));
+      });
+      return `<tr${r.trained===false?' style="background:var(--redbg)"':''}>
+        <td><b>${link(r, escapeHtml(r.empName))}</b>${!r.linked?' <span style="font-size:10px;color:var(--gray)">нет карточки</span>':''}</td>
+        <td>${r.equipmentId} <span style="color:var(--gray);font-size:11px">${r.model||""}</span></td>
+        <td>${r.eqType||"—"}</td>
+        <td>${r.site}</td>
+        <td style="font-size:12px;color:var(--gray)">${r.vahta} · ${r.smena==="1"?"день":"ночь"}</td>
+        <td>${mark}</td>
+        <td style="font-size:11px;color:var(--gray)">${other.length?other.join(", "):"—"}</td>
+      </tr>`;
+    }).join("")}</tbody></table></div>`
+    : `<div class="empty"><div class="empty-icon">📚</div>Нет данных по выбранным фильтрам</div>`;
+
+  renderEvaluationQueue();
+}
+
+// ── Очередь на оценку — коррелируется с графиком обучения выше:
+// использует те же фильтры «Участок»/«Вахта». Порог "давно не оценивался" —
+// 6 месяцев; "На эту неделю" — top-N, N задаётся полем (по умолчанию 4).
+let ALL_EVALUATIONS = null;   // кэш на сессию — не перезапрашиваем при каждой смене фильтра
+
+async function loadEvalQueueDataIfNeeded() {
+  if (ALL_EVALUATIONS !== null) return;
+  try {
+    const val = await fetchWithRetry(`${CFG.SHEET_URL}?action=getEvaluationsList`, 40000, 3);
+    ALL_EVALUATIONS = (val && val.ok && Array.isArray(val.evaluations)) ? val.evaluations : [];
+  } catch(e) {
+    console.error("Оценки (очередь):", e);
+    ALL_EVALUATIONS = [];
+  }
+}
+
+// "dd.MM.yyyy" -> timestamp, ручной разбор (не new Date(str) — ловили UTC-сдвиг на этом раньше)
+function evalDateToTs(d) {
+  const m = String(d||"").match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})/);
+  if (!m) return null;
+  return new Date(Number(m[3]), Number(m[2])-1, Number(m[1])).getTime();
+}
+
+// empId/empName -> дата последней оценки (мс), берём самую свежую по обоим ключам
+function lastEvalByEmployee() {
+  const map = {};
+  (ALL_EVALUATIONS||[]).forEach(e => {
+    const ts = evalDateToTs(e.date);
+    if (ts == null) return;
+    const id = String(e.empId||"");
+    const nm = String(e.empName||"").trim().toLowerCase();
+    if (id) { const k="id:"+id; if (!map[k] || ts>map[k]) map[k]=ts; }
+    if (nm) { const k="nm:"+nm; if (!map[k] || ts>map[k]) map[k]=ts; }
+  });
+  return map;
+}
+
+function lastEvalOf(map, empId, empName) {
+  const a = map["id:"+String(empId||"")];
+  const b = map["nm:"+String(empName||"").trim().toLowerCase()];
+  const vals = [a,b].filter(v => v != null);
+  return vals.length ? Math.max(...vals) : null;
+}
+
+const EVAL_OVERDUE_MS = 183 * 24 * 60 * 60 * 1000;   // 6 месяцев
+
+function buildEvaluationQueue() {
+  const site  = document.getElementById("planSite")?.value  || "all";
+  const vahta = document.getElementById("planVahta")?.value || "all";
+  const map = lastEvalByEmployee();
+  const now = Date.now();
+  const rows = [];
+
+  (DATA.shiftAssignments||[]).forEach(a => {
+    if (a.status !== "активен") return;
+    if (!a.empName || String(a.empName).toLowerCase() === "вакансия") return;
+    if (site  !== "all" && String(a.site||"").trim() !== site) return;
+    if (vahta !== "all" && a.vahta !== vahta) return;
+
+    const ts = lastEvalOf(map, a.empId, a.empName);
+    const overdue = ts === null || (now - ts) >= EVAL_OVERDUE_MS;
+    if (!overdue) return;
+
+    rows.push({
+      empId: a.empId || "", empName: a.empName,
+      site: (a.site||"").trim(), vahta: a.vahta, smena: String(a.smena),
+      equipmentId: a.equipmentId || "",
+      lastEvalTs: ts, daysSince: ts !== null ? Math.floor((now-ts)/86400000) : null,
+    });
+  });
+
+  // Сначала кто вообще ни разу не оценивался, затем — по возрастанию даты (самые старые первые)
+  rows.sort((x,y) => {
+    if (x.lastEvalTs === null && y.lastEvalTs === null) return x.empName.localeCompare(y.empName);
+    if (x.lastEvalTs === null) return -1;
+    if (y.lastEvalTs === null) return 1;
+    return x.lastEvalTs - y.lastEvalTs;
+  });
+  return rows;
+}
+
+function renderEvaluationQueue() {
+  const topEl  = document.getElementById("evalQueueTop");
+  const fullEl = document.getElementById("evalQueueFull");
+  const sumEl  = document.getElementById("evalQueueSummary");
+  if (!topEl || !fullEl) return;
+
+  if (ALL_EVALUATIONS === null) {
+    topEl.innerHTML = fullEl.innerHTML = `<div class="empty"><div class="empty-icon">⏳</div>Загружаю историю оценок...</div>`;
+    loadEvalQueueDataIfNeeded().then(renderEvaluationQueue);
+    return;
+  }
+
+  const topN = Math.max(1, Number(document.getElementById("evalQueueTopN")?.value) || 4);
+  const rows = buildEvaluationQueue();
+  const neverCount = rows.filter(r => r.lastEvalTs === null).length;
+
+  if (sumEl) sumEl.innerHTML = `<div class="stats-grid" style="margin-bottom:4px">
+    ${[
+      {lbl:"В очереди (6+ мес. без оценки или ни разу)", val: rows.length, acc: rows.length ? "var(--red)" : "var(--green,#2E7D32)"},
+      {lbl:"Из них — ни разу не оценивались", val: neverCount, acc: neverCount ? "var(--red)" : "var(--gray)"},
+    ].map(s=>`<div class="stat-card" style="border-left-color:${s.acc}">
+      <div class="stat-val" style="color:${s.acc}">${s.val}</div>
+      <div class="stat-lbl">${s.lbl}</div></div>`).join("")}
+  </div>`;
+
+  const link = (r, txt) => txt; // без карточки сотрудника — только текст
+
+  const rowHtml = r => {
+    const eq = (DATA.equipment||[]).find(e => String(e.equipmentId)===String(r.equipmentId));
+    const lastLabel = r.lastEvalTs === null
+      ? `<span style="color:var(--red);font-weight:700">ни разу</span>`
+      : `<span style="color:${r.daysSince>=365?'var(--red)':'var(--gray)'}">${Math.floor(r.daysSince/30)} мес. назад</span>`;
+    return `<tr>
+      <td><b>${link(r, escapeHtml(r.empName))}</b></td>
+      <td>${r.equipmentId||"—"} <span style="color:var(--gray);font-size:11px">${eq?eq.model:""}</span></td>
+      <td>${r.site}</td>
+      <td style="font-size:12px;color:var(--gray)">${r.vahta} · ${r.smena==="1"?"день":"ночь"}</td>
+      <td>${lastLabel}</td>
+    </tr>`;
+  };
+  const thead = `<thead><tr><th>Сотрудник</th><th>Техника</th><th>Участок</th><th>Вахта / смена</th><th>Последняя оценка</th></tr></thead>`;
+
+  topEl.innerHTML = rows.length
+    ? `<div class="tbl-wrap"><table style="font-size:13px">${thead}<tbody>${rows.slice(0,topN).map(rowHtml).join("")}</tbody></table></div>`
+    : `<div style="padding:10px 12px;background:var(--greenbg,#EAF7ED);border-radius:8px;font-size:13px;color:var(--green,#2E7D32);font-weight:700">✓ По выбранному фильтру все оценены в срок</div>`;
+
+  fullEl.innerHTML = rows.length
+    ? `<div class="tbl-wrap"><table style="font-size:13px">${thead}<tbody>${rows.map(rowHtml).join("")}</tbody></table></div>`
+    : `<div style="font-size:12px;color:var(--gray)">Очередь пуста.</div>`;
+}
+
+function exportTrainingPlanCSV() {
+  const rows = buildTrainingPlan();
+  const headers = ["Сотрудник","Техника","Модель","Тип техники","Участок","Вахта","Смена","Обучен на свою технику","Смежное обучение"];
+  const data = rows.map(r => [
+    r.empName, r.equipmentId, r.model, r.eqType||"", r.site, r.vahta,
+    r.smena === "1" ? "день" : "ночь",
+    r.trained === true ? "да" : r.trained === false ? "НЕТ" : "нет данных",
+    r.courses.join("; "),
+  ]);
+  downloadCSV([headers, ...data], `График_обучения_${today()}.csv`);
 }
 
 function renderCatalogList() {
