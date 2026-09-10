@@ -1608,7 +1608,7 @@ function nextEmployeeId(too) {
 }
 
 function ensureEmpColumns(sheet, headers) {
-  const needed = ["tooPrimary", "tooSecondary", "hireDate", "address", "education", "experienceYears", "specialties", "additionalSkills", "email", "certificates", "courses", "department"];
+  const needed = ["tooPrimary", "tooSecondary", "hireDate", "address", "education", "experienceYears", "specialties", "additionalSkills", "email", "certificates", "courses", "department", "clothingSize", "shoeSize"];
   let lastCol = headers.length;
   needed.forEach(col => {
     if (headers.indexOf(col) < 0) {
@@ -1624,6 +1624,7 @@ function ensureEmpColumns(sheet, headers) {
 function hireEmployee(p) {
   const { name, position, site, too, tooSecondary, hireDate, phone, address,
           education, experienceYears, specialties, additionalSkills, email, certificates, courses,
+          clothingSize, shoeSize,
           department, photoUrl, force } = p || {};
 
   if (!name || !too) {
@@ -1680,6 +1681,8 @@ function hireEmployee(p) {
     if (h === "email")          return email || "";
     if (h === "certificates")   return certificates || "";
     if (h === "courses")        return courses || "";
+    if (h === "clothingSize")   return clothingSize || "";
+    if (h === "shoeSize")       return shoeSize || "";
     if (h === "photoUrl")       return photoUrl || "";
     return "";
   });
@@ -1833,7 +1836,7 @@ function savePersonnelEvent(empId, empName, type, date, description, issuedBy, e
 function updateEmployee(p) {
   const { id, name, position, site, tooPrimary, tooSecondary, phone, email,
           address, hireDate, education, experienceYears, specialties,
-          additionalSkills, certificates, courses, department } = p || {};
+          additionalSkills, certificates, courses, clothingSize, shoeSize, department } = p || {};
 
   if (!id)   return json({ ok: false, error: "Нужен id сотрудника" });
   if (!name) return json({ ok: false, error: "Нужно ФИО" });
@@ -1849,7 +1852,7 @@ function updateEmployee(p) {
 
   const values = { name, position, site, tooPrimary, tooSecondary, phone, email,
     address, hireDate, education, experienceYears, specialties, additionalSkills,
-    certificates, courses, department };
+    certificates, courses, clothingSize, shoeSize, department };
 
   for (let i = 1; i < rows0.length; i++) {
     if (String(rows0[i][idCol]).trim() === String(id).trim()) {
@@ -1947,6 +1950,7 @@ const SHEET_SURVEYS = "Анкеты";
 function submitSurvey(p) {
   const { empId, empName, position, site, too, tooSecondary, hireDate, address, phone,
           education, experienceYears, specialties, additionalSkills, email, certificates, courses,
+          clothingSize, shoeSize,
           photoUrl } = p || {};
 
   if (!empName) return json({ ok: false, error: "Нужно ФИО" });
@@ -1957,7 +1961,7 @@ function submitSurvey(p) {
 
   const FULL_HEADER = ["empId","empName","position","site","too","tooSecondary","hireDate","address","phone",
                         "education","experienceYears","specialties","additionalSkills",
-                        "email","certificates","courses",
+                        "email","certificates","courses","clothingSize","shoeSize",
                         "photoUrl","submittedAt","status"];
 
   if (!sheet) {
@@ -1991,6 +1995,7 @@ function submitSurvey(p) {
     education: education||"", experienceYears: experienceYears||"", specialties: specialties||"",
     additionalSkills: additionalSkills||"",
     email: email||"", certificates: certificates||"", courses: courses||"",
+    clothingSize: clothingSize||"", shoeSize: shoeSize||"",
     photoUrl: photoUrl||"",
     submittedAt, status: "pending",
   };
@@ -2081,7 +2086,7 @@ function approveSurvey(rowNum, force) {
     let found = false;
     for (let i = 1; i < empRows.length; i++) {
       if (String(empRows[i][idCol]) === String(rec.empId)) {
-        ["tooPrimary","tooSecondary","hireDate","address","phone","education","experienceYears","specialties","additionalSkills","email","certificates","courses","photoUrl","position","site"].forEach(field => {
+        ["tooPrimary","tooSecondary","hireDate","address","phone","education","experienceYears","specialties","additionalSkills","email","certificates","courses","clothingSize","shoeSize","photoUrl","position","site"].forEach(field => {
           const col = empHeaders.indexOf(field);
           const val = field === "tooPrimary" ? rec.too
                     : field === "tooSecondary" ? rec.tooSecondary
@@ -2106,6 +2111,7 @@ function approveSurvey(rowNum, force) {
       education: rec.education, experienceYears: rec.experienceYears, specialties: rec.specialties,
       additionalSkills: rec.additionalSkills,
       email: rec.email, certificates: rec.certificates, courses: rec.courses,
+      clothingSize: rec.clothingSize, shoeSize: rec.shoeSize,
       photoUrl: rec.photoUrl,
       force: !!force,
     });
