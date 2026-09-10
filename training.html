@@ -1025,7 +1025,7 @@ function logout() {
 }
 
 function showScreen(name) {
-  ["plan","history","catalog","group","eval","timing","archive","requirements","print","certPrint","roster"].forEach(s => {
+  ["plan","history","catalog","group","eval","timing","archive","requirements","print","certPrint","roster","import","testResults","access"].forEach(s => {
     document.getElementById("screen"+s.charAt(0).toUpperCase()+s.slice(1)).classList.remove("active");
     document.getElementById("nav"+s.charAt(0).toUpperCase()+s.slice(1)).classList.remove("active");
   });
