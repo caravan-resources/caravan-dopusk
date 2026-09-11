@@ -244,6 +244,17 @@ input:focus, select:focus, textarea:focus { border-color:var(--gold); }
         <option value="70">70</option>
       </select>
 
+      <label class="label">Ростовка</label>
+      <select id="fHeightRange">
+        <option value="">— выберите —</option>
+        <option value="158-164">158–164</option>
+        <option value="164-170">164–170</option>
+        <option value="170-176">170–176</option>
+        <option value="176-182">176–182</option>
+        <option value="182-188">182–188</option>
+        <option value="188-194">188–194</option>
+      </select>
+
       <label class="label">Размер обуви</label>
       <select id="fShoeSize">
         <option value="">— выберите —</option>
@@ -677,6 +688,7 @@ async function submitForm() {
     certificates: document.getElementById("fCertificates").value.trim(),
     courses: document.getElementById("fCourses").value.trim(),
     clothingSize: document.getElementById("fClothingSize").value,
+    heightRange: document.getElementById("fHeightRange").value,
     shoeSize: document.getElementById("fShoeSize").value,
     winterClothingSize: document.getElementById("fWinterClothingSize").value,
     winterShoeSize: document.getElementById("fWinterShoeSize").value,
