@@ -1677,7 +1677,7 @@ function nextEmployeeId(too) {
 }
 
 function ensureEmpColumns(sheet, headers) {
-  const needed = ["tooPrimary", "tooSecondary", "hireDate", "address", "education", "experienceYears", "specialties", "additionalSkills", "email", "certificates", "courses", "department", "clothingSize", "shoeSize", "winterClothingSize", "winterShoeSize"];
+  const needed = ["tooPrimary", "tooSecondary", "hireDate", "address", "education", "experienceYears", "specialties", "additionalSkills", "email", "certificates", "courses", "department", "clothingSize", "shoeSize", "winterClothingSize", "winterShoeSize", "heightRange"];
   let lastCol = headers.length;
   needed.forEach(col => {
     if (headers.indexOf(col) < 0) {
@@ -1693,7 +1693,7 @@ function ensureEmpColumns(sheet, headers) {
 function hireEmployee(p) {
   const { name, position, site, too, tooSecondary, hireDate, phone, address,
           education, experienceYears, specialties, additionalSkills, email, certificates, courses,
-          clothingSize, shoeSize, winterClothingSize, winterShoeSize,
+          clothingSize, shoeSize, winterClothingSize, winterShoeSize, heightRange,
           department, photoUrl, force } = p || {};
 
   if (!name || !too) {
@@ -1752,6 +1752,7 @@ function hireEmployee(p) {
     if (h === "courses")        return courses || "";
     if (h === "clothingSize")   return clothingSize || "";
     if (h === "shoeSize")       return shoeSize || "";
+    if (h === "heightRange")    return heightRange || "";
     if (h === "winterClothingSize") return winterClothingSize || "";
     if (h === "winterShoeSize")     return winterShoeSize || "";
     if (h === "photoUrl")       return photoUrl || "";
@@ -1908,7 +1909,7 @@ function updateEmployee(p) {
   const { id, name, position, site, tooPrimary, tooSecondary, phone, email,
           address, hireDate, education, experienceYears, specialties,
           additionalSkills, certificates, courses, clothingSize, shoeSize,
-          winterClothingSize, winterShoeSize, department } = p || {};
+          winterClothingSize, winterShoeSize, heightRange, department } = p || {};
 
   if (!id)   return json({ ok: false, error: "Нужен id сотрудника" });
   if (!name) return json({ ok: false, error: "Нужно ФИО" });
@@ -1924,7 +1925,7 @@ function updateEmployee(p) {
 
   const values = { name, position, site, tooPrimary, tooSecondary, phone, email,
     address, hireDate, education, experienceYears, specialties, additionalSkills,
-    certificates, courses, clothingSize, shoeSize, winterClothingSize, winterShoeSize, department };
+    certificates, courses, clothingSize, shoeSize, winterClothingSize, winterShoeSize, heightRange, department };
 
   for (let i = 1; i < rows0.length; i++) {
     if (String(rows0[i][idCol]).trim() === String(id).trim()) {
@@ -2022,7 +2023,7 @@ const SHEET_SURVEYS = "Анкеты";
 function submitSurvey(p) {
   const { empId, empName, position, site, too, tooSecondary, hireDate, address, phone,
           education, experienceYears, specialties, additionalSkills, email, certificates, courses,
-          clothingSize, shoeSize, winterClothingSize, winterShoeSize,
+          clothingSize, shoeSize, winterClothingSize, winterShoeSize, heightRange,
           photoUrl } = p || {};
 
   if (!empName) return json({ ok: false, error: "Нужно ФИО" });
@@ -2033,7 +2034,7 @@ function submitSurvey(p) {
 
   const FULL_HEADER = ["empId","empName","position","site","too","tooSecondary","hireDate","address","phone",
                         "education","experienceYears","specialties","additionalSkills",
-                        "email","certificates","courses","clothingSize","shoeSize","winterClothingSize","winterShoeSize",
+                        "email","certificates","courses","clothingSize","shoeSize","winterClothingSize","winterShoeSize","heightRange",
                         "photoUrl","submittedAt","status"];
 
   if (!sheet) {
@@ -2069,6 +2070,7 @@ function submitSurvey(p) {
     email: email||"", certificates: certificates||"", courses: courses||"",
     clothingSize: clothingSize||"", shoeSize: shoeSize||"",
     winterClothingSize: winterClothingSize||"", winterShoeSize: winterShoeSize||"",
+    heightRange: heightRange||"",
     photoUrl: photoUrl||"",
     submittedAt, status: "pending",
   };
@@ -2159,7 +2161,7 @@ function approveSurvey(rowNum, force) {
     let found = false;
     for (let i = 1; i < empRows.length; i++) {
       if (String(empRows[i][idCol]) === String(rec.empId)) {
-        ["tooPrimary","tooSecondary","hireDate","address","phone","education","experienceYears","specialties","additionalSkills","email","certificates","courses","clothingSize","shoeSize","winterClothingSize","winterShoeSize","photoUrl","position","site"].forEach(field => {
+        ["tooPrimary","tooSecondary","hireDate","address","phone","education","experienceYears","specialties","additionalSkills","email","certificates","courses","clothingSize","shoeSize","winterClothingSize","winterShoeSize","heightRange","photoUrl","position","site"].forEach(field => {
           const col = empHeaders.indexOf(field);
           const val = field === "tooPrimary" ? rec.too
                     : field === "tooSecondary" ? rec.tooSecondary
@@ -2186,6 +2188,7 @@ function approveSurvey(rowNum, force) {
       email: rec.email, certificates: rec.certificates, courses: rec.courses,
       clothingSize: rec.clothingSize, shoeSize: rec.shoeSize,
       winterClothingSize: rec.winterClothingSize, winterShoeSize: rec.winterShoeSize,
+      heightRange: rec.heightRange,
       photoUrl: rec.photoUrl,
       force: !!force,
     });
