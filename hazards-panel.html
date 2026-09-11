@@ -599,7 +599,7 @@ function renderPpeEmployees() {
     <table class="ppe-table">
       <thead><tr>
         <th>ФИО</th><th>Должность</th><th>Класс защиты</th><th>Срок</th>
-        <th>Одежда</th><th>Обувь</th><th>Зимняя одежда</th><th>Зимняя обувь</th>
+        <th>Одежда</th><th>Ростовка</th><th>Обувь</th><th>Зимняя одежда</th><th>Зимняя обувь</th>
       </tr></thead>
       <tbody>
         ${filtered.map(e => {
@@ -615,6 +615,7 @@ function renderPpeEmployees() {
               <td>${classCell}</td>
               <td>${srokCell}</td>
               <td>${escapeHtml(e.clothingSize || "—")}</td>
+              <td>${escapeHtml(e.heightRange || "—")}</td>
               <td>${escapeHtml(e.shoeSize || "—")}</td>
               <td>${escapeHtml(e.winterClothingSize || "—")}</td>
               <td>${escapeHtml(e.winterShoeSize || "—")}</td>
