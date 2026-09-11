@@ -106,6 +106,16 @@ textarea { resize:vertical; min-height:80px; }
 .btn-red { background:var(--redbg); color:var(--red); border:none; padding:8px 12px;
   border-radius:8px; cursor:pointer; font-size:13px; font-weight:700; }
 .modal-photo { width:100%; border-radius:10px; margin-bottom:12px; }
+
+.ppe-table { width:100%; border-collapse:collapse; font-size:13px; }
+.ppe-table th { text-align:left; padding:8px 10px; border-bottom:2px solid var(--border);
+  color:var(--gray); font-weight:700; font-size:11px; text-transform:uppercase; }
+.ppe-table td { padding:8px 10px; border-bottom:1px solid var(--border); vertical-align:top; }
+.ppe-table tr:hover td { background:var(--light); }
+.ppe-actions button { margin-right:6px; }
+.ppe-missing { color:var(--red); font-size:11px; }
+#ppeSearch { width:100%; padding:10px 12px; border:1.5px solid var(--border); border-radius:8px;
+  font-size:13px; margin-bottom:12px; }
 </style>
 </head>
 <body>
@@ -135,6 +145,7 @@ textarea { resize:vertical; min-height:80px; }
     <button id="navOverview" class="active" onclick="showScreen('overview')">📊 Обзор</button>
     <button id="navList" onclick="showScreen('list')">📋 Все сообщения</button>
     <button id="navLink" onclick="showScreen('link')">🔗 Ссылка для анкеты</button>
+    <button id="navPpe" onclick="showScreen('ppe')">🦺 СИЗ</button>
   </div>
 
   <div class="wrap">
@@ -211,6 +222,26 @@ textarea { resize:vertical; min-height:80px; }
         <button class="btn-gold" onclick="copyHazardLink()">Скопировать ссылку</button>
       </div>
     </div>
+
+    <!-- ══ СИЗ ══ -->
+    <div id="screenPpe" class="screen">
+      <div class="panel">
+        <div class="panel-title">
+          <span>Нормы выдачи СИЗ по должностям</span>
+          <button class="btn-gold" onclick="openPpeNormModal(null)">+ Добавить норму</button>
+        </div>
+        <div id="ppeNormsTable"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">
+          <span>Работники — класс защиты и размерная сетка</span>
+          <span id="ppeEmpCount" style="font-size:12px;color:var(--gray);font-weight:400"></span>
+        </div>
+        <input type="text" id="ppeSearch" placeholder="🔍 Поиск по ФИО или должности..." oninput="renderPpeEmployees()">
+        <div id="ppeEmpTable"></div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -226,6 +257,15 @@ const CFG = {
 
 let STATS = null;
 let ITEMS = [];
+let CURRENT_SCREEN = "overview";
+let PPE_NORMS = [];
+let PPE_EMPLOYEES = [];
+
+function escapeHtml(s) {
+  return String(s == null ? "" : s)
+    .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+}
 
 function checkPin() {
   const val = document.getElementById("pinInput").value;
@@ -247,12 +287,14 @@ function logout() {
 }
 
 function showScreen(name) {
-  ["overview","list","link"].forEach(s => {
+  ["overview","list","link","ppe"].forEach(s => {
     document.getElementById("screen"+s.charAt(0).toUpperCase()+s.slice(1)).classList.remove("active");
     document.getElementById("nav"+s.charAt(0).toUpperCase()+s.slice(1)).classList.remove("active");
   });
   document.getElementById("screen"+name.charAt(0).toUpperCase()+name.slice(1)).classList.add("active");
   document.getElementById("nav"+name.charAt(0).toUpperCase()+name.slice(1)).classList.add("active");
+  CURRENT_SCREEN = name;
+  if (name === "ppe") loadPpe();
 }
 
 async function fetchWithRetry(url, timeoutMs, attempts) {
@@ -274,7 +316,9 @@ async function fetchWithRetry(url, timeoutMs, attempts) {
   throw lastErr;
 }
 
-function onFilterChange() { loadAll(); }
+function onFilterChange() {
+  if (CURRENT_SCREEN === "ppe") loadPpe(); else loadAll();
+}
 
 async function loadAll() {
   document.getElementById("loadStatus").textContent = "загрузка...";
@@ -474,6 +518,180 @@ function copyHazardLink() {
   input.select();
   navigator.clipboard && navigator.clipboard.writeText(input.value);
 }
+
+// ══════════════════════════════════════════════════════════
+// СИЗ — нормы по должностям + сводная таблица работников
+// ══════════════════════════════════════════════════════════
+function normKey(pos) { return String(pos||"").trim().toLowerCase(); }
+
+function getNormsMap() {
+  const map = {};
+  PPE_NORMS.forEach(n => { map[normKey(n.position)] = n; });
+  return map;
+}
+
+async function loadPpe() {
+  const site = document.getElementById("filterSite").value;
+  try {
+    const [normsRes, empRes] = await Promise.all([
+      fetchWithRetry(`${CFG.SHEET_URL}?action=getPpeNorms`),
+      fetchWithRetry(`${CFG.SHEET_URL}?action=list${site && site !== "Все" ? "&site="+encodeURIComponent(site) : ""}`),
+    ]);
+    PPE_NORMS = Array.isArray(normsRes) ? normsRes : [];
+    PPE_EMPLOYEES = (Array.isArray(empRes) ? empRes : []).filter(e => e.name);
+    renderPpeNorms();
+    renderPpeEmployees();
+  } catch (e) {
+    document.getElementById("ppeNormsTable").innerHTML = `<div class="empty">Ошибка загрузки</div>`;
+    document.getElementById("ppeEmpTable").innerHTML = `<div class="empty">Ошибка загрузки</div>`;
+  }
+}
+
+async function loadPpeNormsOnly() {
+  try {
+    const normsRes = await fetchWithRetry(`${CFG.SHEET_URL}?action=getPpeNorms`);
+    PPE_NORMS = Array.isArray(normsRes) ? normsRes : [];
+    renderPpeNorms();
+    renderPpeEmployees();
+  } catch (e) { /* тихо — таблица просто не обновится */ }
+}
+
+function renderPpeNorms() {
+  const el = document.getElementById("ppeNormsTable");
+  if (PPE_NORMS.length === 0) {
+    el.innerHTML = `<div class="empty">Нормы ещё не заданы — нажмите «+ Добавить норму»</div>`;
+    return;
+  }
+  el.innerHTML = `
+    <table class="ppe-table">
+      <thead><tr><th>Должность</th><th>Класс защиты</th><th>Срок носки</th><th></th></tr></thead>
+      <tbody>
+        ${PPE_NORMS.map(n => `
+          <tr>
+            <td>${escapeHtml(n.position)}</td>
+            <td>${escapeHtml(n.protectionClass || "—")}</td>
+            <td>${n.validityMonths ? escapeHtml(n.validityMonths) + " мес." : "—"}</td>
+            <td class="ppe-actions">
+              <button class="btn-ghost" onclick='openPpeNormModal(${JSON.stringify(n).replace(/'/g,"&#39;")})'>Изменить</button>
+            </td>
+          </tr>
+        `).join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+function renderPpeEmployees() {
+  const el = document.getElementById("ppeEmpTable");
+  const q = (document.getElementById("ppeSearch").value || "").trim().toLowerCase();
+  const normsMap = getNormsMap();
+  const filtered = PPE_EMPLOYEES.filter(e => !q ||
+    String(e.name||"").toLowerCase().includes(q) || String(e.position||"").toLowerCase().includes(q));
+
+  document.getElementById("ppeEmpCount").textContent = `${filtered.length} из ${PPE_EMPLOYEES.length}`;
+
+  if (filtered.length === 0) {
+    el.innerHTML = `<div class="empty">Ничего не найдено</div>`;
+    return;
+  }
+
+  el.innerHTML = `
+    <table class="ppe-table">
+      <thead><tr>
+        <th>ФИО</th><th>Должность</th><th>Класс защиты</th><th>Срок</th>
+        <th>Одежда</th><th>Обувь</th><th>Зимняя одежда</th><th>Зимняя обувь</th>
+      </tr></thead>
+      <tbody>
+        ${filtered.map(e => {
+          const norm = normsMap[normKey(e.position)];
+          const classCell = norm && norm.protectionClass
+            ? escapeHtml(norm.protectionClass)
+            : `<span class="ppe-missing">норма не задана</span>`;
+          const srokCell = norm && norm.validityMonths ? escapeHtml(norm.validityMonths) + " мес." : "—";
+          return `
+            <tr>
+              <td>${escapeHtml(e.name)}</td>
+              <td>${escapeHtml(e.position || "—")}</td>
+              <td>${classCell}</td>
+              <td>${srokCell}</td>
+              <td>${escapeHtml(e.clothingSize || "—")}</td>
+              <td>${escapeHtml(e.shoeSize || "—")}</td>
+              <td>${escapeHtml(e.winterClothingSize || "—")}</td>
+              <td>${escapeHtml(e.winterShoeSize || "—")}</td>
+            </tr>
+          `;
+        }).join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+function openPpeNormModal(norm) {
+  const isEdit = !!norm;
+  const positionsList = [...new Set(PPE_EMPLOYEES.map(e => e.position).filter(Boolean))].sort();
+  document.getElementById("modalBox").innerHTML = `
+    <div style="font-size:16px;font-weight:800;color:var(--navy);margin-bottom:16px">
+      ${isEdit ? "Изменить норму" : "Новая норма СИЗ"}
+    </div>
+    <div class="field">
+      <label>Должность</label>
+      <input type="text" id="normPosition" list="positionsDatalist"
+        value="${escapeHtml(isEdit ? norm.position : "")}"
+        ${isEdit ? 'readonly style="background:var(--light)"' : ""}>
+      <datalist id="positionsDatalist">
+        ${positionsList.map(p => `<option value="${escapeHtml(p)}">`).join("")}
+      </datalist>
+    </div>
+    <div class="field">
+      <label>Класс защиты</label>
+      <input type="text" id="normClass" value="${escapeHtml(isEdit ? norm.protectionClass : "")}"
+        placeholder="Например: Тн, 2 класс...">
+    </div>
+    <div class="field">
+      <label>Срок носки (месяцев)</label>
+      <input type="text" id="normValidity" value="${escapeHtml(isEdit ? norm.validityMonths : "")}"
+        placeholder="Например: 12">
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn-ghost" onclick="closeModal()">Отмена</button>
+      ${isEdit ? `<button class="btn-red" onclick="deletePpeNormConfirm('${String(norm.position).replace(/'/g,"\\'")}')">Удалить</button>` : ""}
+      <button class="btn-gold" onclick="savePpeNormSubmit()">Сохранить</button>
+    </div>
+  `;
+  document.getElementById("modalOverlay").style.display = "flex";
+}
+
+async function savePpeNormSubmit() {
+  const position = document.getElementById("normPosition").value.trim();
+  const protectionClass = document.getElementById("normClass").value.trim();
+  const validityMonths = document.getElementById("normValidity").value.trim();
+  if (!position) { alert("Укажите должность"); return; }
+  try {
+    const res = await fetch(CFG.SHEET_URL, {
+      method: "POST",
+      body: JSON.stringify({ action: "savePpeNorm", position, protectionClass, validityMonths }),
+    }).then(r => r.json());
+    if (res.ok) { closeModal(); await loadPpeNormsOnly(); }
+    else alert("Ошибка: " + (res.error || "неизвестная"));
+  } catch (e) {
+    alert("Ошибка сети");
+  }
+}
+
+async function deletePpeNormConfirm(position) {
+  if (!confirm(`Удалить норму для должности «${position}»?`)) return;
+  try {
+    const res = await fetch(CFG.SHEET_URL, {
+      method: "POST",
+      body: JSON.stringify({ action: "deletePpeNorm", position }),
+    }).then(r => r.json());
+    if (res.ok) { closeModal(); await loadPpeNormsOnly(); }
+    else alert("Ошибка: " + (res.error || "неизвестная"));
+  } catch (e) {
+    alert("Ошибка сети");
+  }
+}
+
 </script>
 </body>
 </html>
