@@ -136,6 +136,43 @@ input:focus, select:focus { border-color:var(--gold); }
         <option value="48">48</option>
       </select>
 
+      <label class="label">Размер зимней одежды</label>
+      <select id="fWinterClothingSize">
+        <option value="">— выберите —</option>
+        <option value="44">44</option>
+        <option value="46">46</option>
+        <option value="48">48</option>
+        <option value="50">50</option>
+        <option value="52">52</option>
+        <option value="54">54</option>
+        <option value="56">56</option>
+        <option value="58">58</option>
+        <option value="60">60</option>
+        <option value="62">62</option>
+        <option value="64">64</option>
+        <option value="66">66</option>
+        <option value="68">68</option>
+        <option value="70">70</option>
+      </select>
+
+      <label class="label">Размер зимней обуви</label>
+      <select id="fWinterShoeSize">
+        <option value="">— выберите —</option>
+        <option value="36">36</option>
+        <option value="37">37</option>
+        <option value="38">38</option>
+        <option value="39">39</option>
+        <option value="40">40</option>
+        <option value="41">41</option>
+        <option value="42">42</option>
+        <option value="43">43</option>
+        <option value="44">44</option>
+        <option value="45">45</option>
+        <option value="46">46</option>
+        <option value="47">47</option>
+        <option value="48">48</option>
+      </select>
+
       <button class="btn btn-gold" id="submitBtn" onclick="submitForm()">Отправить</button>
     </div>
   </div>
@@ -233,7 +270,9 @@ async function submitForm() {
 
   const clothingSize = document.getElementById("fClothingSize").value;
   const shoeSize = document.getElementById("fShoeSize").value;
-  if (!clothingSize && !shoeSize) { alert("Укажите хотя бы один размер"); return; }
+  const winterClothingSize = document.getElementById("fWinterClothingSize").value;
+  const winterShoeSize = document.getElementById("fWinterShoeSize").value;
+  if (!clothingSize && !shoeSize && !winterClothingSize && !winterShoeSize) { alert("Укажите хотя бы один размер"); return; }
 
   const btn = document.getElementById("submitBtn");
   btn.disabled = true;
@@ -245,6 +284,8 @@ async function submitForm() {
     empName: selected.name,
     clothingSize,
     shoeSize,
+    winterClothingSize,
+    winterShoeSize,
   };
 
   try {
