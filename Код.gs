@@ -13,6 +13,7 @@ const SHEET_COURSE_CATALOG = "КаталогКурсов";
 const SHEET_REQUIREMENTS = "Требования";
 const SHEET_DOCUMENTS = "Документы";
 const SHEET_PERSONNEL_EVENTS = "Личное дело";
+const SHEET_PPE_NORMS = "НормыСИЗ";
 const PHOTO_FOLDER_ID = "1rX0jetKQqm_Lsym8JX6YE8d4Js-Ye4y_";
 
 // Табельные номера: префикс закреплён за основным ТОО сотрудника.
@@ -91,6 +92,7 @@ function doGet(e) {
   else if (action === "getHazardStats") result = getHazardStats(e.parameter);
   else if (action === "getHazardMeta") result = getHazardMeta();
   else if (action === "getRosterDraft") result = getRosterDraft(e.parameter.course, e.parameter.date);
+  else if (action === "getPpeNorms") result = getPpeNorms();
   else result = json({ ok: false, error: "unknown action" });
 
   if (callback) {
@@ -164,6 +166,8 @@ function doPost(e) {
     if (d.action === "uploadHazardPhoto") return uploadHazardPhoto(d.image, d.mimeType);
     if (d.action === "updateHazardStatus") return updateHazardStatus(d);
     if (d.action === "deleteHazard") return deleteHazard(d);
+    if (d.action === "savePpeNorm") return savePpeNorm(d.position, d.protectionClass, d.validityMonths);
+    if (d.action === "deletePpeNorm") return deletePpeNorm(d.position);
     return json({ ok: false, error: "unknown action" });
   } catch(err) {
     return json({ ok: false, error: err.toString() });
@@ -1491,6 +1495,71 @@ function deleteCourseCatalog(course) {
   const rows = sheet.getDataRange().getValues();
   for (let i = 1; i < rows.length; i++) {
     if (String(rows[i][0]||"").trim() === name) {
+      sheet.deleteRow(i + 1);
+      return json({ ok: true });
+    }
+  }
+  return json({ ok: false, error: "Не найдено" });
+}
+
+// ══════════════════════════════════════════════════════════
+// НОРМЫ ВЫДАЧИ СИЗ ПО ДОЛЖНОСТЯМ
+// Один ряд = одна должность: класс защиты + срок носки (в месяцах).
+// Страница «СИЗ» в hazards-panel.html смотрит должность сотрудника,
+// подставляет сюда класс/срок по совпадению (без учёта регистра/пробелов).
+// ══════════════════════════════════════════════════════════
+function getPpeNorms() {
+  const ss    = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName(SHEET_PPE_NORMS);
+  if (!sheet) return json([]);
+  const rows = sheet.getDataRange().getValues();
+  if (rows.length < 2) return json([]);
+  const data = rows.slice(1).filter(r => r[0]).map((r, i) => ({
+    position: String(r[0]).trim(),
+    protectionClass: String(r[1] || "").trim(),
+    validityMonths: r[2] !== "" ? Number(r[2]) || "" : "",
+  }));
+  return json(data);
+}
+
+function savePpeNorm(position, protectionClass, validityMonths) {
+  const pos = String(position||"").trim();
+  if (!pos) return json({ ok: false, error: "Нужна должность" });
+
+  const ss    = SpreadsheetApp.openById(SHEET_ID);
+  let sheet   = ss.getSheetByName(SHEET_PPE_NORMS);
+  if (!sheet) {
+    sheet = ss.insertSheet(SHEET_PPE_NORMS);
+    sheet.appendRow(["position", "protectionClass", "validityMonths"]);
+    sheet.getRange(1,1,1,3)
+      .setBackground("#0D1B3E").setFontColor("#F4A52A").setFontWeight("bold");
+    sheet.setFrozenRows(1);
+    sheet.setColumnWidth(1, 300);
+    sheet.setColumnWidth(2, 200);
+    sheet.setColumnWidth(3, 150);
+  }
+
+  const rows = sheet.getDataRange().getValues();
+  for (let i = 1; i < rows.length; i++) {
+    if (String(rows[i][0]).trim().toLowerCase() === pos.toLowerCase()) {
+      sheet.getRange(i + 1, 2).setValue(protectionClass || "");
+      sheet.getRange(i + 1, 3).setValue(validityMonths || "");
+      return json({ ok: true, updated: pos });
+    }
+  }
+  ensureCapacity(sheet, 1);
+  sheet.appendRow([pos, protectionClass || "", validityMonths || ""]);
+  return json({ ok: true, created: pos });
+}
+
+function deletePpeNorm(position) {
+  const pos = String(position||"").trim().toLowerCase();
+  const ss    = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName(SHEET_PPE_NORMS);
+  if (!sheet) return json({ ok: false, error: "Лист норм не найден" });
+  const rows = sheet.getDataRange().getValues();
+  for (let i = 1; i < rows.length; i++) {
+    if (String(rows[i][0]||"").trim().toLowerCase() === pos) {
       sheet.deleteRow(i + 1);
       return json({ ok: true });
     }
