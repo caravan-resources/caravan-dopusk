@@ -3442,6 +3442,7 @@ function selectPersonnelEmployee(id) {
         <div style="grid-column:1/-1"><span style="color:var(--gray)">Доп. компетенции:</span> <b>${escapeHtml(emp.additionalSkills||"—")}</b></div>
         <div><span style="color:var(--gray)">Почта:</span> <b>${escapeHtml(emp.email||"—")}</b></div>
         <div><span style="color:var(--gray)">Размер одежды:</span> <b>${escapeHtml(emp.clothingSize||"—")}</b></div>
+        <div><span style="color:var(--gray)">Ростовка:</span> <b>${escapeHtml(emp.heightRange||"—")}</b></div>
         <div><span style="color:var(--gray)">Размер обуви:</span> <b>${escapeHtml(emp.shoeSize||"—")}</b></div>
         <div><span style="color:var(--gray)">Размер зимней одежды:</span> <b>${escapeHtml(emp.winterClothingSize||"—")}</b></div>
         <div><span style="color:var(--gray)">Размер зимней обуви:</span> <b>${escapeHtml(emp.winterShoeSize||"—")}</b></div>
@@ -3742,6 +3743,7 @@ function openHireModal() {
       <textarea id="hireCertificates" placeholder="Сертификаты" rows="2" style="padding:10px;border:1px solid var(--border);border-radius:8px;font-family:inherit;resize:vertical"></textarea>
       <textarea id="hireCourses" placeholder="Курсы" rows="2" style="padding:10px;border:1px solid var(--border);border-radius:8px;font-family:inherit;resize:vertical"></textarea>
       <input id="hireClothingSize" placeholder="Размер одежды" style="padding:10px;border:1px solid var(--border);border-radius:8px">
+      <input id="hireHeightRange" placeholder="Ростовка (напр. 170-176)" style="padding:10px;border:1px solid var(--border);border-radius:8px">
       <input id="hireShoeSize" placeholder="Размер обуви" style="padding:10px;border:1px solid var(--border);border-radius:8px">
       <input id="hireWinterClothingSize" placeholder="Размер зимней одежды" style="padding:10px;border:1px solid var(--border);border-radius:8px">
       <input id="hireWinterShoeSize" placeholder="Размер зимней обуви" style="padding:10px;border:1px solid var(--border);border-radius:8px">
@@ -3780,6 +3782,7 @@ async function submitHire(force) {
     certificates: document.getElementById("hireCertificates").value.trim(),
     courses: document.getElementById("hireCourses").value.trim(),
     clothingSize: document.getElementById("hireClothingSize").value.trim(),
+    heightRange: document.getElementById("hireHeightRange").value.trim(),
     shoeSize: document.getElementById("hireShoeSize").value.trim(),
     winterClothingSize: document.getElementById("hireWinterClothingSize").value.trim(),
     winterShoeSize: document.getElementById("hireWinterShoeSize").value.trim(),
@@ -3928,6 +3931,7 @@ function openEditEmployeeModal(id) {
       <textarea id="editCertificates" placeholder="Сертификаты" rows="2" style="padding:10px;border:1px solid var(--border);border-radius:8px;font-family:inherit;resize:vertical">${escapeHtml(emp.certificates||"")}</textarea>
       <textarea id="editCourses" placeholder="Курсы" rows="2" style="padding:10px;border:1px solid var(--border);border-radius:8px;font-family:inherit;resize:vertical">${escapeHtml(emp.courses||"")}</textarea>
       <input id="editClothingSize" placeholder="Размер одежды" value="${esc(emp.clothingSize)}" style="padding:10px;border:1px solid var(--border);border-radius:8px">
+      <input id="editHeightRange" placeholder="Ростовка (напр. 170-176)" value="${esc(emp.heightRange)}" style="padding:10px;border:1px solid var(--border);border-radius:8px">
       <input id="editShoeSize" placeholder="Размер обуви" value="${esc(emp.shoeSize)}" style="padding:10px;border:1px solid var(--border);border-radius:8px">
       <input id="editWinterClothingSize" placeholder="Размер зимней одежды" value="${esc(emp.winterClothingSize)}" style="padding:10px;border:1px solid var(--border);border-radius:8px">
       <input id="editWinterShoeSize" placeholder="Размер зимней обуви" value="${esc(emp.winterShoeSize)}" style="padding:10px;border:1px solid var(--border);border-radius:8px">
@@ -3966,6 +3970,7 @@ async function submitEditEmployee(id) {
     certificates: document.getElementById("editCertificates").value.trim(),
     courses: document.getElementById("editCourses").value.trim(),
     clothingSize: document.getElementById("editClothingSize").value.trim(),
+    heightRange: document.getElementById("editHeightRange").value.trim(),
     shoeSize: document.getElementById("editShoeSize").value.trim(),
     winterClothingSize: document.getElementById("editWinterClothingSize").value.trim(),
     winterShoeSize: document.getElementById("editWinterShoeSize").value.trim(),
@@ -4115,6 +4120,7 @@ function renderSurveysList() {
         <div style="grid-column:1/-1"><span style="color:var(--gray)">Доп. компетенции:</span> <b>${escapeHtml(s.additionalSkills||"—")}</b></div>
         <div><span style="color:var(--gray)">Почта:</span> <b>${escapeHtml(s.email||"—")}</b></div>
         <div><span style="color:var(--gray)">Размер одежды:</span> <b>${escapeHtml(s.clothingSize||"—")}</b></div>
+        <div><span style="color:var(--gray)">Ростовка:</span> <b>${escapeHtml(s.heightRange||"—")}</b></div>
         <div><span style="color:var(--gray)">Размер обуви:</span> <b>${escapeHtml(s.shoeSize||"—")}</b></div>
         <div><span style="color:var(--gray)">Размер зимней одежды:</span> <b>${escapeHtml(s.winterClothingSize||"—")}</b></div>
         <div><span style="color:var(--gray)">Размер зимней обуви:</span> <b>${escapeHtml(s.winterShoeSize||"—")}</b></div>
