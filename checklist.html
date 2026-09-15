@@ -143,6 +143,8 @@ input:focus, select:focus, textarea:focus { border-color:var(--gold); }
       <button class="btn btn-gold" style="margin-bottom:10px" onclick="startFlow('inspection')">📋 Провести осмотр</button>
       <button class="btn btn-ghost" style="margin-bottom:10px" onclick="startFlow('fuel')">⛽ Записать заправку</button>
       <button class="btn btn-red" onclick="markRepair(this)">🔧 Отправить в ремонт</button>
+      <button class="btn btn-ghost" id="endShiftBtn" style="display:none; margin-top:10px" onclick="endShift()">⏹ Закончить смену (остановить трекер)</button>
+      <div style="margin-top:14px"><a href="#" onclick="changeDeviceEquipment(); return false;" style="font-size:12px; color:var(--gray)">сменить закреплённую технику на этом телефоне</a></div>
     </div>
   </div>
 
@@ -588,6 +590,7 @@ async function submitChecklist() {
       // GPS-трекер смены — только после осмотра (не после заправки), запускаем
       // независимо от статуса техники ниже, best-effort, ничего не блокирует.
       startShiftGpsTracker(equipment.equipmentId);
+      localStorage.setItem("operbaza_current_shift_equipment", equipment.equipmentId);
       // Статус техники "В работе" — фоном, не блокируя экран успеха. Если
       // активная вахта участка не задана (unavailable) или запрос не дошёл —
       // молча пропускаем, это вторичное действие, не должно мешать основному.
@@ -638,42 +641,136 @@ document.addEventListener("visibilitychange", async () => {
   }
 });
 
+let gpsMode = "не запущен";
+
 function gpsUpdateBadge() {
   const badge = document.getElementById("gpsTrackerBadge");
   badge.classList.add("show");
   document.getElementById("gpsCount").textContent = gpsPoints.length;
+  document.getElementById("gpsMode").textContent = gpsMode;
+  document.getElementById("endShiftBtn").style.display = "block";
   if (gpsNextSendAt) {
     const mins = Math.max(0, Math.round((gpsNextSendAt - Date.now()) / 60000));
     document.getElementById("gpsNext").textContent = mins > 0 ? `~${mins} мин` : "сейчас";
   }
 }
 
+// Внутри приложения-обёртки (Capacitor) доступен настоящий фоновый GPS —
+// переживает закрытие/сворачивание, потому что работает как системный
+// foreground-сервис, а не как JS в вкладке браузера. В обычном браузере
+// (просто открыли ссылку) window.Capacitor не существует — тогда работает
+// прежний navigator.geolocation.watchPosition, страница не ломается.
+function gpsAddPoint(lat, lng, acc, speed, equipmentId) {
+  gpsPoints.push({
+    t: new Date().toISOString(),
+    lat, lng,
+    acc: Math.round(acc || 0),
+    speed: speed || 0,
+    label: equipmentId,
+  });
+  localStorage.setItem(gpsKey("points"), JSON.stringify(gpsPoints));
+  gpsUpdateBadge();
+}
+
+let gpsNativeWatcherId = null;
+
 function startShiftGpsTracker(equipmentId) {
-  if (!("geolocation" in navigator)) return; // нет геолокации — тихо не включаем, не мешаем чек-листу
   localStorage.setItem(gpsKey("active"), "1");
   gpsPoints = JSON.parse(localStorage.getItem(gpsKey("points")) || "[]");
 
-  gpsWatchId = navigator.geolocation.watchPosition(
-    (pos) => {
-      gpsPoints.push({
-        t: new Date().toISOString(),
-        lat: pos.coords.latitude,
-        lng: pos.coords.longitude,
-        acc: Math.round(pos.coords.accuracy),
-        speed: pos.coords.speed || 0,
-        label: equipmentId,
-      });
-      localStorage.setItem(gpsKey("points"), JSON.stringify(gpsPoints));
+  if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.BackgroundGeolocation) {
+    gpsMode = "нативный (проверка…)";
+    gpsUpdateBadge();
+    window.Capacitor.Plugins.BackgroundGeolocation.addWatcher(
+      {
+        backgroundTitle: "Опербаза — трекер смены",
+        backgroundMessage: equipmentId + " — идёт запись рейсов. Не закрывать до конца смены.",
+        requestPermissions: true,
+        stale: false,
+        distanceFilter: 15, // метров между точками — достаточно для геозон, экономит батарею
+      },
+      (location, error) => {
+        if (error) { gpsMode = "нативный, ошибка: " + (error.message || error.code || "?"); gpsUpdateBadge(); return; }
+        if (!location) return;
+        gpsMode = "нативный (работает)";
+        gpsAddPoint(location.latitude, location.longitude, location.accuracy, location.speed, equipmentId);
+      }
+    ).then((id) => {
+      gpsNativeWatcherId = id;
+      gpsMode = "нативный (запущен, жду первую точку)";
       gpsUpdateBadge();
-    },
-    () => { /* тихо — трекер вторичен, не показываем ошибок поверх основного экрана */ },
-    { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 }
-  );
+    }).catch((err) => {
+      gpsMode = "нативный НЕ запустился: " + (err && err.message ? err.message : String(err));
+      gpsUpdateBadge();
+    });
+  } else if ("geolocation" in navigator) {
+    gpsMode = "браузерный (без фоновой службы)";
+    gpsWatchId = navigator.geolocation.watchPosition(
+      (pos) => gpsAddPoint(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy, pos.coords.speed, equipmentId),
+      () => { /* тихо — трекер вторичен, не показываем ошибок поверх основного экрана */ },
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 }
+    );
+    gpsRequestWakeLock(); // Wake Lock актуален только для обычного браузера — в приложении держит сам foreground-сервис
+  } else {
+    gpsMode = "GPS недоступен";
+    return;
+  }
 
-  gpsRequestWakeLock();
   gpsScheduleNextSend();
   gpsUpdateBadge();
   setInterval(gpsUpdateBadge, 60000);
+}
+
+async function changeDeviceEquipment() {
+  const isActive = localStorage.getItem(gpsKey("active")) === "1";
+  const msg = isActive
+    ? "Сменить технику? Текущая смена будет закончена, накопленные точки отправлены."
+    : "Выбрать технику заново?";
+  if (!confirm(msg)) return;
+
+  if (isActive) {
+    if (gpsSendTimer) clearTimeout(gpsSendTimer);
+    if (gpsNativeWatcherId !== null && window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.BackgroundGeolocation) {
+      try { await window.Capacitor.Plugins.BackgroundGeolocation.removeWatcher({ id: gpsNativeWatcherId }); } catch(e) {}
+      gpsNativeWatcherId = null;
+    }
+    if (gpsWatchId !== null) { navigator.geolocation.clearWatch(gpsWatchId); gpsWatchId = null; }
+    if (gpsWakeLock) { try { await gpsWakeLock.release(); } catch(e) {} gpsWakeLock = null; }
+    await gpsSendBatch();
+    localStorage.removeItem(gpsKey("active"));
+  }
+  localStorage.removeItem("operbaza_current_shift_equipment");
+
+  if (window.Capacitor) {
+    location.href = "app-start.html";
+  } else {
+    alert("Это работает только внутри приложения Опербаза — в браузере просто открой ссылку с нужным ?eq= вручную.");
+  }
+}
+
+async function endShift() {
+  if (!confirm("Закончить смену? Трекер остановится, оставшиеся точки отправятся сейчас.")) return;
+
+  if (gpsSendTimer) clearTimeout(gpsSendTimer);
+
+  if (gpsNativeWatcherId !== null && window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.BackgroundGeolocation) {
+    try { await window.Capacitor.Plugins.BackgroundGeolocation.removeWatcher({ id: gpsNativeWatcherId }); } catch(e) {}
+    gpsNativeWatcherId = null;
+  }
+  if (gpsWatchId !== null) {
+    navigator.geolocation.clearWatch(gpsWatchId);
+    gpsWatchId = null;
+  }
+  if (gpsWakeLock) { try { await gpsWakeLock.release(); } catch(e) {} gpsWakeLock = null; }
+
+  await gpsSendBatch();
+
+  localStorage.removeItem(gpsKey("active"));
+  localStorage.removeItem("operbaza_current_shift_equipment");
+  gpsMode = "смена закончена";
+  document.getElementById("gpsTrackerBadge").classList.remove("show");
+  document.getElementById("endShiftBtn").style.display = "none";
+  alert("Смена закончена, данные отправлены.");
 }
 
 function gpsScheduleNextSend() {
@@ -714,7 +811,7 @@ init();
 </script>
 <div id="gpsTrackerBadge">
   <span class="dot" id="gpsDot"></span>
-  <span class="txt">Трекер смены: <span class="cnt" id="gpsCount">0</span> точек · след. отправка <span id="gpsNext">—</span></span>
+  <span class="txt">Трекер (<span id="gpsMode">—</span>): <span class="cnt" id="gpsCount">0</span> точек · след. отправка <span id="gpsNext">—</span></span>
 </div>
 </body>
 </html>
