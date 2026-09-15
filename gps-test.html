@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Тест GPS — Опербаза</title>
+<style>
+  :root { --navy:#0B1A35; --gold:#F4A52A; --green:#16A34A; --red:#DC2626; --gray:#64748B; --border:#E2E8F0; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+    background:#F1F5F9; color:var(--navy); margin:0; min-height:100vh; display:flex; flex-direction:column; }
+  .header { background:var(--navy); color:#fff; padding:16px; text-align:center; }
+  .header h1 { margin:0; font-size:17px; }
+  .wrap { flex:1; max-width:480px; width:100%; margin:0 auto; padding:20px; }
+  .card { background:#fff; border-radius:14px; padding:18px; margin-bottom:14px; box-shadow:0 2px 10px rgba(0,0,0,.05); }
+  .label-input { width:100%; padding:12px; border:1.5px solid var(--border); border-radius:10px; font-size:15px; margin-bottom:14px; }
+  .big-btn { width:100%; padding:18px; border:none; border-radius:12px; font-weight:800; font-size:17px; cursor:pointer; }
+  .btn-start { background:var(--green); color:#fff; }
+  .btn-stop { background:var(--red); color:#fff; }
+  .btn-send { background:var(--gold); color:var(--navy); margin-top:10px; }
+  .btn-send:disabled { background:var(--border); color:var(--gray); }
+  .stats { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:16px; }
+  .stat { background:#F8FAFC; border-radius:10px; padding:12px; text-align:center; }
+  .stat .v { font-size:22px; font-weight:800; }
+  .stat .l { font-size:11px; color:var(--gray); margin-top:2px; }
+  .status { text-align:center; font-size:13px; color:var(--gray); margin-top:10px; min-height:18px; }
+  .log { max-height:180px; overflow-y:auto; font-size:11px; color:var(--gray); margin-top:10px; font-family:monospace; }
+  .log div { padding:2px 0; border-bottom:1px solid var(--border); }
+  .warn { background:#FEF2F2; color:var(--red); padding:10px; border-radius:10px; font-size:13px; margin-top:10px; display:none; }
+</style>
+</head>
+<body>
+<div class="header"><h1>Тест точности GPS</h1></div>
+<div class="wrap">
+  <div class="card">
+    <input class="label-input" id="labelInput" placeholder="Что сейчас едем (напр. 'Блок 3 → разгрузка А')" value="">
+    <button class="big-btn btn-start" id="toggleBtn" onclick="toggleTrack()">▶ Начать запись</button>
+    <div class="status" id="status">Точки копятся в телефоне даже без связи — отправить можно позже.</div>
+    <div class="warn" id="warn"></div>
+    <div class="stats">
+      <div class="stat"><div class="v" id="statCount">0</div><div class="l">точек записано</div></div>
+      <div class="stat"><div class="v" id="statAcc">—</div><div class="l">точность сейчас, м</div></div>
+    </div>
+    <button class="big-btn btn-send" id="sendBtn" onclick="sendTrack()" disabled>Отправить в базу (0 точек)</button>
+    <div class="log" id="log"></div>
+  </div>
+</div>
+
+<script>
+const CFG = {
+  SHEET_URL: "https://script.google.com/macros/s/AKfycbwhdMV20k8US2BXUz1Xk2XCXE9MEwpHpQaadTF9xEfzbU1--dHL-Zuj06K2qXW-rFtKGw/exec",
+};
+
+let watchId = null;
+let points = JSON.parse(localStorage.getItem("gps_test_points") || "[]");
+let tracking = false;
+
+function save() {
+  localStorage.setItem("gps_test_points", JSON.stringify(points));
+}
+
+function refreshUI() {
+  document.getElementById("statCount").textContent = points.length;
+  const sendBtn = document.getElementById("sendBtn");
+  sendBtn.textContent = `Отправить в базу (${points.length} точек)`;
+  sendBtn.disabled = points.length === 0;
+}
+
+function logLine(text) {
+  const box = document.getElementById("log");
+  const div = document.createElement("div");
+  div.textContent = text;
+  box.prepend(div);
+  while (box.children.length > 40) box.removeChild(box.lastChild);
+}
+
+function toggleTrack() {
+  if (!tracking) startTrack(); else stopTrack();
+}
+
+function startTrack() {
+  if (!("geolocation" in navigator)) {
+    document.getElementById("warn").style.display = "block";
+    document.getElementById("warn").textContent = "Браузер не поддерживает геолокацию.";
+    return;
+  }
+  tracking = true;
+  const btn = document.getElementById("toggleBtn");
+  btn.textContent = "■ Остановить запись";
+  btn.className = "big-btn btn-stop";
+  document.getElementById("status").textContent = "Идёт запись — держи телефон при себе.";
+
+  watchId = navigator.geolocation.watchPosition(
+    (pos) => {
+      const label = document.getElementById("labelInput").value.trim();
+      const pt = {
+        t: new Date().toISOString(),
+        lat: pos.coords.latitude,
+        lng: pos.coords.longitude,
+        acc: Math.round(pos.coords.accuracy),
+        speed: pos.coords.speed || 0,
+        label,
+      };
+      points.push(pt);
+      save();
+      refreshUI();
+      document.getElementById("statAcc").textContent = pt.acc;
+      logLine(`${pt.t.slice(11,19)}  ${pt.lat.toFixed(6)}, ${pt.lng.toFixed(6)}  ±${pt.acc}м`);
+    },
+    (err) => {
+      document.getElementById("warn").style.display = "block";
+      document.getElementById("warn").textContent = "Ошибка GPS: " + err.message + " — проверь разрешение геолокации.";
+    },
+    { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 }
+  );
+}
+
+function stopTrack() {
+  tracking = false;
+  if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+  const btn = document.getElementById("toggleBtn");
+  btn.textContent = "▶ Начать запись";
+  btn.className = "big-btn btn-start";
+  document.getElementById("status").textContent = "Запись остановлена. Можно отправить или продолжить позже.";
+}
+
+async function sendTrack() {
+  if (!points.length) return;
+  const sendBtn = document.getElementById("sendBtn");
+  sendBtn.disabled = true;
+  sendBtn.textContent = "Отправка…";
+  try {
+    const res = await fetch(CFG.SHEET_URL, {
+      method: "POST",
+      body: JSON.stringify({ action: "uploadGpsTrack", label: "тест", points }),
+    });
+    const val = await res.json();
+    if (val.ok) {
+      document.getElementById("status").textContent = `Отправлено ${val.inserted} точек. Можно чистить и катать заново.`;
+      points = [];
+      save();
+      refreshUI();
+    } else {
+      document.getElementById("status").textContent = "Ошибка отправки: " + (val.error || "неизвестно");
+      sendBtn.disabled = false;
+    }
+  } catch (e) {
+    document.getElementById("status").textContent = "Нет связи — точки остались в телефоне, попробуй ещё раз позже.";
+    sendBtn.disabled = false;
+  }
+}
+
+refreshUI();
+</script>
+</body>
+</html>
