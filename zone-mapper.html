@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Разметка зоны — Опербаза</title>
+<style>
+  :root { --navy:#0B1A35; --gold:#F4A52A; --green:#16A34A; --red:#DC2626; --gray:#64748B; --border:#E2E8F0; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+    background:#F1F5F9; color:var(--navy); margin:0; min-height:100vh; display:flex; flex-direction:column; }
+  .header { background:var(--navy); color:#fff; padding:16px; text-align:center; }
+  .header h1 { margin:0; font-size:16px; }
+  .wrap { flex:1; max-width:480px; width:100%; margin:0 auto; padding:20px; padding-bottom:100px; }
+  .card { background:#fff; border-radius:14px; padding:18px; margin-bottom:14px; box-shadow:0 2px 10px rgba(0,0,0,.05); }
+  .card h2 { font-size:14px; margin:0 0 12px; }
+  input[type=text], select { width:100%; padding:12px; border:1.5px solid var(--border); border-radius:10px; font-size:15px; margin-bottom:12px; }
+  .big-btn { width:100%; padding:16px; border:none; border-radius:12px; font-weight:800; font-size:16px; cursor:pointer; margin-bottom:10px; }
+  .btn-start { background:var(--green); color:#fff; }
+  .btn-stop { background:var(--red); color:#fff; }
+  .btn-save { background:var(--gold); color:var(--navy); }
+  .btn-save:disabled { background:var(--border); color:var(--gray); }
+  .status-row { display:flex; justify-content:space-between; padding:8px 0; font-size:13px; border-bottom:1px solid var(--border); }
+  .status-row:last-child { border-bottom:none; }
+  .status-row .v { font-weight:800; }
+  .grade-row { display:none; }
+  .grade-row.show { display:block; }
+  .hint { font-size:12px; color:var(--gray); margin-top:6px; line-height:1.5; }
+  .zone-list-item { display:flex; justify-content:space-between; padding:8px 0; font-size:13px; border-bottom:1px solid var(--border); }
+</style>
+</head>
+<body>
+<div class="header"><h1>Разметка зоны (погрузка / разгрузка)</h1></div>
+
+<div class="wrap">
+  <div class="card">
+    <h2>1. Параметры зоны</h2>
+    <input type="text" id="zoneName" placeholder="Название (напр. Блок B7 или Экскаватор EX_224)">
+    <select id="zoneType" onchange="onTypeChange()">
+      <option value="">Тип зоны…</option>
+      <option value="Погрузка">Погрузка (у экскаватора)</option>
+      <option value="Разгрузка">Разгрузка (склад/карта выщелачивания)</option>
+    </select>
+    <div class="grade-row" id="gradeRow">
+      <select id="zoneGrade">
+        <option value="">Грейд руды…</option>
+        <option value="Баланс">Баланс</option>
+        <option value="Забаланс">Забаланс</option>
+        <option value="Порода">Порода (вскрыша)</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>2. Объезд границы</h2>
+    <button class="big-btn btn-start" id="toggleBtn" onclick="toggleTrack()">▶ Начать объезд границы</button>
+    <div class="status-row"><span>Точек по границе</span><span class="v" id="stCount">0</span></div>
+    <div class="status-row"><span>Точность сейчас</span><span class="v" id="stAcc">—</span></div>
+    <div class="hint">Медленно объезжай (или обходи) периметр зоны один раз по кругу, вернувшись примерно к начальной точке. Не нужно останавливаться на углах — просто держи ровный темп.</div>
+  </div>
+
+  <div class="card">
+    <button class="big-btn btn-save" id="saveBtn" onclick="saveZone()" disabled>Сохранить зону</button>
+  </div>
+
+  <div class="card">
+    <h2>Уже сохранённые зоны</h2>
+    <div id="zoneList"><div class="hint">Загрузка…</div></div>
+  </div>
+</div>
+
+<script>
+const CFG = {
+  SHEET_URL: "https://script.google.com/macros/s/AKfycbwhdMV20k8US2BXUz1Xk2XCXE9MEwpHpQaadTF9xEfzbU1--dHL-Zuj06K2qXW-rFtKGw/exec",
+};
+
+let watchId = null;
+let tracking = false;
+let boundaryPoints = [];
+
+function onTypeChange() {
+  const type = document.getElementById("zoneType").value;
+  document.getElementById("gradeRow").classList.toggle("show", type === "Погрузка");
+}
+
+function toggleTrack() {
+  if (!tracking) startTrack(); else stopTrack();
+}
+
+function startTrack() {
+  tracking = true;
+  boundaryPoints = [];
+  const btn = document.getElementById("toggleBtn");
+  btn.textContent = "■ Остановить объезд";
+  btn.className = "big-btn btn-stop";
+  document.getElementById("saveBtn").disabled = true;
+
+  watchId = navigator.geolocation.watchPosition(
+    (pos) => {
+      boundaryPoints.push([pos.coords.latitude, pos.coords.longitude]);
+      document.getElementById("stCount").textContent = boundaryPoints.length;
+      document.getElementById("stAcc").textContent = Math.round(pos.coords.accuracy) + " м";
+    },
+    (err) => { alert("Ошибка GPS: " + err.message); },
+    { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 }
+  );
+}
+
+function stopTrack() {
+  tracking = false;
+  if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+  const btn = document.getElementById("toggleBtn");
+  btn.textContent = "▶ Начать объезд границы";
+  btn.className = "big-btn btn-start";
+  document.getElementById("saveBtn").disabled = boundaryPoints.length < 3;
+}
+
+async function saveZone() {
+  const name = document.getElementById("zoneName").value.trim();
+  const type = document.getElementById("zoneType").value;
+  const grade = document.getElementById("zoneGrade").value;
+  if (!name) { alert("Укажи название зоны"); return; }
+  if (!type) { alert("Укажи тип зоны"); return; }
+  if (type === "Погрузка" && !grade) { alert("Для зоны погрузки укажи грейд руды"); return; }
+  if (boundaryPoints.length < 3) { alert("Нужно хотя бы 3 точки границы"); return; }
+
+  const btn = document.getElementById("saveBtn");
+  btn.disabled = true;
+  btn.textContent = "Сохранение…";
+  try {
+    const res = await fetch(CFG.SHEET_URL, {
+      method: "POST",
+      body: JSON.stringify({ action: "saveZone", name, type, grade, polygon: boundaryPoints }),
+    });
+    const val = await res.json();
+    if (val.ok) {
+      alert("Зона сохранена: " + name);
+      document.getElementById("zoneName").value = "";
+      boundaryPoints = [];
+      document.getElementById("stCount").textContent = 0;
+      loadZoneList();
+    } else {
+      alert("Ошибка: " + (val.error || "?"));
+    }
+  } catch (e) {
+    alert("Нет связи — попробуй ещё раз, когда появится интернет.");
+  }
+  btn.disabled = false;
+  btn.textContent = "Сохранить зону";
+}
+
+async function loadZoneList() {
+  const box = document.getElementById("zoneList");
+  try {
+    const res = await fetch(`${CFG.SHEET_URL}?action=getZones`);
+    const zones = await res.json();
+    if (!zones.length) { box.innerHTML = `<div class="hint">Пока ни одной зоны не сохранено.</div>`; return; }
+    box.innerHTML = zones.map(z => `
+      <div class="zone-list-item">
+        <span>${z.name} — ${z.type}${z.grade ? " (" + z.grade + ")" : ""}</span>
+        <span>${z.polygon.length} точек</span>
+      </div>
+    `).join("");
+  } catch (e) {
+    box.innerHTML = `<div class="hint">Не удалось загрузить список.</div>`;
+  }
+}
+
+loadZoneList();
+</script>
+</body>
+</html>
