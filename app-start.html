@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Опербаза</title>
+<style>
+  :root { --navy:#0B1A35; --gold:#F4A52A; --gray:#64748B; --border:#E2E8F0; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+    background:#F1F5F9; color:var(--navy); margin:0; min-height:100vh; display:flex; flex-direction:column; }
+  .header { background:var(--navy); color:#fff; padding:20px; text-align:center; }
+  .header h1 { margin:0; font-size:18px; }
+  .header .sub { font-size:12px; color:rgba(255,255,255,.65); margin-top:4px; }
+  .wrap { flex:1; max-width:480px; width:100%; margin:0 auto; padding:20px; }
+  .card { background:#fff; border-radius:14px; padding:18px; box-shadow:0 2px 10px rgba(0,0,0,.05); }
+  input[type=text] { width:100%; padding:13px; border:1.5px solid var(--border); border-radius:10px; font-size:16px; margin-bottom:12px; }
+  .list { max-height:60vh; overflow-y:auto; }
+  .item { padding:13px 10px; border-bottom:1px solid var(--border); font-size:15px; cursor:pointer; }
+  .item:active { background:#F1F5F9; }
+  .item .id { font-weight:800; }
+  .item .model { color:var(--gray); font-size:12px; }
+  .loading, .empty { text-align:center; color:var(--gray); padding:20px; font-size:14px; }
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>Опербаза</h1>
+  <div class="sub">Выбери свою технику — один раз, дальше запомнится на этом телефоне</div>
+</div>
+<div class="wrap">
+  <div class="card">
+    <input type="text" id="search" placeholder="Поиск по номеру или модели…" oninput="renderList()">
+    <div class="list" id="list"><div class="loading">Загрузка списка техники…</div></div>
+  </div>
+</div>
+
+<script>
+const CFG = {
+  SHEET_URL: "https://script.google.com/macros/s/AKfycbwhdMV20k8US2BXUz1Xk2XCXE9MEwpHpQaadTF9xEfzbU1--dHL-Zuj06K2qXW-rFtKGw/exec",
+};
+const LAST_KEY = "operbaza_last_equipment";       // подсказка "как в прошлый раз" — не пропускает выбор
+const ACTIVE_KEY = "operbaza_current_shift_equipment"; // техника ТЕКУЩЕЙ незавершённой смены, если есть
+
+// Если смена уже идёт (чек-лист пройден, трекер работает) — продолжаем
+// именно её, а не спрашиваем заново. Но если смены нет (только что открыли
+// приложение, предыдущая закончена) — выбор техники всегда заново, ведь
+// оператор мог сесть на другую машину (горячая замена).
+const activeEquipment = localStorage.getItem(ACTIVE_KEY);
+if (activeEquipment) {
+  location.replace(`checklist.html?eq=${encodeURIComponent(activeEquipment)}`);
+}
+
+let ALL_EQUIPMENT = [];
+
+async function loadEquipment() {
+  try {
+    const res = await fetch(`${CFG.SHEET_URL}?action=getEquipment`);
+    ALL_EQUIPMENT = await res.json();
+    renderList();
+  } catch (e) {
+    document.getElementById("list").innerHTML = `<div class="empty">Не удалось загрузить список — проверь связь и обнови страницу.</div>`;
+  }
+}
+
+function renderList() {
+  const q = document.getElementById("search").value.trim().toLowerCase();
+  const last = localStorage.getItem(LAST_KEY);
+  let list = ALL_EQUIPMENT.filter(e =>
+    !q || String(e.equipmentId).toLowerCase().includes(q) || String(e.model || "").toLowerCase().includes(q)
+  );
+  if (!q && last) {
+    // подсказка "как в прошлый раз" — только сортировка, не автовыбор
+    list = [...list].sort((a,b) => (a.equipmentId===last ? -1 : b.equipmentId===last ? 1 : 0));
+  }
+  const box = document.getElementById("list");
+  if (!list.length) { box.innerHTML = `<div class="empty">Ничего не найдено</div>`; return; }
+  box.innerHTML = list.map(e => `
+    <div class="item" onclick="selectEquipment('${e.equipmentId}')">
+      <div class="id">${e.equipmentId}${e.equipmentId===last ? " · как в прошлый раз" : ""}</div>
+      <div class="model">${e.model || ""} · ${e.site || ""}</div>
+    </div>
+  `).join("");
+}
+
+function selectEquipment(equipmentId) {
+  localStorage.setItem(LAST_KEY, equipmentId);
+  location.replace(`checklist.html?eq=${encodeURIComponent(equipmentId)}`);
+}
+
+loadEquipment();
+</script>
+</body>
+</html>
