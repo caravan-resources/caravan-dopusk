@@ -103,6 +103,17 @@ input:focus, select:focus, textarea:focus { border-color:var(--gold); }
 
 #screenLoading, #screenSearch, #screenForm, #screenSuccess, #screenError, #screenHub, #screenFuelForm, #screenStatusResult { display:none; }
 #screenLoading.active, #screenSearch.active, #screenForm.active, #screenSuccess.active, #screenError.active, #screenHub.active, #screenFuelForm.active, #screenStatusResult.active { display:block; }
+/* ── GPS-трекер смены (после чек-листа) ── */
+#gpsTrackerBadge {
+  position:fixed; left:12px; right:12px; bottom:12px; z-index:999;
+  background:var(--navy); color:#fff; border-radius:12px; padding:10px 14px;
+  font-size:12px; box-shadow:0 4px 16px rgba(0,0,0,.25); display:none;
+}
+#gpsTrackerBadge.show { display:flex; justify-content:space-between; align-items:center; gap:10px; }
+#gpsTrackerBadge .dot { width:8px; height:8px; border-radius:50%; background:var(--green); flex-shrink:0; }
+#gpsTrackerBadge.warn .dot { background:var(--gold); }
+#gpsTrackerBadge .txt { flex:1; line-height:1.4; }
+#gpsTrackerBadge .cnt { font-weight:800; }
 </style>
 </head>
 <body>
@@ -283,6 +294,7 @@ async function init() {
     document.getElementById("pageSubtitle").textContent = "Caravan Resources · " + equipment.equipmentId;
     document.getElementById("hubEquipmentTitle").textContent = `${equipment.equipmentId} — ${equipment.model}`;
 
+    gpsResumeIfActive();
     showScreen("Hub");
   } catch(e) {
     showError("Ошибка соединения", "Не удалось загрузить данные. Проверьте интернет и обновите страницу.");
@@ -573,6 +585,9 @@ async function submitChecklist() {
       document.getElementById("successTitle").textContent = "Чек-лист отправлен";
       document.getElementById("successSub").textContent = "Спасибо! Осмотр зафиксирован.";
       showScreen("Success");
+      // GPS-трекер смены — только после осмотра (не после заправки), запускаем
+      // независимо от статуса техники ниже, best-effort, ничего не блокирует.
+      startShiftGpsTracker(equipment.equipmentId);
       // Статус техники "В работе" — фоном, не блокируя экран успеха. Если
       // активная вахта участка не задана (unavailable) или запрос не дошёл —
       // молча пропускаем, это вторичное действие, не должно мешать основному.
@@ -591,7 +606,115 @@ async function submitChecklist() {
   }
 }
 
+// ══════════════════════════════════════════════════════════
+// GPS-ТРЕКЕР СМЕНЫ — запускается после успешной отправки чек-листа.
+// Ничего из формы осмотра выше не меняет, отдельный независимый
+// механизм. Копит точки локально, отправляет пакетом раз в 2 часа
+// (action: uploadGpsTrack — тот же, что уже используется для теста
+// точности GPS). Если страницу перезагрузили посреди смены — сам
+// продолжает трекинг без повторного чек-листа.
+// ══════════════════════════════════════════════════════════
+const GPS_SEND_INTERVAL_MS = 2 * 60 * 60 * 1000; // раз в 2 часа
+let gpsWatchId = null;
+let gpsWakeLock = null;
+let gpsPoints = [];
+let gpsSendTimer = null;
+let gpsNextSendAt = null;
+
+function gpsKey(suffix) { return `shift_gps_${suffix}_${equipment.equipmentId}`; }
+
+async function gpsRequestWakeLock() {
+  try {
+    if ("wakeLock" in navigator) {
+      gpsWakeLock = await navigator.wakeLock.request("screen");
+      gpsWakeLock.addEventListener("release", () => {});
+    }
+  } catch (e) { /* тихо — это best-effort, не блокирует трекер */ }
+}
+
+document.addEventListener("visibilitychange", async () => {
+  if (document.visibilityState === "visible" && localStorage.getItem(gpsKey("active")) === "1") {
+    await gpsRequestWakeLock();
+  }
+});
+
+function gpsUpdateBadge() {
+  const badge = document.getElementById("gpsTrackerBadge");
+  badge.classList.add("show");
+  document.getElementById("gpsCount").textContent = gpsPoints.length;
+  if (gpsNextSendAt) {
+    const mins = Math.max(0, Math.round((gpsNextSendAt - Date.now()) / 60000));
+    document.getElementById("gpsNext").textContent = mins > 0 ? `~${mins} мин` : "сейчас";
+  }
+}
+
+function startShiftGpsTracker(equipmentId) {
+  if (!("geolocation" in navigator)) return; // нет геолокации — тихо не включаем, не мешаем чек-листу
+  localStorage.setItem(gpsKey("active"), "1");
+  gpsPoints = JSON.parse(localStorage.getItem(gpsKey("points")) || "[]");
+
+  gpsWatchId = navigator.geolocation.watchPosition(
+    (pos) => {
+      gpsPoints.push({
+        t: new Date().toISOString(),
+        lat: pos.coords.latitude,
+        lng: pos.coords.longitude,
+        acc: Math.round(pos.coords.accuracy),
+        speed: pos.coords.speed || 0,
+        label: equipmentId,
+      });
+      localStorage.setItem(gpsKey("points"), JSON.stringify(gpsPoints));
+      gpsUpdateBadge();
+    },
+    () => { /* тихо — трекер вторичен, не показываем ошибок поверх основного экрана */ },
+    { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 }
+  );
+
+  gpsRequestWakeLock();
+  gpsScheduleNextSend();
+  gpsUpdateBadge();
+  setInterval(gpsUpdateBadge, 60000);
+}
+
+function gpsScheduleNextSend() {
+  gpsNextSendAt = Date.now() + GPS_SEND_INTERVAL_MS;
+  gpsSendTimer = setTimeout(async () => {
+    await gpsSendBatch();
+    gpsScheduleNextSend();
+  }, GPS_SEND_INTERVAL_MS);
+}
+
+async function gpsSendBatch() {
+  if (!gpsPoints.length) return;
+  try {
+    const res = await fetch(CFG.SHEET_URL, {
+      method: "POST",
+      body: JSON.stringify({ action: "uploadGpsTrack", label: equipment.equipmentId, points: gpsPoints }),
+    });
+    const val = await res.json();
+    if (val.ok) {
+      gpsPoints = [];
+      localStorage.setItem(gpsKey("points"), "[]");
+      gpsUpdateBadge();
+    }
+    // при ошибке — молча оставляем точки в телефоне, попробуем на следующем цикле
+  } catch (e) { /* нет связи — точки остаются локально, отправим в следующий раз */ }
+}
+
+// Продолжение трекинга после перезагрузки страницы посреди смены —
+// проверяем сразу после того, как определили технику (equipment уже
+// известен на этом этапе init()).
+function gpsResumeIfActive() {
+  if (equipment && localStorage.getItem(gpsKey("active")) === "1") {
+    startShiftGpsTracker(equipment.equipmentId);
+  }
+}
+
 init();
 </script>
+<div id="gpsTrackerBadge">
+  <span class="dot" id="gpsDot"></span>
+  <span class="txt">Трекер смены: <span class="cnt" id="gpsCount">0</span> точек · след. отправка <span id="gpsNext">—</span></span>
+</div>
 </body>
 </html>
