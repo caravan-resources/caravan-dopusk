@@ -126,9 +126,52 @@ input:focus, select:focus, textarea:focus { border-color:var(--gold); }
         <option value="Машинист насосной установки">Машинист насосной установки</option>
         <option value="Машинист буровой установки">Машинист буровой установки</option>
         <option value="Водитель фронтального погрузчика">Водитель фронтального погрузчика</option>
+        <option value="Машинист конвейера">Машинист конвейера (ДСК/Телестак)</option>
+        <option value="Дробильщик">Дробильщик (ДСК)</option>
+        <option value="Бункеровщик">Бункеровщик (ДСК)</option>
+        <option value="Грохотовщик">Грохотовщик (ДСК)</option>
+        <option value="Оператор штабелеукладчика">Оператор штабелеукладчика (Телестак)</option>
+        <option value="Оператор пульта управления (ДСК)">Оператор пульта управления (ДСК)</option>
+        <option value="Мастер (ДСК/Телестак)">Мастер (ДСК/Телестак)</option>
+        <option value="Начальник ДСК">Начальник ДСК</option>
         <option value="__other__">Другое (указать)</option>
       </select>
       <input type="text" id="fPositionOther" placeholder="Укажите должность" style="display:none">
+
+      <!-- Показывается только для должностей ДСК-1/Телестак — вахта, мастер и
+           закреплённое оборудование не нужны мобильной технике (у неё это
+           решается через "Смены"/checklist.html), но необходимы для
+           дробильно-сортировочного комплекса, где люди закреплены за узлом
+           оборудования, а не за единицей техники. Список мастеров ниже —
+           снимок на 16.09.2026, при кадровых изменениях требует ручного
+           обновления (не тянется из базы). -->
+      <div id="dskFieldsBlock" style="display:none">
+        <label class="label">Вахта</label>
+        <select id="fVahta">
+          <option value="">— выберите —</option>
+          <option value="вахта 1">Вахта 1</option>
+          <option value="вахта 2">Вахта 2</option>
+        </select>
+
+        <label class="label">Мастер / бригадир</label>
+        <select id="fMaster" onchange="toggleMasterOther(this.value)">
+          <option value="">— выберите —</option>
+          <option value="Айтбаев Т.Н">Айтбаев Т.Н. — ДСК, вахта 2</option>
+          <option value="Дыбов В.А">Дыбов В.А. — ДСК, вахта 2</option>
+          <option value="Тулкибаев К.Б">Тулкибаев К.Б. — ДСК, вахта 1</option>
+          <option value="Мукушев М.Т">Мукушев М.Т. — ДСК, вахта 1</option>
+          <option value="Саметов М.С">Саметов М.С. — Телестак, вахта 2</option>
+          <option value="Газизов А.А">Газизов А.А. — Телестак, вахта 2</option>
+          <option value="Мерекеев А.Ж">Мерекеев А.Ж. — Телестак, вахта 1</option>
+          <option value="Калмаханов А.Б">Калмаханов А.Б. — Телестак, вахта 1</option>
+          <option value="—">— (я мастер/начальник, надо мной нет)</option>
+          <option value="__other__">Другой / не в списке (указать)</option>
+        </select>
+        <input type="text" id="fMasterOther" placeholder="Укажите ФИО мастера" style="display:none">
+
+        <label class="label">Закреплённое оборудование</label>
+        <textarea id="fEquipment" rows="2" placeholder="Например: 201-CV-008 Конвейер В1200х37м, 201-FE-005 Ленточный дозатор"></textarea>
+      </div>
 
       <label class="label">Основное ТОО</label>
       <select id="fToo">
@@ -430,12 +473,38 @@ function handlePhotoSelect(event) {
   reader.readAsDataURL(file);
 }
 
+// Должности ДСК-1/Телестак, для которых нужны вахта/мастер/оборудование.
+// Список синхронизирован со значениями <option> в fPosition выше.
+const DSK_POSITIONS = ["Машинист конвейера","Дробильщик","Бункеровщик","Грохотовщик",
+  "Оператор штабелеукладчика","Оператор пульта управления (ДСК)","Мастер (ДСК/Телестак)","Начальник ДСК"];
+
 function togglePositionOther(val, ctx) {
   const suffix = ctx === "hire" ? "hire" : "f";
   const other = document.getElementById(suffix === "hire" ? "hirePositionOther" : "fPositionOther");
+  if (other) {
+    other.style.display = (val === "__other__") ? "block" : "none";
+    if (val !== "__other__") other.value = "";
+  }
+  // Блок вахта/мастер/оборудование существует только в анкете (ctx="anketa"),
+  // в форме найма из instructor.html (ctx="hire") его нет.
+  if (suffix === "f") {
+    const dskBlock = document.getElementById("dskFieldsBlock");
+    if (dskBlock) dskBlock.style.display = DSK_POSITIONS.includes(val) ? "block" : "none";
+  }
+}
+
+function toggleMasterOther(val) {
+  const other = document.getElementById("fMasterOther");
   if (!other) return;
   other.style.display = (val === "__other__") ? "block" : "none";
   if (val !== "__other__") other.value = "";
+}
+
+function getMasterValue() {
+  const sel = document.getElementById("fMaster");
+  if (!sel) return "";
+  if (sel.value === "__other__") return document.getElementById("fMasterOther").value.trim();
+  return sel.value;
 }
 
 // Подрядная организация — галочка открывает поле для названия.
@@ -693,6 +762,12 @@ async function submitForm() {
     winterClothingSize: document.getElementById("fWinterClothingSize").value,
     winterShoeSize: document.getElementById("fWinterShoeSize").value,
     photoUrl,
+    // Только для должностей ДСК-1/Телестак (см. DSK_POSITIONS) — для
+    // остальных полей нет в форме, и на бэкенде пустая строка не перетрёт
+    // уже сохранённое значение (submitSurvey/hireEmployee ставят "" через ||).
+    vahta: document.getElementById("fVahta").value,
+    master: getMasterValue(),
+    equipment: document.getElementById("fEquipment").value.trim(),
   };
 
   try {
