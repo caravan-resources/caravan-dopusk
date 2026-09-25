@@ -503,7 +503,7 @@ tr:hover td { background:#FAFBFD; }
           </div>
         </div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
-          <input type="text" id="checklistModelFilterAlmaty" placeholder="Модель, напр. HITACHI ZX470"
+          <input type="text" id="checklistModelFilterAlmaty" placeholder="Номер или модель, напр. EX224 / HITACHI"
             style="max-width:220px">
           <span style="font-size:11px;color:var(--gray)">период:</span>
           <input type="date" id="checklistFromAlmaty" style="max-width:140px">
@@ -558,7 +558,7 @@ tr:hover td { background:#FAFBFD; }
           </div>
         </div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
-          <input type="text" id="checklistModelFilterAshyktas" placeholder="Модель, напр. HITACHI ZX470"
+          <input type="text" id="checklistModelFilterAshyktas" placeholder="Номер или модель, напр. EX224 / HITACHI"
             style="max-width:220px">
           <span style="font-size:11px;color:var(--gray)">период:</span>
           <input type="date" id="checklistFromAshyktas" style="max-width:140px">
@@ -5306,7 +5306,11 @@ function exportChecklistExcel(site) {
   const list = (DATA.checklistRecords||[]).filter(rec => {
     if (!eqIds.has(String(rec.equipmentId))) return false;
     const eq = eqById[String(rec.equipmentId)];
-    if (modelFilter && !(eq && String(eq.model||"").toLowerCase().includes(modelFilter))) return false;
+    // Ищем по тому же тексту, что показан в карточке ("EX224 — HITACHI EX1200-7") —
+    // раньше сравнивалось только с eq.model, и ввод с номером техники впереди
+    // (как люди естественно копируют из списка) никогда не совпадал. 25.09.2026.
+    const searchable = eq ? `${eq.equipmentId||""} — ${eq.model||""}`.toLowerCase() : "";
+    if (modelFilter && !searchable.includes(modelFilter)) return false;
     const d = parseRecordDate(rec.date);
     if (!d) return false;
     if (from && d < from) return false;
