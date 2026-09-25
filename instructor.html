@@ -509,7 +509,7 @@ tr:hover td { background:#FAFBFD; }
           <input type="date" id="checklistFromAlmaty" style="max-width:140px">
           <span style="font-size:11px;color:var(--gray)">—</span>
           <input type="date" id="checklistToAlmaty" style="max-width:140px">
-          <button class="btn btn-ghost" onclick="exportChecklistExcel('Алмалы')">⬇️ Excel по модели/периоду</button>
+          <button class="btn btn-ghost" onclick="exportChecklistExcel('Алмалы', this)">⬇️ Excel по модели/периоду</button>
         </div>
         <div id="checklistRecordsListAlmaty"></div>
       </div>
@@ -564,7 +564,7 @@ tr:hover td { background:#FAFBFD; }
           <input type="date" id="checklistFromAshyktas" style="max-width:140px">
           <span style="font-size:11px;color:var(--gray)">—</span>
           <input type="date" id="checklistToAshyktas" style="max-width:140px">
-          <button class="btn btn-ghost" onclick="exportChecklistExcel('Ашыктас')">⬇️ Excel по модели/периоду</button>
+          <button class="btn btn-ghost" onclick="exportChecklistExcel('Ашыктас', this)">⬇️ Excel по модели/периоду</button>
         </div>
         <div id="checklistRecordsListAshyktas"></div>
       </div>
@@ -5280,17 +5280,26 @@ function exportChecklistCSV(site) {
 
 // 25.09.2026: выгрузка чек-листов по модели техники за произвольный период —
 // одна строка на осмотр (не на пункт, как в exportChecklistCSV), для проверки
-// "сдал/не сдал" по конкретной модели. Требует, чтобы полный журнал уже был
-// загружен кнопкой «Показать журнал осмотров» (DATA.checklistRecords) —
-// без этого фильтр увидит только последние записи из агрегата или ничего.
-function exportChecklistExcel(site) {
+// "сдал/не сдал" по конкретной модели.
+// 25.09.2026 (правка): раньше требовала, чтобы журнал уже был загружен кнопкой
+// «Показать журнал осмотров», иначе тихо показывала alert — с точки зрения
+// пользователя выглядело как "нажимаю и ничего не происходит" (сам alert легко
+// потерять среди других открытых окон/вкладок). Теперь грузит журнал сама,
+// если его ещё нет, с индикацией на самой кнопке.
+async function exportChecklistExcel(site, btn) {
   if (typeof XLSX === "undefined") {
     alert("Библиотека Excel не загрузилась (нужен интернет) — попробуй ещё раз.");
     return;
   }
   if (!(DATA.checklistRecords||[]).length) {
-    alert("Сначала загрузите полный журнал осмотров — кнопка «Показать журнал осмотров» в блоке «Проведённые осмотры» выше.");
-    return;
+    const oldLabel = btn ? btn.textContent : "";
+    if (btn) { btn.disabled = true; btn.textContent = "⏳ Загружаю журнал осмотров..."; }
+    const ok = await loadFullHistory();
+    if (btn) { btn.disabled = false; btn.textContent = oldLabel; }
+    if (!ok || !(DATA.checklistRecords||[]).length) {
+      alert("Не удалось загрузить журнал осмотров (нужен интернет) — попробуй ещё раз.");
+      return;
+    }
   }
   const suffix = site === "Ашыктас" ? "Ashyktas" : "Almaty";
   const modelFilter = (document.getElementById("checklistModelFilter"+suffix).value || "").trim().toLowerCase();
