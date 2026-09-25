@@ -502,6 +502,15 @@ tr:hover td { background:#FAFBFD; }
             <button class="btn btn-ghost" onclick="loadAll()">🔄 Обновить</button>
           </div>
         </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+          <input type="text" id="checklistModelFilterAlmaty" placeholder="Модель, напр. HITACHI ZX470"
+            style="max-width:220px">
+          <span style="font-size:11px;color:var(--gray)">период:</span>
+          <input type="date" id="checklistFromAlmaty" style="max-width:140px">
+          <span style="font-size:11px;color:var(--gray)">—</span>
+          <input type="date" id="checklistToAlmaty" style="max-width:140px">
+          <button class="btn btn-ghost" onclick="exportChecklistExcel('Алмалы')">⬇️ Excel по модели/периоду</button>
+        </div>
         <div id="checklistRecordsListAlmaty"></div>
       </div>
     </div>
@@ -547,6 +556,15 @@ tr:hover td { background:#FAFBFD; }
             <button class="btn btn-ghost" onclick="exportChecklistCSV('Ашыктас')">⬇️ Скачать CSV</button>
             <button class="btn btn-ghost" onclick="loadAll()">🔄 Обновить</button>
           </div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+          <input type="text" id="checklistModelFilterAshyktas" placeholder="Модель, напр. HITACHI ZX470"
+            style="max-width:220px">
+          <span style="font-size:11px;color:var(--gray)">период:</span>
+          <input type="date" id="checklistFromAshyktas" style="max-width:140px">
+          <span style="font-size:11px;color:var(--gray)">—</span>
+          <input type="date" id="checklistToAshyktas" style="max-width:140px">
+          <button class="btn btn-ghost" onclick="exportChecklistExcel('Ашыктас')">⬇️ Excel по модели/периоду</button>
         </div>
         <div id="checklistRecordsListAshyktas"></div>
       </div>
@@ -5258,6 +5276,65 @@ function exportChecklistCSV(site) {
     });
   });
   downloadCSV([headers, ...rows], `Осмотры_${site}_${today()}.csv`);
+}
+
+// 25.09.2026: выгрузка чек-листов по модели техники за произвольный период —
+// одна строка на осмотр (не на пункт, как в exportChecklistCSV), для проверки
+// "сдал/не сдал" по конкретной модели. Требует, чтобы полный журнал уже был
+// загружен кнопкой «Показать журнал осмотров» (DATA.checklistRecords) —
+// без этого фильтр увидит только последние записи из агрегата или ничего.
+function exportChecklistExcel(site) {
+  if (typeof XLSX === "undefined") {
+    alert("Библиотека Excel не загрузилась (нужен интернет) — попробуй ещё раз.");
+    return;
+  }
+  if (!(DATA.checklistRecords||[]).length) {
+    alert("Сначала загрузите полный журнал осмотров — кнопка «Показать журнал осмотров» в блоке «Проведённые осмотры» выше.");
+    return;
+  }
+  const suffix = site === "Ашыктас" ? "Ashyktas" : "Almaty";
+  const modelFilter = (document.getElementById("checklistModelFilter"+suffix).value || "").trim().toLowerCase();
+  const fromVal = document.getElementById("checklistFrom"+suffix).value;
+  const toVal   = document.getElementById("checklistTo"+suffix).value;
+  const from = fromVal ? parseAnchorDate(fromVal) : null;
+  const to   = toVal ? (() => { const d = parseAnchorDate(toVal); d.setDate(d.getDate()+1); return d; })() : null; // включительно
+
+  const eqById = {};
+  (DATA.equipment||[]).forEach(e => { eqById[String(e.equipmentId)] = e; });
+  const eqIds = new Set((DATA.equipment||[]).filter(e => (e.site||"").trim() === site).map(e => String(e.equipmentId)));
+
+  const list = (DATA.checklistRecords||[]).filter(rec => {
+    if (!eqIds.has(String(rec.equipmentId))) return false;
+    const eq = eqById[String(rec.equipmentId)];
+    if (modelFilter && !(eq && String(eq.model||"").toLowerCase().includes(modelFilter))) return false;
+    const d = parseRecordDate(rec.date);
+    if (!d) return false;
+    if (from && d < from) return false;
+    if (to && d >= to) return false;
+    return true;
+  });
+
+  if (!list.length) { alert("Нет осмотров по заданным модели/периоду."); return; }
+
+  const rows = list.map(rec => {
+    const eq = eqById[String(rec.equipmentId)];
+    const defects = (rec.items||[]).filter(it => it.status === "defect");
+    return [
+      fmtRecordDateTime(rec.date),
+      rec.equipmentId || "",
+      eq ? eq.model : "",
+      rec.empName || "",
+      defects.length ? `${defects.length} неисправност${defects.length===1?"ь":defects.length<5?"и":"ей"}` : "Без замечаний",
+      defects.map(it => it.comment ? `${it.itemText}: ${it.comment}` : it.itemText).join("; "),
+    ];
+  });
+  const aoa = [["Дата и время","Техника","Модель","Сотрудник","Статус","Неисправности"], ...rows];
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws["!cols"] = [{wch:18},{wch:12},{wch:22},{wch:22},{wch:18},{wch:50}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Осмотры");
+  const modelPart = modelFilter ? `_${modelFilter.replace(/[^a-z0-9а-яё]+/gi,"-")}` : "";
+  XLSX.writeFile(wb, `Осмотры_${site}${modelPart}_${today()}.xlsx`);
 }
 
 // ══════════════════════════════════════════════════════
