@@ -503,13 +503,16 @@ tr:hover td { background:#FAFBFD; }
           </div>
         </div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+          <select id="checklistTypeFilterAlmaty" style="max-width:170px" onchange="renderChecklistRecordsList('Алмалы')">
+            <option value="">— все виды техники —</option>
+          </select>
           <input type="text" id="checklistModelFilterAlmaty" placeholder="Номер или модель, напр. EX224 / HITACHI"
-            style="max-width:220px">
+            style="max-width:220px" oninput="renderChecklistRecordsList('Алмалы')">
           <span style="font-size:11px;color:var(--gray)">период:</span>
-          <input type="date" id="checklistFromAlmaty" style="max-width:140px">
+          <input type="date" id="checklistFromAlmaty" style="max-width:140px" onchange="renderChecklistRecordsList('Алмалы')">
           <span style="font-size:11px;color:var(--gray)">—</span>
-          <input type="date" id="checklistToAlmaty" style="max-width:140px">
-          <button class="btn btn-ghost" onclick="exportChecklistExcel('Алмалы', this)">⬇️ Excel по модели/периоду</button>
+          <input type="date" id="checklistToAlmaty" style="max-width:140px" onchange="renderChecklistRecordsList('Алмалы')">
+          <button class="btn btn-ghost" onclick="exportChecklistExcel('Алмалы', this)">⬇️ Excel по фильтру</button>
         </div>
         <div id="checklistRecordsListAlmaty"></div>
       </div>
@@ -558,13 +561,16 @@ tr:hover td { background:#FAFBFD; }
           </div>
         </div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+          <select id="checklistTypeFilterAshyktas" style="max-width:170px" onchange="renderChecklistRecordsList('Ашыктас')">
+            <option value="">— все виды техники —</option>
+          </select>
           <input type="text" id="checklistModelFilterAshyktas" placeholder="Номер или модель, напр. EX224 / HITACHI"
-            style="max-width:220px">
+            style="max-width:220px" oninput="renderChecklistRecordsList('Ашыктас')">
           <span style="font-size:11px;color:var(--gray)">период:</span>
-          <input type="date" id="checklistFromAshyktas" style="max-width:140px">
+          <input type="date" id="checklistFromAshyktas" style="max-width:140px" onchange="renderChecklistRecordsList('Ашыктас')">
           <span style="font-size:11px;color:var(--gray)">—</span>
-          <input type="date" id="checklistToAshyktas" style="max-width:140px">
-          <button class="btn btn-ghost" onclick="exportChecklistExcel('Ашыктас', this)">⬇️ Excel по модели/периоду</button>
+          <input type="date" id="checklistToAshyktas" style="max-width:140px" onchange="renderChecklistRecordsList('Ашыктас')">
+          <button class="btn btn-ghost" onclick="exportChecklistExcel('Ашыктас', this)">⬇️ Excel по фильтру</button>
         </div>
         <div id="checklistRecordsListAshyktas"></div>
       </div>
@@ -4561,10 +4567,65 @@ function renderChecklistAnalytics(site) {
   }
 }
 
+// Список видов техники участка — общий помощник для дропдаунов фильтров
+// (осмотры, заправки и т.п.), чтобы не жёстко зашивать типы, а брать из
+// живых данных.
+function siteEquipmentTypes(site) {
+  return Array.from(new Set((DATA.equipment||[]).filter(e => (e.site||"").trim()===site).map(e=>e.type).filter(Boolean))).sort();
+}
+
+// Единая фильтрация журнала осмотров по виду техники / номеру-модели / периоду —
+// используется и живым списком карточек на экране, и Excel-выгрузкой. Раньше
+// у них была раздельная логика фильтрации (список вообще не фильтровался),
+// из-за чего то, что видно на экране, не совпадало с тем, что уходит в файл —
+// источник путаницы. 25.09.2026.
+function checklistApplyFilters(site, suffix) {
+  const eqById = {};
+  (DATA.equipment||[]).forEach(e => { eqById[String(e.equipmentId)] = e; });
+  const eqIds = new Set((DATA.equipment||[]).filter(e => (e.site||"").trim() === site).map(e => String(e.equipmentId)));
+
+  const typeEl  = document.getElementById("checklistTypeFilter"+suffix);
+  const modelEl = document.getElementById("checklistModelFilter"+suffix);
+  const fromEl  = document.getElementById("checklistFrom"+suffix);
+  const toEl    = document.getElementById("checklistTo"+suffix);
+
+  const typeFilter  = typeEl ? typeEl.value : "";
+  const modelFilter = (modelEl ? modelEl.value : "").trim().toLowerCase();
+  const from = (fromEl && fromEl.value) ? parseAnchorDate(fromEl.value) : null;
+  const to   = (toEl && toEl.value) ? (() => { const d = parseAnchorDate(toEl.value); d.setDate(d.getDate()+1); return d; })() : null; // включительно
+
+  return (DATA.checklistRecords||[]).filter(rec => {
+    if (!eqIds.has(String(rec.equipmentId))) return false;
+    const eq = eqById[String(rec.equipmentId)];
+    if (typeFilter && (!eq || eq.type !== typeFilter)) return false;
+    if (modelFilter) {
+      const searchable = eq ? `${eq.equipmentId||""} — ${eq.model||""}`.toLowerCase() : "";
+      if (!searchable.includes(modelFilter)) return false;
+    }
+    if (from || to) {
+      const d = parseRecordDate(rec.date);
+      if (!d) return false;
+      if (from && d < from) return false;
+      if (to && d >= to) return false;
+    }
+    return true;
+  });
+}
+
 function renderChecklistRecordsList(site) {
   const suffix = site === "Ашыктас" ? "Ashyktas" : "Almaty";
   const el = document.getElementById("checklistRecordsList"+suffix);
   if (!el) return;
+
+  // Дропдаун видов техники — заполняем всегда (не зависит от загрузки
+  // тяжёлого журнала), сохраняя уже выбранное значение.
+  const typeSelEl = document.getElementById("checklistTypeFilter"+suffix);
+  if (typeSelEl) {
+    const prevType = typeSelEl.value;
+    const types = siteEquipmentTypes(site);
+    typeSelEl.innerHTML = `<option value="">— все виды техники —</option>` + types.map(t=>`<option value="${t}">${t}</option>`).join("");
+    if (prevType && types.indexOf(prevType) >= 0) typeSelEl.value = prevType;
+  }
 
   // Сами записи осмотров не грузятся при входе — их объём растёт каждый день.
   // Здесь показываем сводку из агрегата, а полный журнал — по кнопке.
@@ -4586,10 +4647,15 @@ function renderChecklistRecordsList(site) {
     return;
   }
 
-  const eqIds = new Set((DATA.equipment||[]).filter(e => (e.site||"").trim() === site).map(e => String(e.equipmentId)));
-  const list = (DATA.checklistRecords||[]).filter(r => eqIds.has(String(r.equipmentId)));
+  const list = checklistApplyFilters(site, suffix);
   if (!list.length) {
-    el.innerHTML = `<div class="empty"><div class="empty-icon">📋</div>Осмотров пока нет</div>`;
+    const anyFilter = (document.getElementById("checklistTypeFilter"+suffix)||{}).value
+      || (document.getElementById("checklistModelFilter"+suffix)||{}).value
+      || (document.getElementById("checklistFrom"+suffix)||{}).value
+      || (document.getElementById("checklistTo"+suffix)||{}).value;
+    el.innerHTML = anyFilter
+      ? `<div class="empty"><div class="empty-icon">📋</div>Осмотров по заданному фильтру нет</div>`
+      : `<div class="empty"><div class="empty-icon">📋</div>Осмотров пока нет</div>`;
     return;
   }
 
@@ -5302,32 +5368,11 @@ async function exportChecklistExcel(site, btn) {
     }
   }
   const suffix = site === "Ашыктас" ? "Ashyktas" : "Almaty";
-  const modelFilter = (document.getElementById("checklistModelFilter"+suffix).value || "").trim().toLowerCase();
-  const fromVal = document.getElementById("checklistFrom"+suffix).value;
-  const toVal   = document.getElementById("checklistTo"+suffix).value;
-  const from = fromVal ? parseAnchorDate(fromVal) : null;
-  const to   = toVal ? (() => { const d = parseAnchorDate(toVal); d.setDate(d.getDate()+1); return d; })() : null; // включительно
-
   const eqById = {};
   (DATA.equipment||[]).forEach(e => { eqById[String(e.equipmentId)] = e; });
-  const eqIds = new Set((DATA.equipment||[]).filter(e => (e.site||"").trim() === site).map(e => String(e.equipmentId)));
+  const list = checklistApplyFilters(site, suffix);
 
-  const list = (DATA.checklistRecords||[]).filter(rec => {
-    if (!eqIds.has(String(rec.equipmentId))) return false;
-    const eq = eqById[String(rec.equipmentId)];
-    // Ищем по тому же тексту, что показан в карточке ("EX224 — HITACHI EX1200-7") —
-    // раньше сравнивалось только с eq.model, и ввод с номером техники впереди
-    // (как люди естественно копируют из списка) никогда не совпадал. 25.09.2026.
-    const searchable = eq ? `${eq.equipmentId||""} — ${eq.model||""}`.toLowerCase() : "";
-    if (modelFilter && !searchable.includes(modelFilter)) return false;
-    const d = parseRecordDate(rec.date);
-    if (!d) return false;
-    if (from && d < from) return false;
-    if (to && d >= to) return false;
-    return true;
-  });
-
-  if (!list.length) { alert("Нет осмотров по заданным модели/периоду."); return; }
+  if (!list.length) { alert("Нет осмотров по заданному фильтру (вид техники/номер-модель/период)."); return; }
 
   const rows = list.map(rec => {
     const eq = eqById[String(rec.equipmentId)];
