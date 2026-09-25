@@ -1560,7 +1560,27 @@ function isoToRuLocal(iso) {
   const m = String(iso||"").match(/^(\d{4})-(\d{2})-(\d{2})/);
   return m ? `${m[3]}.${m[2]}.${m[1]}` : "";
 }
-
+// Автоимя файла для архива сканов — вместо родного имени со сканера/камеры
+// ("scan.pdf", "Снимок экрана...png"), которое ничего не говорит о том,
+// что на скане. Собирается из того, что человек и так вводит в форму
+// (курс/тест + дата), по образцу вручную заведённых старых записей:
+// "Ростер_18-06-2026_Оператор карьерного самосвала TONLY DTH145.pdf".
+function extensionForMime(mimeType) {
+  if (mimeType === "image/jpeg") return "jpg";
+  if (mimeType === "application/pdf") return "pdf";
+  if (mimeType === "image/png") return "png";
+  const m = String(mimeType||"").match(/\/([a-zA-Z0-9]+)$/);
+  return m ? m[1] : "dat";
+}
+function sanitizeForFileName(s) {
+  return String(s||"").trim().replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim();
+}
+function buildArchiveFileName(prefix, title, dateRu, mimeType) {
+  const ext = extensionForMime(mimeType);
+  const datePart = dateRu ? String(dateRu).replace(/\./g, "-") : "";
+  const parts = [prefix, datePart, sanitizeForFileName(title)].filter(Boolean);
+  return parts.join("_") + "." + ext;
+}
 // Загрузка скана ростера без привязки к зачислению группы (когда часть или
 // все обучаемые ещё не в базе — batchId неоткуда взять). Тот же archiveDocs,
 // просто linkedIds пустой — привязка только по курсу/дате/участку в метаданных.
@@ -1644,7 +1664,7 @@ async function submitRosterUpload(input) {
     const res = await fetch(CFG.SHEET_URL, { method:"POST", body: JSON.stringify({
       action: "uploadDocument",
       image: base64, mimeType,
-      fileName: file.name,
+      fileName: buildArchiveFileName("Ростер", course, dateRu, mimeType),
       type: "ростер",
       title: course,
       date: dateRu,
@@ -1675,14 +1695,15 @@ async function submitProtocolUpload(input) {
   const statusEl = document.getElementById("protocolUploadStatus");
   if (statusEl) statusEl.textContent = "⏳ Загружаю...";
   try {
-    const { base64, mimeType } = await prepareFileForUpload(file);
+       const { base64, mimeType } = await prepareFileForUpload(file);
+    const protocolDateRu = dateIso ? isoToRuLocal(dateIso) : "";
     const res = await fetch(CFG.SHEET_URL, { method:"POST", body: JSON.stringify({
       action: "uploadDocument",
       image: base64, mimeType,
-      fileName: file.name,
+      fileName: buildArchiveFileName("Протокол", test ? test.title : testId, protocolDateRu, mimeType),
       type: "протокол экзамена",
       title: test ? test.title : testId,
-      date: dateIso ? isoToRuLocal(dateIso) : "",
+      date: protocolDateRu,
       site,
       linkedIds: testId,
     })});
