@@ -3277,13 +3277,14 @@ function competencyGap(emp) {
 
   const doneCourseNames = new Set(
     (DATA.training||[])
-      .filter(t => String(t.empId)===String(emp.id) || t.empName===emp.name)
-      .map(t => String(t.course||"").trim())
+      .filter(t => String(t.empId)===String(emp.id) || nameEq(t.empName, emp.name))
+      .map(t => String(t.course||"").trim().toLowerCase())
       .filter(Boolean)
   );
   const coursesRequired = req.requiredCourses || [];
-  const coursesDone    = coursesRequired.filter(c => doneCourseNames.has(c));
-  const coursesMissing = coursesRequired.filter(c => !doneCourseNames.has(c));
+  const courseKey = c => String(c||"").trim().toLowerCase();
+  const coursesDone    = coursesRequired.filter(c => doneCourseNames.has(courseKey(c)));
+  const coursesMissing = coursesRequired.filter(c => !doneCourseNames.has(courseKey(c)));
 
   return { testsRequired, testsDone, testsMissing, coursesRequired, coursesDone, coursesMissing };
 }
