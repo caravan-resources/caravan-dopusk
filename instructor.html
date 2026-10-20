@@ -3283,8 +3283,15 @@ function competencyGap(emp) {
   );
   const coursesRequired = req.requiredCourses || [];
   const courseKey = c => String(c||"").trim().toLowerCase();
-  const coursesDone    = coursesRequired.filter(c => doneCourseNames.has(courseKey(c)));
-  const coursesMissing = coursesRequired.filter(c => !doneCourseNames.has(courseKey(c)));
+  // Курс/тест переименовали — старые записи «Обучение» остаются под прежним
+  // названием и по строке не совпадают. Тест при переименовании сохраняет id,
+  // поэтому курс также считается закрытым, если сдан тест с тем же названием.
+  const passedTestTitles = new Set(
+    (DATA.tests||[]).filter(t => passedTestIds.has(t.id)).map(t => courseKey(t.title))
+  );
+  const isCourseDone = c => doneCourseNames.has(courseKey(c)) || passedTestTitles.has(courseKey(c));
+  const coursesDone    = coursesRequired.filter(isCourseDone);
+  const coursesMissing = coursesRequired.filter(c => !isCourseDone(c));
 
   return { testsRequired, testsDone, testsMissing, coursesRequired, coursesDone, coursesMissing };
 }
@@ -3618,8 +3625,10 @@ function showTestReview(resultId, filter) {
   let answers = {};
   try { answers = JSON.parse(r.answers || "{}"); } catch(e) { answers = {}; }
 
-  // Тест ищем по названию — id теста в результате не сохраняется
-  const test = (DATA.tests||[]).find(t => t.title === r.testTitle);
+  // Сначала по id теста (переживает переименование), затем по названию —
+  // у старых результатов testId может отсутствовать
+  const test = (r.testId && (DATA.tests||[]).find(t => t.id === r.testId))
+    || (DATA.tests||[]).find(t => t.title === r.testTitle);
   if (!test) {
     openModal(`
       <div style="font-size:16px;font-weight:800;color:var(--navy);margin-bottom:8px">${r.testTitle||"Тест"}</div>
