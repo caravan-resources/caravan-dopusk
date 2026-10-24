@@ -210,6 +210,8 @@ tr:hover td { background:#FAFBFD; }
 <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
 <!-- SheetJS — экспорт заправок в .xlsx -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<!-- Справочник организаций (свои ТОО + подрядчики) — общий с anketa.html и training.html -->
+<script src="orgs.js"></script>
 </head>
 <body>
 
@@ -787,6 +789,8 @@ tr:hover td { background:#FAFBFD; }
         <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
           <label style="font-size:13px;color:var(--gray)">Фильтр по машине (необязательно):</label>
           <select id="reportTrendEquipmentAlmaty" style="max-width:280px"><option value="">— весь участок —</option></select>
+          <label style="font-size:13px;color:var(--gray);margin-left:10px">Организация:</label>
+          <select id="reportOrgAlmaty" style="max-width:280px"><option value="">— все организации —</option></select>
           <label style="font-size:13px;color:var(--gray);margin-left:10px">Дата (необязательно, по умолчанию — сегодня):</label>
           <input type="date" id="reportAnchorDateAlmaty" style="padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px">
         </div>
@@ -807,6 +811,10 @@ tr:hover td { background:#FAFBFD; }
         </div>
         <div class="hint" style="margin-bottom:12px">
           Кадры + техника + осмотры + топливо + обучение этого участка одним снимком, с выводами и рекомендациями.
+        </div>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+          <label style="font-size:13px;color:var(--gray)">Организация (необязательно):</label>
+          <select id="fullReportOrgAlmaty" style="max-width:320px"><option value="">— все организации —</option></select>
         </div>
         <button class="btn btn-gold" style="width:auto;padding:10px 20px" onclick="generateFullSystemReport('Алмалы')">📊 Сформировать сводный отчёт</button>
       </div>
@@ -832,6 +840,8 @@ tr:hover td { background:#FAFBFD; }
         <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
           <label style="font-size:13px;color:var(--gray)">Фильтр по машине (необязательно):</label>
           <select id="reportTrendEquipmentAshyktas" style="max-width:280px"><option value="">— весь участок —</option></select>
+          <label style="font-size:13px;color:var(--gray);margin-left:10px">Организация:</label>
+          <select id="reportOrgAshyktas" style="max-width:280px"><option value="">— все организации —</option></select>
           <label style="font-size:13px;color:var(--gray);margin-left:10px">Дата (необязательно, по умолчанию — сегодня):</label>
           <input type="date" id="reportAnchorDateAshyktas" style="padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px">
         </div>
@@ -852,6 +862,10 @@ tr:hover td { background:#FAFBFD; }
         </div>
         <div class="hint" style="margin-bottom:12px">
           Кадры + техника + осмотры + топливо + обучение этого участка одним снимком, с выводами и рекомендациями.
+        </div>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+          <label style="font-size:13px;color:var(--gray)">Организация (необязательно):</label>
+          <select id="fullReportOrgAshyktas" style="max-width:320px"><option value="">— все организации —</option></select>
         </div>
         <button class="btn btn-gold" style="width:auto;padding:10px 20px" onclick="generateFullSystemReport('Ашыктас')">📊 Сформировать сводный отчёт</button>
       </div>
@@ -6552,6 +6566,36 @@ function renderReportPeriodButtons(site) {
         .map(e => `<option value="${e.equipmentId}">${e.equipmentId} — ${e.model}</option>`).join("");
     sel.value = prevVal;
   }
+
+  // Списки организаций: свои ТОО + подрядчики из справочника + то, что
+  // встретилось в данных сотрудников (чтобы никто не выпал из фильтра).
+  // Пересобираем только если сотрудников загрузили больше, чем при прошлой сборке.
+  if (window.ORGS) {
+    const nEmp = (DATA.employees||[]).length;
+    ["reportOrg","fullReportOrg"].forEach(prefix => {
+      const osel = document.getElementById(prefix+suffix);
+      if (!osel || osel.dataset.nEmp === String(nEmp)) return;
+      const prevOrg = osel.value;
+      osel.innerHTML = ORGS.filterOptionsHtml((DATA.employees||[]).map(e => e.tooPrimary));
+      osel.value = prevOrg;
+      osel.dataset.nEmp = String(nEmp);
+    });
+  }
+}
+
+// Фильтр записей (осмотры, заправки) по организации сотрудника-автора.
+// Возвращает null, если организация не выбрана. Связь по табельному/id,
+// с подстраховкой по ФИО — так же, как в belongsToSite.
+function orgRecordFilter(orgKey) {
+  if (!orgKey || !window.ORGS) return null;
+  const ids = new Set(), names = new Set();
+  (DATA.employees||[]).forEach(e => {
+    if (ORGS.matches(e.tooPrimary, orgKey)) {
+      ids.add(String(e.id));
+      names.add(String(e.name||"").trim());
+    }
+  });
+  return r => ids.has(String(r.empId)) || names.has(String(r.empName||"").trim());
 }
 
 function pctChange(cur, prev) {
@@ -6734,8 +6778,14 @@ async function generateReport(site) {
   if (trendEqId) siteEquipment = siteEquipment.filter(e => String(e.equipmentId) === String(trendEqId));
   const eqIds = new Set(siteEquipment.map(e => String(e.equipmentId)));
 
+  // Организация (необязательно): оставляем только заправки и осмотры, сделанные
+  // сотрудниками этой организации
+  const orgKey = (document.getElementById("reportOrg"+suffix)||{}).value || "";
+  const orgF = orgRecordFilter(orgKey);
+  const orgLabelText = orgKey ? (orgKey === "__none__" ? "(организация не указана)" : ORGS.orgLabel(orgKey)) : "";
+
   // ── ТОПЛИВО ──
-  const fuelAll  = (DATA.fuel||[]).filter(f => eqIds.has(String(f.equipmentId)));
+  const fuelAll  = (DATA.fuel||[]).filter(f => eqIds.has(String(f.equipmentId)) && (!orgF || orgF(f)));
   const fuelCur  = fuelAll.filter(f => inRange(f.date, start, end));
   const fuelPrev = fuelAll.filter(f => inRange(f.date, prevStart, prevEnd));
   const litersCur  = fuelCur.reduce((s,f)=>s+(Number(f.amountLiters)||0),0);
@@ -6746,7 +6796,7 @@ async function generateReport(site) {
   const topFuel = Object.entries(fuelByEq).sort((a,b)=>b[1]-a[1]).slice(0,3);
 
   // ── ОСМОТРЫ ──
-  const chkAll = (DATA.checklistRecords||[]).filter(r => eqIds.has(String(r.equipmentId)));
+  const chkAll = (DATA.checklistRecords||[]).filter(r => eqIds.has(String(r.equipmentId)) && (!orgF || orgF(r)));
   const recCur  = chkAll.filter(r => inRange(r.date, start, end));
   const recPrev = chkAll.filter(r => inRange(r.date, prevStart, prevEnd));
 
@@ -6777,7 +6827,7 @@ async function generateReport(site) {
 
   // ── СБОРКА: карточки + таблицы вместо абзацев ──
   const lines = [];
-  lines.push(`<div style="font-size:15px;font-weight:800;color:var(--navy);margin-bottom:4px">Отчёт за ${periodLabel} (${rangeLabel}) — ${site}${trendEqId ? ` · ${eqLabel(trendEqId)}` : ""}</div>`);
+  lines.push(`<div style="font-size:15px;font-weight:800;color:var(--navy);margin-bottom:4px">Отчёт за ${periodLabel} (${rangeLabel}) — ${site}${trendEqId ? ` · ${eqLabel(trendEqId)}` : ""}${orgLabelText ? ` · ${escapeHtml(orgLabelText)}` : ""}</div>`);
   lines.push(`<div style="font-size:11px;color:var(--gray);margin-bottom:16px">Сформирован ${fmtRecordDateTime(new Date().toISOString())}</div>`);
 
   // ⛽ Топливо
@@ -6809,7 +6859,11 @@ async function generateReport(site) {
     topDefects.map(([t,c]) => [t, `<b>${c}×</b>`]),
     "Неисправностей за период не найдено."
   ));
-  if (notInspected.length) {
+  if (orgF) {
+    // «Не проходила осмотр» — вопрос про технику, а не про людей организации:
+    // при фильтре по организации он теряет смысл, поэтому не выводим
+    lines.push(`<div style="margin-bottom:14px;font-size:12px;color:var(--gray)">Фильтр по организации: учтены только осмотры и заправки сотрудников «${escapeHtml(orgLabelText)}». Список техники без осмотра не показан.</div>`);
+  } else if (notInspected.length) {
     lines.push(`<div style="margin-bottom:14px;padding:10px 12px;background:var(--redbg,#FEECEC);border-radius:8px;font-size:13px;color:var(--red)">
       ⚠ Не проходили осмотр за период (${notInspected.length} ед.): ${notInspected.map(e=>e.equipmentId).join(", ")}
     </div>`);
@@ -6930,12 +6984,18 @@ async function generateFullSystemReport(site) {
   }
   const suffix = site === "Ашыктас" ? "Ashyktas" : "Almaty";
 
-  const emp   = (DATA.employees||[]).filter(e => (e.site||"").trim() === site);
+  // Организация (необязательно): кадры, анкеты, обучение, осмотры и заправки —
+  // только сотрудников выбранной организации. Техника — по участку целиком.
+  const orgKey = (document.getElementById("fullReportOrg"+suffix)||{}).value || "";
+  const orgF = orgRecordFilter(orgKey);
+  const orgLabelText = orgKey ? (orgKey === "__none__" ? "(организация не указана)" : ORGS.orgLabel(orgKey)) : "";
+
+  const emp   = (DATA.employees||[]).filter(e => (e.site||"").trim() === site && (!orgKey || ORGS.matches(e.tooPrimary, orgKey)));
   const eq    = (DATA.equipment||[]).filter(e => (e.site||"").trim() === site);
   const eqIds = new Set(eq.map(e => String(e.equipmentId)));
-  const chk   = (DATA.checklistRecords||[]).filter(r => eqIds.has(String(r.equipmentId)));
-  const fuel  = (DATA.fuel||[]).filter(f => eqIds.has(String(f.equipmentId)));
-  const surv  = (DATA.surveys||[]).filter(s => (s.site||"").trim() === site);
+  const chk   = (DATA.checklistRecords||[]).filter(r => eqIds.has(String(r.equipmentId)) && (!orgF || orgF(r)));
+  const fuel  = (DATA.fuel||[]).filter(f => eqIds.has(String(f.equipmentId)) && (!orgF || orgF(f)));
+  const surv  = (DATA.surveys||[]).filter(s => (s.site||"").trim() === site && (!orgKey || ORGS.matches(s.too, orgKey)));
   const tpl   = DATA.checklistTemplates || []; // общие для всех участков, не фильтруем
 
   // Обучение/тесты/личное дело привязаны к сотруднику, а не к технике —
@@ -6966,7 +7026,8 @@ async function generateFullSystemReport(site) {
   });
 
   const tooCounts = {};
-  emp.forEach(e => { const k = e.tooPrimary || "(не указано)"; tooCounts[k] = (tooCounts[k]||0)+1; });
+  // Подрядчики в разных написаниях сводим к одной организации (orgs.js)
+  emp.forEach(e => { const k = window.ORGS ? ORGS.orgLabel(ORGS.orgKey(e.tooPrimary)) : (e.tooPrimary || "(не указано)"); tooCounts[k] = (tooCounts[k]||0)+1; });
   const posCounts = {};
   emp.forEach(e => { const k = e.position || "(не указано)"; posCounts[k] = (posCounts[k]||0)+1; });
   const topPositions = Object.entries(posCounts).sort((a,b)=>b[1]-a[1]).slice(0,5);
@@ -7002,7 +7063,7 @@ async function generateFullSystemReport(site) {
   // ── СБОРКА: карточки + таблицы вместо абзацев ──
   const L = [];
 
-  L.push(`<div style="font-size:16px;font-weight:800;color:var(--navy)">Сводный отчёт — ${site}</div>`);
+  L.push(`<div style="font-size:16px;font-weight:800;color:var(--navy)">Сводный отчёт — ${site}${orgLabelText ? ` · ${escapeHtml(orgLabelText)}` : ""}</div>`);
   L.push(`<div style="font-size:11px;color:var(--gray);margin-bottom:8px">Снимок на ${fmtRecordDateTime(new Date().toISOString())}</div>`);
 
   // 👥 Кадры
