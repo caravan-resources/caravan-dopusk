@@ -8,6 +8,8 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<!-- Справочник организаций (свои ТОО + подрядчики) — общий с anketa.html и instructor.html -->
+<script src="orgs.js"></script>
 <style>
 :root {
   --navy:#0B1A35; --navy2:#1B3B6F; --gold:#F4A52A;
@@ -335,6 +337,7 @@ td { padding:8px; border-bottom:1px solid var(--border); }
             <option value="pass">Сдали</option>
             <option value="fail">Не сдали</option>
           </select>
+          <select id="filterOrgTests" data-org-filter onchange="renderTestsTable()" ><option value="">— все организации —</option></select>
           <button class="btn-ghost" style="width:auto;padding:9px 16px" onclick="exportTestsCSV()">📥 CSV</button>
         </div>
         <div class="tbl-wrap">
@@ -378,6 +381,7 @@ td { padding:8px; border-bottom:1px solid var(--border); }
             <option value="warning">Истекает</option>
             <option value="ok">Действителен</option>
           </select>
+          <select id="filterOrgAccess" data-org-filter onchange="renderAccessTable()" ><option value="">— все организации —</option></select>
           <input type="date" id="filterPassDate" onchange="renderAccessTable()" style="max-width:160px" title="Дата прохождения">
           <button class="btn-ghost" id="clearPassDateBtn" onclick="document.getElementById('filterPassDate').value='';renderAccessTable()" style="display:none">✕ Дата</button>
           <button class="btn-ghost" style="width:auto;padding:9px 16px" onclick="exportAccessCSV()">📥 CSV</button>
@@ -928,6 +932,7 @@ td { padding:8px; border-bottom:1px solid var(--border); }
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
           <input type="text" id="searchPrint" placeholder="🔍 Поиск..." oninput="renderPrintSelect()" style="flex:1;min-width:180px">
+          <select id="filterOrgPrint" data-org-filter onchange="renderPrintSelect()" style="max-width:240px"><option value="">— все организации —</option></select>
           <input type="date" id="filterPrintDate" style="max-width:160px">
           <button class="btn-ghost" style="width:auto;padding:8px 12px" onclick="selectByPassDate()">📅 Сдавшие в этот день</button>
         </div>
@@ -954,6 +959,7 @@ td { padding:8px; border-bottom:1px solid var(--border); }
             <button class="btn-ghost" style="width:auto;padding:7px 14px" onclick="downloadDrivingCards(this)">⬇ Скачать PDF</button>
           </div>
         </div>
+        <select id="filterOrgDriving" data-org-filter onchange="renderDrivingPrintSelect()" style="max-width:320px;margin-bottom:8px"><option value="">— все организации —</option></select>
         <input type="text" id="searchDrivingPrint" placeholder="🔍 Поиск по имени..." oninput="renderDrivingPrintSelect()" style="margin-bottom:12px">
         <div id="drivingPrintSelectList" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:8px;margin-bottom:16px"></div>
         <div style="font-size:12px;color:var(--gray)" id="drivingPrintSelectedCount">Выбрано: 0</div>
@@ -982,6 +988,7 @@ td { padding:8px; border-bottom:1px solid var(--border); }
           Удостоверение о прохождении обучения по конкретной профессии/курсу — не путать
           с допуском в карьер. Выберите сотрудников ниже, карточки соберутся в лист А4 сами.
         </div>
+        <select id="filterOrgCert" data-org-filter onchange="renderCertPrintSelect('profession')" style="max-width:320px;margin-bottom:8px"><option value="">— все организации —</option></select>
         <input type="text" id="searchCertPrintProfession" placeholder="🔍 Поиск по имени или курсу..." oninput="renderCertPrintSelect('profession')" style="margin-bottom:12px">
         <div id="certPrintSelectListProfession" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:8px;margin-bottom:16px"></div>
         <div style="font-size:12px;color:var(--gray)" id="certPrintSelectedCountProfession">Выбрано: 0</div>
@@ -1198,6 +1205,7 @@ function renderAll() {
   renderArchiveTestSelect();
   renderArchiveList();
   renderRequirementsPanel();
+  fillOrgFilters();
   renderTestsTable();
   renderAccessTable();
   renderTrainingPlan();
@@ -1257,6 +1265,50 @@ function daysUntil(d) {
 }
 
 function empById(id) { return (DATA.employees||[]).find(e => String(e.id)===String(id)); }
+
+// ── Фильтр по организации (свои ТОО + подрядчики), справочник — orgs.js ──
+// Селекты помечены data-org-filter и наполняются в fillOrgFilters().
+// Запись обучения/теста привязана к сотруднику по empId, с подстраховкой по ФИО.
+let _orgIdx = { n: -1, byId: {}, byName: {} };
+function orgIndex() {
+  const emps = DATA.employees || [];
+  if (_orgIdx.n !== emps.length) {
+    const byId = {}, byName = {};
+    emps.forEach(e => { byId[String(e.id)] = e.tooPrimary || ""; byName[String(e.name||"").trim()] = e.tooPrimary || ""; });
+    _orgIdx = { n: emps.length, byId, byName };
+  }
+  return _orgIdx;
+}
+function orgFilterValue(selId) {
+  const el = document.getElementById(selId);
+  return (el && window.ORGS) ? el.value : "";
+}
+// too — значение поля ТОО сотрудника
+function orgMatchesEmp(e, key) { return !key || ORGS.matches(e && e.tooPrimary, key); }
+// r — запись с empId / empName (результат теста, запись обучения)
+function orgMatchesRecord(r, key) {
+  if (!key) return true;
+  const ix = orgIndex();
+  let too = "";
+  if (r.empId != null && String(r.empId) in ix.byId) too = ix.byId[String(r.empId)];
+  else {
+    const nm = String(r.empName || getField(r,"empName","Сотрудник") || "").trim();
+    too = ix.byName[nm] || "";
+  }
+  return ORGS.matches(too, key);
+}
+function fillOrgFilters() {
+  if (!window.ORGS) return;
+  const html = ORGS.filterOptionsHtml((DATA.employees||[]).map(e => e.tooPrimary));
+  const n = String((DATA.employees||[]).length);
+  document.querySelectorAll("select[data-org-filter]").forEach(sel => {
+    if (sel.dataset.nEmp === n) return;
+    const prev = sel.value;
+    sel.innerHTML = html;
+    sel.value = prev;
+    sel.dataset.nEmp = n;
+  });
+}
 
 function renderEmpDatalist() {
   const el = document.getElementById("planEmpList");
@@ -2249,6 +2301,7 @@ function renderTestsTable() {
   let rows = [...(DATA.results||[])].reverse().filter(r => {
     const name = String(getField(r,"empName","Сотрудник")).toLowerCase();
     if (q && !name.includes(q)) return false;
+    if (!orgMatchesRecord(r, orgFilterValue("filterOrgTests"))) return false;
     const pass = isPassed(r);
     if (f==="pass" && !pass) return false;
     if (f==="fail" && pass) return false;
@@ -2400,6 +2453,7 @@ function renderAccessTable() {
 
   let emps = (DATA.employees||[]).filter(e => {
     if (q && !(e.name||"").toLowerCase().includes(q)) return false;
+    if (!orgMatchesEmp(e, orgFilterValue("filterOrgAccess"))) return false;
     if (fst!=="all" && statusOf(e)!==fst) return false;
     if (fpd && !passDateMatches(e, fpd)) return false;
     return true;
@@ -4290,11 +4344,12 @@ function certSelectedSet(kind) {
 function renderPrintSelect() {
   const q   = (document.getElementById("searchPrint")?.value||"").toLowerCase();
   const fs  = document.getElementById("filterPrintSite")?.value||"all";
+  const org = orgFilterValue("filterOrgPrint");
   const list = document.getElementById("printSelectList");
   if (!list) return;
 
-  // Если поиск пустой — показываем только выбранных
-  if (!q && fs === "all") {
+  // Если поиск пустой и организация не выбрана — показываем только выбранных
+  if (!q && fs === "all" && !org) {
     const selected = DATA.employees.filter(e => printSelected.has(e.id));
     if (selected.length === 0) {
       list.innerHTML = `<div style="padding:24px;text-align:center;color:var(--gray);
@@ -4324,6 +4379,7 @@ function renderPrintSelect() {
   const emps = DATA.employees.filter(e => {
     if (q && !(e.name||"").toLowerCase().includes(q)) return false;
     if (fs !== "all" && (e.site||"").trim() !== fs) return false;
+    if (!orgMatchesEmp(e, org)) return false;
     return true;
   });
 
@@ -4794,9 +4850,10 @@ function renderDrivingPrintSelect() {
   const q = (document.getElementById("searchDrivingPrint")?.value||"").toLowerCase();
   const list = document.getElementById("drivingPrintSelectList");
   if (!list) return;
+  const org = orgFilterValue("filterOrgDriving");
   const pool = drivingCertPool();
 
-  if (!q) {
+  if (!q && !org) {
     const selected = pool.filter(t => printSelectedDriving.has(trainingKeyDriving(t)));
     if (selected.length === 0) {
       list.innerHTML = `<div style="padding:24px;text-align:center;color:var(--gray);
@@ -4812,7 +4869,7 @@ function renderDrivingPrintSelect() {
     return;
   }
 
-  const found = pool.filter(t => (t.empName||"").toLowerCase().includes(q));
+  const found = pool.filter(t => (t.empName||"").toLowerCase().includes(q) && orgMatchesRecord(t, org));
   if (found.length === 0) {
     list.innerHTML = `<div style="padding:16px;text-align:center;color:var(--gray);
       font-size:13px;grid-column:1/-1">Не найдено</div>`;
@@ -4932,10 +4989,11 @@ function renderCertPrintSelect(kind) {
   const selSet = certSelectedSet(kind);
   const pool = certPoolFor(kind);
   const q = (document.getElementById("searchCertPrint"+suffix)?.value||"").toLowerCase();
+  const org = orgFilterValue("filterOrgCert");
   const list = document.getElementById("certPrintSelectList"+suffix);
   if (!list) return;
 
-  if (!q) {
+  if (!q && !org) {
     const selected = pool.filter(t => selSet.has(trainingKey(t)));
     if (selected.length === 0) {
       list.innerHTML = `<div style="padding:24px;text-align:center;color:var(--gray);
@@ -4954,7 +5012,7 @@ function renderCertPrintSelect(kind) {
   const found = pool.filter(t => {
     const name   = (t.empName||"").toLowerCase();
     const course = (t.course||"").toLowerCase();
-    return name.includes(q) || course.includes(q);
+    return (name.includes(q) || course.includes(q)) && orgMatchesRecord(t, org);
   });
 
   if (found.length === 0) {
