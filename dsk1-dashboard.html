@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ДСК-1 — Оперативная панель — Caravan Resources</title>
+<style>
+:root {
+  --navy:#0B1A35; --navy2:#1B3B6F; --gold:#F4A52A;
+  --red:#DC2626; --redbg:#FEF2F2;
+  --green:#16A34A; --greenbg:#F0FDF4;
+  --yellow:#B45309; --yellowbg:#FFFBEB;
+  --gray:#64748B; --light:#F1F5F9; --border:#E2E8F0;
+}
+* { box-sizing:border-box; }
+body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+  background:var(--light); color:var(--navy); margin:0; min-height:100vh; }
+
+.header { background:var(--navy); color:#fff; padding:16px 24px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; }
+.header h1 { font-size:16px; font-weight:800; margin:0; }
+.header p { font-size:11px; color:rgba(255,255,255,.6); margin:2px 0 0; }
+.header button { background:var(--gold); color:var(--navy); border:none; padding:8px 14px; border-radius:8px; font-weight:800; font-size:12px; cursor:pointer; }
+
+.navbar { background:#fff; border-bottom:1px solid var(--border); padding:0 16px; display:flex;
+  gap:4px; overflow-x:auto; position:sticky; top:0; z-index:5; }
+.navbar button { background:none; border:none; padding:12px 14px; font-size:13px; font-weight:700;
+  color:var(--gray); cursor:pointer; white-space:nowrap; border-bottom:3px solid transparent; }
+.navbar button.active { color:var(--navy); border-bottom-color:var(--gold); }
+
+.wrap { max-width:1200px; margin:0 auto; padding:20px; }
+.screen { display:none; }
+.screen.active { display:block; }
+
+.loading { text-align:center; padding:60px; color:var(--gray); font-size:14px; }
+.err-banner { background:var(--redbg); border:1px solid #FCA5A5; color:var(--red);
+  padding:12px 16px; border-radius:10px; font-size:12.5px; margin-bottom:16px; line-height:1.5; }
+.gap-banner { background:var(--yellowbg); border:1px solid #FDE68A; color:var(--yellow);
+  padding:12px 16px; border-radius:10px; font-size:12.5px; margin-bottom:16px; line-height:1.5; }
+.gap-banner b { color:var(--navy); }
+
+.stats-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin-bottom:20px; }
+.stat-card { background:#fff; border-radius:12px; padding:16px; border-left:4px solid var(--gold); }
+.stat-card.warn { border-left-color:var(--red); }
+.stat-val { font-size:24px; font-weight:800; }
+.stat-lbl { font-size:12px; color:var(--gray); margin-top:2px; }
+
+.panel { background:#fff; border-radius:14px; padding:18px; margin-bottom:16px; }
+.panel-title { font-size:14px; font-weight:800; color:var(--navy); margin-bottom:12px;
+  display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; }
+.panel-sub { font-size:11px; color:var(--gray); font-weight:500; }
+
+.searchbar { display:flex; gap:8px; margin-bottom:16px; align-items:center; flex-wrap:wrap; }
+.searchbar input { flex:1; min-width:220px; padding:10px 12px; border:1.5px solid var(--border);
+  border-radius:10px; font-size:14px; }
+
+.team-card { border:1px solid var(--border); border-radius:12px; margin-bottom:14px; overflow:hidden; }
+.team-head { background:var(--light); padding:10px 14px; display:flex; justify-content:space-between;
+  align-items:center; cursor:pointer; flex-wrap:wrap; gap:6px; }
+.team-head b { font-size:13.5px; }
+.team-head .chip { font-size:11px; font-weight:700; padding:3px 8px; border-radius:20px; }
+.chip-dsk { background:#EFF6FF; color:#1D4ED8; }
+.chip-tel { background:#F5F3FF; color:#7C3AED; }
+.chip-unk { background:#F1F5F9; color:#64748B; }
+.team-body { display:none; padding:0 6px 6px; }
+.team-body.open { display:block; }
+
+table { width:100%; border-collapse:collapse; font-size:12.5px; }
+th { text-align:left; padding:8px; color:var(--gray); font-size:10.5px; text-transform:uppercase;
+  border-bottom:2px solid var(--border); white-space:nowrap; }
+td { padding:8px; border-bottom:1px solid var(--border); vertical-align:top; }
+tr.gap-row td { background:var(--yellowbg); }
+.badge-gap { background:var(--yellow); color:#fff; font-size:10px; font-weight:800; padding:2px 7px;
+  border-radius:10px; }
+.eq-text { font-size:11.5px; color:var(--gray); max-width:300px; }
+
+.crew-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:12px; }
+.crew-mini { border:1px solid var(--border); border-radius:12px; padding:12px; }
+.crew-mini .n { font-size:20px; font-weight:800; }
+.crew-mini .l { font-size:11.5px; color:var(--gray); margin-top:2px; }
+
+.cl-panel { border:1px solid var(--border); border-radius:12px; margin-bottom:12px; }
+.cl-head { padding:12px 14px; font-weight:700; font-size:13px; display:flex; justify-content:space-between;
+  cursor:pointer; align-items:center; gap:8px; }
+.cl-body { display:none; padding:0 14px 14px; font-size:12.5px; line-height:1.6; color:var(--navy2); white-space:pre-wrap; }
+.cl-body.open { display:block; }
+.cl-sub { font-size:11px; font-weight:800; color:var(--gray); text-transform:uppercase; margin:10px 0 4px; }
+
+.empty { text-align:center; padding:24px; color:var(--gray); font-size:13px; }
+.note { background:var(--light); border-radius:12px; padding:16px; font-size:12.5px; color:var(--navy2); line-height:1.6; }
+
+#loginScreen { display:flex; align-items:center; justify-content:center; min-height:100vh; }
+.login-box { background:#fff; border-radius:16px; padding:36px; width:320px; text-align:center;
+  box-shadow:0 10px 40px rgba(0,0,0,.1); }
+.login-logo { font-size:36px; margin-bottom:10px; }
+.login-title { font-size:17px; font-weight:800; color:var(--navy); }
+.login-sub { font-size:12px; color:var(--gray); margin:4px 0 20px; }
+.login-box input { width:100%; padding:12px; border:1.5px solid var(--border); border-radius:10px;
+  font-size:15px; margin-bottom:12px; text-align:center; }
+.login-box button { width:100%; padding:12px; border:none; border-radius:10px; background:var(--gold);
+  color:var(--navy); font-weight:800; font-size:15px; cursor:pointer; }
+.login-err { display:none; color:var(--red); font-size:12px; margin-top:10px; }
+
+#app { display:none; }
+</style>
+</head>
+<body>
+
+<div id="loginScreen">
+  <div class="login-box">
+    <div class="login-logo">⛏️</div>
+    <div class="login-title">ДСК-1 · Телестак</div>
+    <div class="login-sub">Caravan Resources · оперативная панель</div>
+    <input type="password" id="pinInput" placeholder="Введите PIN-код"
+      onkeydown="if(event.key==='Enter')checkPin()">
+    <button onclick="checkPin()">Войти</button>
+    <div class="login-err" id="loginErr">Неверный PIN-код</div>
+  </div>
+</div>
+
+<div id="app">
+<div class="header">
+  <div>
+    <h1>ДСК-1 · Телестак — Оперативная панель</h1>
+    <p id="headerSub">Загрузка живых данных из «Сотрудники»…</p>
+  </div>
+  <button onclick="loadData()">↻ Обновить</button>
+</div>
+
+<div class="navbar">
+  <button id="navOverview" class="active" onclick="showScreen('overview')">📊 Обзор</button>
+  <button id="navV1" onclick="showScreen('v1')">👷 Вахта 1</button>
+  <button id="navV2" onclick="showScreen('v2')">👷 Вахта 2</button>
+  <button id="navCl" onclick="showScreen('cl')">📋 Инструкции ТО</button>
+</div>
+
+<div class="wrap">
+
+  <div id="loadingBlock" class="loading">Загружаю список сотрудников с сервера…</div>
+  <div id="errBlock" class="err-banner" style="display:none"></div>
+
+  <div id="mainContent" style="display:none">
+
+    <div class="gap-banner">
+      ⚠ <b>Как читать эту панель:</b> состав тянется живьём из листа «Сотрудники» (через анкету → одобрение инструктором). Человек попадает сюда, только если у него заполнено хотя бы одно из полей вахта/мастер/оборудование, или должность содержит «ДСК»/«Телестак». Инструкции по ТО во вкладке «Инструкции ТО» — статичный справочник по должности из исходного файла (14.09.2026), сама база их не хранит.
+    </div>
+
+    <!-- ══ ОБЗОР ══ -->
+    <div id="screenOverview" class="screen active">
+      <div class="stats-grid" id="statsGrid"></div>
+      <div class="panel">
+        <div class="panel-title">Состав бригад <span class="panel-sub">по мастерам, обе вахты</span></div>
+        <div class="crew-grid" id="crewGrid"></div>
+      </div>
+      <div class="panel" id="gapsPanelWrap" style="display:none">
+        <div class="panel-title">Пробелы в данных <span class="panel-sub" id="gapCount"></span></div>
+        <div id="gapsList"></div>
+      </div>
+    </div>
+
+    <!-- ══ ВАХТА 1 / 2 ══ -->
+    <div id="screenV1" class="screen">
+      <div class="searchbar"><input type="text" id="searchV1" placeholder="🔍 Поиск по ФИО или должности — вахта 1" oninput="renderVahta('вахта 1','teamsV1','searchV1')"></div>
+      <div id="teamsV1"></div>
+    </div>
+    <div id="screenV2" class="screen">
+      <div class="searchbar"><input type="text" id="searchV2" placeholder="🔍 Поиск по ФИО или должности — вахта 2" oninput="renderVahta('вахта 2','teamsV2','searchV2')"></div>
+      <div id="teamsV2"></div>
+    </div>
+
+    <!-- ══ ИНСТРУКЦИИ ТО ══ -->
+    <div id="screenCl" class="screen">
+      <div class="panel">
+        <div class="panel-title">Инструкции по ежесменному и еженедельному ТО по должностям</div>
+        <div class="panel-sub" style="margin-bottom:12px">Статичный справочник из исходного файла (14.09.2026) — не подключён к живой базе, ежесменное/еженедельное ТО «Сотрудники» не хранит.</div>
+        <div id="clList"></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+</div>
+
+<script>
+const CFG = { PIN: "2508" };
+const SHEET_URL = "https://script.google.com/macros/s/AKfycbwhdMV20k8US2BXUz1Xk2XCXE9MEwpHpQaadTF9xEfzbU1--dHL-Zuj06K2qXW-rFtKGw/exec";
+const CHECKLISTS = {"Машинист конвейера": {"daily": "1. Проверьте натяжение,износ конвейерных лент. 2. Проверьте затяг всех болтов и гаек на бугелях подшипников, и ролик опорах 3. Проверьте целостность и износ роликов. 4.Проверьте все предупреждающие знаки и убедитесь, что они чистые.5. Проверьте все приборы аварийной остановы конвейера (тросы, кнопки).6. Проверяете состояние барабанов, бугелей, чистиков, фартуков, пересыпных бункеров.7.Визуальный осмотр привода конвейера (мотор редуктор).8. Проверяете состояние обслуживающих площадок и перил", "weekly": ""}, "Диспетчер пульта управления": {"daily": "1. Контроль технологического процесса 2.Управление оборудованием 3.Контроль аварийных ситуации 4.Ведение оперативной документации 5.Мониторинг систем автоматизации 6.Взаимодействие с персоналом", "weekly": ""}, "Дробильщик": {"daily": "1. Проверка уровня масла в баке и системе смазки В пределах показаний датчика уровня 2. Замер температуры в линиях подачи и слива масла Линия слива: +38° – 54°С (100° –130°F) Разность температур на выходе и входе: от+0° до 7° С (+0° до 12°F) без охладителей от+0° до 11° С (+0° до 20°F) с охладителями 3. Проверка давления масла в коробке приводного вала 1,4 –2,8 бар (20 – 40 psi) 4. Проверка потребляемой мощности и уровня в камере дробления 5. Проверка ширины разгрузочной щели 6. Проверка давления разгрузки камеры дробления Смотрите гидравлический раздел 7. Проверка давления зажима 165 –193 бар (2400 – 2800 psi) 8. Проверка распределения питания 9. Проверка чистоты разгрузочного узла. Счистить материал с траверс 10. Проверка износа футеровки противовеса и крышки 11. Проверка времени остановки приводного вала по инерции 30-60 секунд 12. Проверка на ослабление соединений и креплений 13. Проверка посторонних шумов, признаков износа или напряжений в деталях дробилки 14. При приближении к пределу износа футеровок (подвижного конуса и чаши) – проверка открепившихся, треснутых или изношенных насквозь элементов 15. Проверка перемещения регулировочного кольца 16. Проверка потока масла и отстойника фильтра Таблица 4-1", "weekly": "1. Очистка сапунов коробки приводного вала и масляного бака 2. Проверка трубопроводов на наличие протечек масла 3. Проверка плиты распределения питания, футеровки чаши и футеровки подвижного конуса на прочность крепления и износ 4. Смазка резьбы регулировочного кольца при отжатой чаше, а затем - при зажатой чаше 5. Проверка масляного фильтра масляного бака на наличие металлической стружки и хлопьев 6. Проверка движения регулировочного кольца Правильная работа с нагрузкой без движений 7. Проверка натяжения и выравнивания ремней клиноременной трансмиссии. 8. Осмотр на наличие протечек масла 9. Проверка на наличие трещин на шкивах и прочности их посадки на валу. 10. Проверка прочности затяжки винта плиты распределения питания 11. Проверка работоспособности всех устройств сигнализации контрольных ламп и блокировок гидравлической системы и системы смазки (давление, температура и датчики потока, при их использовании) 12. Проверка износа ограждения коробки приводного вала, ограждений траверс, подвижного конуса, противовеса и главной рамы 13. Проверка уровня в масляном баке. 14. Проверка температуры на линии подачи и слива масла. 15. Проверка давления масла в коробке приводного вала. 16. Проверка установки и износа футеровки дробилки 17. Проверка расхода мощности и уровня камеры дробления. 18. Проверка необычного шума и движений"}, "Бункеровщик": {"daily": "A. Во время использования питатель, регулярно проверяйте состояние подшипников, произведите замену в случае обнаружения избыточного износа. B. Регулярно проверяйте, не ослабла ли нижняя плита, есть ли утечка материала из-за износа или повреждение приводных ремней. C. . Регулярно проверяйте болты на вибраторе и нижней плите. При ослаблении, затягивайте своевременно. D. Регулярно проверяйте пружины на наличие усталостного износа. При обнаружении, замените, чтобы избежать возможных повреждений. E. Регулярно проверяйте смазку и состояние подшипников, свободное вращение, температуру и утечки. Проверяйте количество масла", "weekly": ""}, "Грохотовщик": {"daily": "2. Ежедневное техническое обслуживание 1. Проверьте натяжение клиновых ремней. 2. Проверьте затяг всех болтов и гаек 3. Проверьте все предупреждающие знаки и убедитесь, что они чистые. 4. Проверьте есть ли утечка смазки. 5. Для грохотов с жидкой смазкой проверьте уровень масла, если низкий, то долейте. 6. Перед запуском грохота, который был выведен из эксплуатации на долгий период, слейте старое масло и долейте новое до необходимого уровня (для грохотов с жидкой смазкой). 7. Проверьте состояние сапуна (для грохотов с жидкой смазкой) 8. Во время работы наблюдайте за шумом подшипников и температурой. Пиковая температура не должна превышать 75°C. 9. Проверьте состояние пружин. 10. Проверьте, что количество выталкиваемой смазки достаточное. 11. Наблюдайте за шумом грохота", "weekly": "1. Проверьте состояние сит и стальных пластин, при износе замените. 2.Проверьте состояние сёдел пружин. 3.Проверьте правильность посадки шкива и маховика и затяг болтов.4. Проверьте состояние ограждений"}, "Оператор штабелеукладчика": {"daily": "1. Проверьте натяжение,износ конвейерных лент. 2. Проверьте затяг всех болтов и гаек на бугелях подшипников, и ролик опорах 3. Проверьте целостность и износ роликов. 4.Проверьте все предупреждающие знаки и убедитесь, что они чистые.5. Проверьте все приборы аварийной остановы конвейера (тросы, кнопки).6. Проверяете состояние барабанов, бугелей, чистиков, фартуков, пересыпных бункеров.7.Визуальный осмотр привода конвейера (мотор редуктор).8. Проверяете состояние обслуживающих площадок и перил", "weekly": ""}, "Оператор пультауправления": {"daily": "1. Контроль технологического процесса 2.Управление оборудованием 3.Контроль аварийных ситуации 4.Ведение оперативной документации 5.Мониторинг систем автоматизации 6.Взаимодействие с персоналом", "weekly": ""}}
+;
+const DSK_MASTERS = ["Айтбаев Т.Н","Дыбов В.А","Тулкибаев К.Б","Мукушев М.Т"];
+const TEL_MASTERS = ["Саметов М.С","Газизов А.А","Мерекеев А.Ж","Калмаханов А.Б"];
+
+let DATA = [];
+
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+function isDskRelated(e){
+  if (e.vahta || e.master || e.equipment) return true;
+  const p = (e.position||'').toLowerCase();
+  return /дск|телестак/.test(p);
+}
+
+function areaOf(e){
+  const m = e.master;
+  if (DSK_MASTERS.includes(m)) return 'ДСК';
+  if (TEL_MASTERS.includes(m)) return 'Телестак';
+  if (DSK_MASTERS.includes(e.name)) return 'ДСК';
+  if (TEL_MASTERS.includes(e.name)) return 'Телестак';
+  return '';
+}
+
+function checkPin() {
+  const val = document.getElementById("pinInput").value;
+  if (val === CFG.PIN) {
+    document.getElementById("loginScreen").style.display = "none";
+    document.getElementById("app").style.display = "block";
+    loadData();
+  } else {
+    document.getElementById("loginErr").style.display = "block";
+    document.getElementById("pinInput").value = "";
+    document.getElementById("pinInput").focus();
+  }
+}
+
+async function loadData(){
+  document.getElementById('loadingBlock').style.display = 'block';
+  document.getElementById('mainContent').style.display = 'none';
+  document.getElementById('errBlock').style.display = 'none';
+  try {
+    const res = await fetch(SHEET_URL + '?action=list&site=' + encodeURIComponent('Алмалы'));
+    const all = await res.json();
+    if (!Array.isArray(all)) throw new Error('Неожиданный формат ответа');
+    DATA = all.filter(isDskRelated);
+    document.getElementById('headerSub').textContent =
+      'Живые данные из «Сотрудники» · обновлено ' + new Date().toLocaleString('ru-RU');
+    document.getElementById('loadingBlock').style.display = 'none';
+    document.getElementById('mainContent').style.display = 'block';
+    renderAll();
+  } catch(e) {
+    document.getElementById('loadingBlock').style.display = 'none';
+    const err = document.getElementById('errBlock');
+    err.style.display = 'block';
+    err.textContent = '⚠ Не удалось загрузить данные с сервера: ' + e.message + '. Попробуйте «Обновить».';
+  }
+}
+
+function showScreen(id){
+  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+  document.getElementById('screen'+id.charAt(0).toUpperCase()+id.slice(1)).classList.add('active');
+  document.querySelectorAll('.navbar button').forEach(b=>b.classList.remove('active'));
+  document.getElementById('nav'+({overview:'Overview',v1:'V1',v2:'V2',cl:'Cl'})[id]).classList.add('active');
+}
+
+function renderAll(){
+  renderStats();
+  renderCrewGrid();
+  renderGaps();
+  renderVahta('вахта 1','teamsV1','searchV1');
+  renderVahta('вахта 2','teamsV2','searchV2');
+  renderChecklists();
+}
+
+function renderStats(){
+  const total = DATA.length;
+  const v1 = DATA.filter(e=>e.vahta==='вахта 1').length;
+  const v2 = DATA.filter(e=>e.vahta==='вахта 2').length;
+  const noVahta = DATA.filter(e=>!e.vahta).length;
+  const masters = DATA.filter(e=>/мастер|начальник/i.test(e.position||'')).length;
+  const brigades = new Set(DATA.filter(e=>e.master && e.master!=='—').map(e=>e.master)).size;
+
+  const cards = [
+    [total, 'Всего в базе (ДСК/Телестак)'],
+    [v1, 'Вахта 1'],
+    [v2, 'Вахта 2'],
+    [noVahta, 'Без указанной вахты', noVahta>0],
+    [masters, 'Мастеров/начальников'],
+    [brigades, 'Бригад (по мастерам)'],
+  ];
+  document.getElementById('statsGrid').innerHTML = cards.map(c=>
+    `<div class="stat-card${c[2]?' warn':''}"><div class="stat-val">${c[0]}</div><div class="stat-lbl">${c[1]}</div></div>`
+  ).join('');
+}
+
+function renderCrewGrid(){
+  const teams = {};
+  DATA.forEach(e=>{
+    if(!e.master || e.master==='—') return;
+    if(!teams[e.master]) teams[e.master] = {vahta:e.vahta||'—', area:areaOf(e), count:0};
+    teams[e.master].count++;
+  });
+  const html = Object.entries(teams).map(([master,t])=>
+    `<div class="crew-mini"><div class="n">${t.count}</div>
+     <div class="l">${esc(master)} · ${esc(t.vahta)} · ${t.area||'участок не определён'}</div></div>`
+  ).join('');
+  document.getElementById('crewGrid').innerHTML = html || '<div class="empty">Нет данных</div>';
+}
+
+function renderGaps(){
+  const gaps = DATA.filter(e => !e.vahta || !e.master || !e.equipment);
+  const wrap = document.getElementById('gapsPanelWrap');
+  if (!gaps.length) { wrap.style.display = 'none'; return; }
+  wrap.style.display = 'block';
+  document.getElementById('gapCount').textContent = gaps.length + ' записей';
+  document.getElementById('gapsList').innerHTML = `<table><thead><tr>
+    <th>ID</th><th>ФИО</th><th>Должность</th><th>Вахта</th><th>Мастер</th><th>Оборудование</th></tr></thead><tbody>` +
+    gaps.map(e=>`<tr class="gap-row"><td>${esc(e.id)}</td><td>${esc(e.name)}</td><td>${esc(e.position)}</td>
+      <td>${e.vahta?esc(e.vahta):'<span class="badge-gap">нет</span>'}</td>
+      <td>${e.master?esc(e.master):'<span class="badge-gap">нет</span>'}</td>
+      <td>${e.equipment?esc(e.equipment):'<span class="badge-gap">нет</span>'}</td></tr>`).join('') + `</tbody></table>`;
+}
+
+function toggleTeam(id){ document.getElementById(id).classList.toggle('open'); }
+
+function renderVahta(vahtaVal, containerId, searchId){
+  const q = (document.getElementById(searchId).value||'').trim().toLowerCase();
+  const rows = DATA.filter(e=>e.vahta===vahtaVal);
+  const teams = {};
+  rows.forEach(e=>{
+    const key = (e.master && e.master!=='—') ? e.master : '(без указанного мастера)';
+    if(!teams[key]) teams[key] = [];
+    teams[key].push(e);
+  });
+  const container = document.getElementById(containerId);
+  const teamHtml = Object.entries(teams).map(([master, members], i)=>{
+    const filtered = q ? members.filter(m=>
+      (m.name||'').toLowerCase().includes(q) || (m.position||'').toLowerCase().includes(q)) : members;
+    if(q && filtered.length===0) return '';
+    const area = areaOf(members[0]) || DSK_MASTERS.includes(master) && 'ДСК' || TEL_MASTERS.includes(master) && 'Телестак' || '';
+    const chipClass = area==='Телестак' ? 'chip-tel' : (area==='ДСК' ? 'chip-dsk' : 'chip-unk');
+    const bodyId = containerId+'_'+i;
+    const rowsHtml = filtered.map(m=>{
+      const missing = !m.vahta || !m.master || !m.equipment;
+      return `<tr class="${missing?'gap-row':''}">
+        <td>${esc(m.id)}</td>
+        <td>${esc(m.name)}</td>
+        <td>${esc(m.position)}</td>
+        <td class="eq-text">${esc(m.equipment)||'<span class="badge-gap">нет</span>'}</td>
+      </tr>`;
+    }).join('');
+    return `<div class="team-card">
+      <div class="team-head" onclick="toggleTeam('${bodyId}')">
+        <b>👤 ${esc(master)}</b>
+        <span class="chip ${chipClass}">${area||'?'}</span>
+        <span class="panel-sub">${members.length} чел.</span>
+      </div>
+      <div class="team-body open" id="${bodyId}">
+        <table><thead><tr><th>Табельный</th><th>ФИО</th><th>Должность</th><th>Оборудование</th></tr></thead>
+        <tbody>${rowsHtml || '<tr><td colspan="4" class="empty">Не найдено</td></tr>'}</tbody></table>
+      </div>
+    </div>`;
+  }).join('');
+  container.innerHTML = teamHtml || '<div class="empty">Нет данных по вахте</div>';
+}
+
+function toggleCl(id){ document.getElementById(id).classList.toggle('open'); }
+
+function renderChecklists(){
+  const positions = Object.keys(CHECKLISTS);
+  const html = positions.map((pos, i)=>{
+    const c = CHECKLISTS[pos];
+    const count = DATA.filter(e=>e.position===pos).length;
+    const bodyId = 'cl_'+i;
+    return `<div class="cl-panel">
+      <div class="cl-head" onclick="toggleCl('${bodyId}')">
+        <span>🔧 ${esc(pos)} <span class="panel-sub">(сейчас в базе: ${count} чел.)</span></span>
+        <span class="panel-sub">развернуть ▾</span>
+      </div>
+      <div class="cl-body" id="${bodyId}">
+        ${c.daily ? '<div class="cl-sub">Ежесменное обслуживание</div>' + esc(c.daily) : ''}
+        ${c.weekly ? '<div class="cl-sub">Еженедельное обслуживание</div>' + esc(c.weekly) : ''}
+      </div>
+    </div>`;
+  }).join('');
+  document.getElementById('clList').innerHTML = html || '<div class="empty">Нет данных</div>';
+}
+// Данные грузятся только после ввода правильного PIN — см. checkPin()
+</script>
+</body>
+</html>
