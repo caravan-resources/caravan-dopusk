@@ -148,7 +148,7 @@ async function init() {
       EQ_LIST = eq;
       $("eqList").innerHTML = eq.map(e => {
         const id = e.equipmentId || e.id || "";
-        return `<option value="${esc(id)}">${esc([e.name, e.site].filter(Boolean).join(" · "))}</option>`;
+        return `<option value="${esc(id)}">${esc([e.model || e.name, e.site].filter(Boolean).join(" · "))}</option>`;
       }).join("");
     }
   } catch (e) { console.error("Справочник техники:", e); }
@@ -257,7 +257,7 @@ function summaryText() {
   const S = H.summary, out = [];
   if (!S.inspections) return `<p><span class="tag">Факт</span>За выбранный период чек-листов по технике ${esc(H.equipmentId)} нет. Проверьте написание ID и даты (база осмотров начинается с ${fmtD(CFG.DB_START)}).</p>`;
   const span = dayDiff(S.firstDay, S.lastDay) + 1, gap = maxGap(H.daily);
-  out.push(`<p><span class="tag">Факт</span>${esc(H.equipmentId)}${H.equipment && H.equipment.name ? " (" + esc(H.equipment.name) + ")" : ""}: ${S.inspections} ${plural(S.inspections, "осмотр", "осмотра", "осмотров")} в ${S.daysWithInspection} ${plural(S.daysWithInspection, "день", "дня", "дней")} с ${fmtD(S.firstDay)} по ${fmtD(S.lastDay)} (${span} дн. в окне). Замечания в ${S.withDefect} из ${S.inspections} осмотров (${pct(S.withDefect, S.inspections)}%).</p>`);
+  out.push(`<p><span class="tag">Факт</span>${esc(H.equipmentId)}${H.equipment && (H.equipment.model || H.equipment.name) ? " (" + esc(H.equipment.model || H.equipment.name) + ")" : ""}: ${S.inspections} ${plural(S.inspections, "осмотр", "осмотра", "осмотров")} в ${S.daysWithInspection} ${plural(S.daysWithInspection, "день", "дня", "дней")} с ${fmtD(S.firstDay)} по ${fmtD(S.lastDay)} (${span} дн. в окне). Замечания в ${S.withDefect} из ${S.inspections} осмотров (${pct(S.withDefect, S.inspections)}%).</p>`);
   if (H.from < S.firstDay && dayDiff(H.from, S.firstDay) > 7)
     out.push(`<p><span class="tag">Факт</span>Первый осмотр в базе — ${fmtD(S.firstDay)}, а запрошен период с ${fmtD(H.from)}. Что было раньше, по чек-листам сказать нельзя.</p>`);
   if (gap.n >= 7) out.push(`<p><span class="tag">Факт</span>Самый длинный перерыв без осмотров: ${gap.n} дн. (${fmtD(gap.a)} — ${fmtD(gap.b)}). В этот период данных нет, а не «замечаний нет».</p>`);
@@ -340,6 +340,23 @@ function exportXlsx() {
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Дата", "Оператор", "Раздел", "Пункт", "Замечание", "Комментарий"]].concat(H.comments.map(c => [c.day, c.op, c.section, c.item, c.defect ? "да" : "", c.comment]))), "Комментарии");
   XLSX.writeFile(wb, `История_${H.equipmentId}_${H.from}_${H.to}.xlsx`);
 }
+// ── Встроенный режим: страница открыта во вкладке «Осмотры техники» ──
+// PIN повторно не спрашиваем, только если родительская страница того же
+// происхождения и уже вошла (панель #app показана). Прямое открытие или
+// встраивание с чужого сайта PIN не обходит.
+(function () {
+  if (new URLSearchParams(location.search).get("embed") !== "1" || window.parent === window) return;
+  let ok = false;
+  try { const a = window.parent.document.getElementById("app"); ok = !!a && a.style.display !== "none"; } catch (e) { ok = false; }
+  if (!ok) return;
+  document.querySelector(".header").style.display = "none";
+  $("loginScreen").style.display = "none";
+  $("app").style.display = "block";
+  document.body.style.background = "transparent";
+  const post = () => window.parent.postMessage({ type: "eqHistoryHeight", h: Math.ceil($("app").getBoundingClientRect().height) }, location.origin);
+  new ResizeObserver(post).observe($("app"));
+  init();
+})();
 </script>
 </body>
 </html>
