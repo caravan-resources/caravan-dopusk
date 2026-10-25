@@ -174,7 +174,7 @@ table.mini td { padding:6px 8px; border-bottom:1px solid var(--border); }
 
     <div class="foot" id="foot">
       Вкладки «Вывозка»: сколько массы вывез каждый оператор на каждой технике за период до среза (смена засчитывается, если по ней есть рейсы). Порядок расчёта. Производственные сутки и месяц отсчитываются от 19:00: ночная смена 19:00–07:00, начатая в 19:00 дня D, относится к суткам D+1. Октябрь начинается в 19:00 30.09.2026 и заканчивается в 19:00 31.10.2026.
-      Рейс относится к смене по времени погрузки (Time Full). Масса рейса — Computed Tonnage. Рейсы, добавленные диспетчером вручную (колонка Extra Load), входят в факт.
+      Рейс относится к смене по времени погрузки (Time Full). Масса рейса — Computed Tonnage, приведённая к номиналу машины: Санни 65 т, Тонли 70 т (класс определяется по рейсам машины; машина без рейсов на 65 и 70 т принимается за Санни). Рейсы, добавленные диспетчером вручную (колонка Extra Load), входят в факт.
       В выгрузке нет водителей и машинистов: рейс закрепляется за работником по плану («дата + смена + самосвал» или «дата + смена + экскаватор»). Если на технике в смене два работника с табельными часами (день заезда или выезда группы), масса делится пропорционально табельным часам.
       План на срез — сумма плана по заданию за смены до выбранного среза включительно. «Осталось до плана» — план месяца минус факт на срез. «Нужно за смену» — остаток, делённый на число оставшихся смен работника по плану; для сравнения под ним указан плановый тоннаж за смену. Пороги цвета заданы условно, это не нормативы.
     </div>
@@ -234,28 +234,40 @@ function parseHexagon(text) {
   const ix = {}; hdr.forEach((h, i) => { ix[h] = i; });
   const miss = need.filter(n => ix[n] === undefined);
   if (miss.length) throw new Error("В файле нет колонок: " + miss.join(", ") + ".");
-  const shifts = {}; const info = { rows: 0, bad: 0, tons: 0, trips: 0, manual: 0, manualTons: 0, min: null, max: null };
+  const info = { rows: 0, bad: 0, tons: 0, trips: 0, manual: 0, manualTons: 0, adj: 0, adjT: 0, adjEq: {}, min: null, max: null };
+  // Проход 1: разбор рейсов и класс машины. Санни — 65 т, Тонли — 70 т; класс определяется по рейсам самой машины,
+  // машина, у которой нет ни одного рейса на 65 или 70 т (в выгрузке — HT152, 57 т), принимается за Санни (65 т).
+  const recs = []; const cls = {};
   for (let r = 1; r < rows.length; r++) {
     const a = rows[r];
     if (a.length < 3 || (a.length === 1 && a[0] === "")) continue;
     const t = parseHexTime(a[ix["Time Full"]]); const tons = parseFloat(a[ix["Computed Tonnage"]]);
     const truck = (a[ix["Truck"]] || "").trim(), shovel = (a[ix["Shovel"]] || "").trim();
     if (!t || !isFinite(tons) || !truck) { info.bad++; continue; }
-    const ps = prodShift(t); const key = ps.date + "|" + ps.sh;
-    const man = (a[ix["Extra Load"]] || "").trim() !== "" ? 1 : 0;
-    const te = parseHexTime(a[ix["Time Empty"]]);
-    const dur = te ? (te.ms - t.ms) / 60000 : null;
-    const S = shifts[key] || (shifts[key] = { m: {}, trips: 0, tons: 0, an: [0, 0], min: t.ms, max: t.ms });
+    const c = cls[truck] || (cls[truck] = { n65: 0, n70: 0 });
+    if (Math.round(tons) === 65) c.n65++; else if (Math.round(tons) === 70) c.n70++;
+    recs.push({ t, tons, truck, shovel, man: (a[ix["Extra Load"]] || "").trim() !== "" ? 1 : 0, te: parseHexTime(a[ix["Time Empty"]]) });
+  }
+  const nominal = tk => (cls[tk].n70 > cls[tk].n65 ? 70 : 65);
+  // Проход 2: приведение массы к номиналу машины и агрегация по сменам
+  const shifts = {};
+  recs.forEach(R => {
+    const nom = nominal(R.truck); let tons = R.tons;
+    if (Math.abs(tons - nom) > 0.5) { info.adj++; info.adjT += nom - tons; info.adjEq[R.truck] = (info.adjEq[R.truck] || 0) + 1; tons = nom; }
+    const t = R.t; const ps = prodShift(t); const key = ps.date + "|" + ps.sh; const man = R.man; const truck = R.truck, shovel = R.shovel;
+    const dur = R.te ? (R.te.ms - t.ms) / 60000 : null;
+    const S = shifts[key] || (shifts[key] = { m: {}, trips: 0, tons: 0, an: [0, 0], adj: [0, 0], min: t.ms, max: t.ms });
     const k = truck + "|" + shovel + "|" + man; const e = S.m[k] || (S.m[k] = [truck, shovel, man, 0, 0]);
     e[3]++; e[4] += tons; S.trips++; S.tons += tons;
+    if (tons !== R.tons) { S.adj[0]++; S.adj[1] += tons - R.tons; }
     if (dur !== null && (dur < 0 || dur > 120)) { S.an[0]++; S.an[1] += tons; }
     if (t.ms < S.min) S.min = t.ms; if (t.ms > S.max) S.max = t.ms;
     info.rows++; info.tons += tons; info.trips++; if (man) { info.manual++; info.manualTons += tons; }
     if (info.min === null || t.ms < info.min) info.min = t.ms;
     if (info.max === null || t.ms > info.max) info.max = t.ms;
-  }
+  });
   const out = {};
-  Object.keys(shifts).forEach(k => { const S = shifts[k]; out[k] = { rows: Object.values(S.m), trips: S.trips, tons: S.tons, an: S.an, min: S.min, max: S.max }; });
+  Object.keys(shifts).forEach(k => { const S = shifts[k]; out[k] = { rows: Object.values(S.m), trips: S.trips, tons: S.tons, an: S.an, adj: S.adj, min: S.min, max: S.max }; });
   return { shifts: out, info };
 }
 
@@ -297,11 +309,11 @@ function compute(plan, factShifts, kind, month, cutOrd) {
     planAll += r[5]; getE(r[2]).plan += r[5];
     if (isReal(r[3])) { const w = getW(r[3].trim()); w.plan += r[5]; w.monthPlan += r[5]; if (r[4] > 0) w.shifts++; const c = cell(w, r[0], r[1], r[2]); c.plan += r[5]; c.hrs += r[4]; }
   });
-  let factAll = 0, tripsAll = 0, manAll = 0, manTAll = 0, unT = 0, unTr = 0, sharedTr = 0, anN = 0, anT = 0;
+  let factAll = 0, tripsAll = 0, manAll = 0, manTAll = 0, unT = 0, unTr = 0, sharedTr = 0, anN = 0, anT = 0, adjN = 0, adjT = 0;
   Object.keys(factShifts).forEach(sk => {
     const [date, sh] = sk.split("|");
     if (date.slice(0, 7) !== month || shiftOrd(date, sh) > cutOrd) return;
-    const S = factShifts[sk]; anN += S.an[0]; anT += S.an[1];
+    const S = factShifts[sk]; anN += S.an[0]; anT += S.an[1]; if (S.adj) { adjN += S.adj[0]; adjT += S.adj[1]; }
     S.rows.forEach(r => {
       const eq = kind === "drivers" ? r[0] : r[1]; const trips = r[3], tons = r[4], man = r[2];
       factAll += tons; tripsAll += trips; if (man) { manAll += trips; manTAll += tons; }
@@ -325,7 +337,7 @@ function compute(plan, factShifts, kind, month, cutOrd) {
     });
   });
   return { workers: Object.values(W), equip: Object.values(E), unassigned: Object.values(U),
-    tot: { plan: planAll, monthAll, fact: factAll, trips: tripsAll, man: manAll, manT: manTAll, unT, unTr, sharedTr, anN, anT } };
+    tot: { plan: planAll, monthAll, fact: factAll, trips: tripsAll, man: manAll, manT: manTAll, unT, unTr, sharedTr, anN, anT, adjN, adjT } };
 }
 
 // Разбор плана из JSON (kpi-plan-*.json)
@@ -462,7 +474,7 @@ async function onFactFile(inp) {
       if (!r.info.rows) throw new Error("не найдено ни одного рейса" + (r.info.bad ? " (строк с ошибками: " + r.info.bad + ")" : ""));
       const m = mergeFact(FACT.shifts, r.shifts); FACT.shifts = m.shifts;
       FACT.files.push({ name: f.name, at: Date.now(), rows: r.info.rows, tons: r.info.tons, from: r.info.min, to: r.info.max });
-      msgs.push(f.name + ": рейсов " + fmtN(r.info.rows) + ", " + fmtT(r.info.tons) + " т; смен добавлено " + m.added + ", обновлено " + m.replaced + ", оставлено прежних " + m.kept + (r.info.bad ? "; пропущено строк с ошибками: " + r.info.bad : "") + ".");
+      msgs.push((r.info.adj ? "Масса приведена к номиналу машины (Санни 65 т, Тонли 70 т): рейсов " + fmtN(r.info.adj) + ", поправка " + (r.info.adjT >= 0 ? "+" : "") + fmtT(r.info.adjT) + " т, машины: " + Object.keys(r.info.adjEq).sort().map(k => k + " (" + r.info.adjEq[k] + ")").join(", ") + ". " : "") + f.name + ": рейсов " + fmtN(r.info.rows) + ", " + fmtT(r.info.tons) + " т; смен добавлено " + m.added + ", обновлено " + m.replaced + ", оставлено прежних " + m.kept + (r.info.bad ? "; пропущено строк с ошибками: " + r.info.bad : "") + ".");
     } catch (e) { banner("errBanner", "Файл «" + f.name + "» не загружен: " + e.message); }
   }
   if (!store(CFG.FACT_KEY, FACT)) banner("warnBanner", "Факт загружен, но не сохранён в браузере. После перезагрузки страницы файл придётся загрузить заново.");
@@ -586,7 +598,8 @@ function renderTable() {
     let h = '<div style="padding:16px"><table class="mini"><thead><tr><th>Показатель</th><th class="num">Водители</th><th class="num">Машинисты</th></tr></thead><tbody>' +
       ctlRow("Факт, т", R.fact, X.fact) + ctlRow("Не закреплено за работником, т", R.unT, X.unT) + ctlRow("Не закреплено, рейсов", R.unTr, X.unTr) +
       ctlRow("Рейсов, разделённых между двумя работниками (день заезда/выезда)", R.sharedTr, X.sharedTr) +
-      ctlRow("Рейсов с подозрительной длительностью (меньше 0 или больше 120 мин)", R.anN, X.anN) + ctlRow("Масса таких рейсов, т", R.anT, X.anT) + "</tbody></table>";
+      ctlRow("Рейсов с подозрительной длительностью (меньше 0 или больше 120 мин)", R.anN, X.anN) + ctlRow("Масса таких рейсов, т", R.anT, X.anT) +
+      ctlRow("Рейсов, где масса приведена к номиналу машины (Санни 65 т, Тонли 70 т)", R.adjN, X.adjN) + ctlRow("Поправка массы к номиналу, т", R.adjT, X.adjT) + "</tbody></table>";
     [["drivers", "Самосвалы без работника в плане"], ["exc", "Экскаваторы без работника в плане"]].forEach(([kd, title]) => {
       const rows = sortRows(RES[kd].unassigned.map(u => Object.assign({}, u)), "ctl");
       h += "<h3 style=\"font-size:14px\">" + title + "</h3>";
