@@ -210,7 +210,7 @@ table.mini td { padding:6px 8px; border-bottom:1px solid var(--border); }
       <b>Как считается.</b> Чек-лист фиксирует только время сдачи предсменного осмотра, а не время работы. Поэтому часы расчётные:
       смена с принятым осмотром засчитывается как табельные часы этого дня по графику вахты (полная смена, день заезда, день выезда).
       KPI = засчитанные часы в графике / плановые часы по графику. Смена вне графика (замена, пересадка) в KPI не входит и показана отдельно.
-      Осмотры до 19:00 относятся к дневной смене, с 19:00 до 07:00 — к ночной (осмотры в 06:00–06:59 и 18:00–18:59 относятся к смене, закреплённой за работником).
+      Производственные сутки и месяц отсчитываются от 19:00: ночная смена, начатая в 19:00 дня D, относится к суткам D+1, поэтому октябрь начинается в 19:00 30.09.2026 и заканчивается в 19:00 31.10.2026. Осмотры до 19:00 относятся к дневной смене, с 19:00 до 07:00 — к ночной (осмотры в 06:00–06:59 и 18:00–18:59 относятся к смене, закреплённой за работником).
       Состав и смены берутся из текущего наряда («Смены»): для прошлых периодов это снимок на сегодня, а не архив назначений.
       Больничные, отпуска и прогулы по датам в системе не хранятся и в плане не вычитаются.
     </div>
@@ -261,13 +261,15 @@ function almatyParts(v) {
 }
 
 // К какой смене относится осмотр. assigned — смена работника по наряду (1 день, 2 ночь, 0 неизвестно).
+// Производственные сутки начинаются в 19:00: ночная смена, начатая в 19:00 календарного дня D, относится к суткам D+1.
+// Поэтому month начинается с последней ночной смены предыдущего месяца (октябрь — с 19:00 30.09).
 function shiftOfTime(p, assigned) {
   const h = p.h;
   if (h >= 7 && h <= 17) return { date: p.key, smena: 1 };
-  if (h >= 19 && h <= 23) return { date: p.key, smena: 2 };
-  if (h >= 0 && h <= 5) return { date: addDays(p.key, -1), smena: 2 };
-  if (h === 18) return { date: p.key, smena: assigned === 2 ? 2 : 1 };
-  return assigned === 1 ? { date: p.key, smena: 1 } : { date: addDays(p.key, -1), smena: 2 }; // h === 6
+  if (h >= 19 && h <= 23) return { date: addDays(p.key, 1), smena: 2 };
+  if (h >= 0 && h <= 5) return { date: p.key, smena: 2 };
+  if (h === 18) return assigned === 2 ? { date: addDays(p.key, 1), smena: 2 } : { date: p.key, smena: 1 };
+  return assigned === 1 ? { date: p.key, smena: 1 } : { date: p.key, smena: 2 }; // h === 6
 }
 
 // Табельные часы группы в календарный день по графику (число месяца).
@@ -281,9 +283,10 @@ function hoursFor(P, group, key) {
   if (d === g.out) return P.hOut;
   return P.hFull;
 }
+// Начало смены производственных суток key: день — в 07:00 key, ночь — в 19:00 предыдущего календарного дня.
 function shiftStartMs(key, smena) {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(key);
-  return Date.UTC(+m[1], +m[2] - 1, +m[3], smena === 2 ? 19 : 7);
+  return smena === 2 ? Date.UTC(+m[1], +m[2] - 1, +m[3] - 1, 19) : Date.UTC(+m[1], +m[2] - 1, +m[3], 7);
 }
 function groupOfVahta(P, vahta) { return P.map[vahta] || null; }
 
@@ -475,7 +478,8 @@ function esc(s) {
 }
 const $ = id => document.getElementById(id);
 function nowAlmatyMs() { return Date.now() + TZ_H * 3600000; }
-function todayKey() { return keyOf(new Date(nowAlmatyMs())); }
+// Текущие производственные сутки: с 19:00 по Алматы уже идут сутки следующего календарного дня.
+function todayKey() { const d = new Date(nowAlmatyMs()); return keyOf(new Date(d.getTime() + (d.getUTCHours() >= 19 ? 86400000 : 0))); }
 function fmtDate(k) { return k ? k.slice(8, 10) + "." + k.slice(5, 7) + "." + k.slice(0, 4) : ""; }
 function fmtH(n) { return (Math.round(n * 10) / 10).toString().replace(".", ","); }
 const WD = ["вс", "пн", "вт", "ср", "чт", "пт", "сб"];
