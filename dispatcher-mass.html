@@ -171,7 +171,7 @@ table.mini td { padding:6px 8px; border-bottom:1px solid var(--border); }
       Порядок расчёта. Производственные сутки и месяц отсчитываются от 19:00: ночная смена 19:00–07:00, начатая в 19:00 дня D, относится к суткам D+1. Октябрь начинается в 19:00 30.09.2026 и заканчивается в 19:00 31.10.2026.
       Рейс относится к смене по времени погрузки (Time Full). Масса рейса — Computed Tonnage. Рейсы, добавленные диспетчером вручную (колонка Extra Load), входят в факт.
       В выгрузке нет водителей и машинистов: рейс закрепляется за работником по плану («дата + смена + самосвал» или «дата + смена + экскаватор»). Если на технике в смене два работника с табельными часами (день заезда или выезда группы), масса делится пропорционально табельным часам.
-      План на срез — сумма плана по заданию за смены до выбранного среза включительно. Пороги цвета заданы условно, это не нормативы.
+      План на срез — сумма плана по заданию за смены до выбранного среза включительно. «Осталось до плана» — план месяца минус факт на срез. «Нужно за смену» — остаток, делённый на число оставшихся смен работника по плану; для сравнения под ним указан плановый тоннаж за смену. Пороги цвета заданы условно, это не нормативы.
     </div>
   </div>
 </div>
@@ -278,14 +278,19 @@ function compute(plan, factShifts, kind, month, cutOrd) {
   const rowsP = kind === "drivers" ? plan.drivers : plan.excavators;
   const idx = buildIndex(rowsP);
   const W = {}; const E = {}; const U = {};
-  const getW = f => W[f] || (W[f] = { fio: f, plan: 0, shifts: 0, fact: 0, trips: 0, man: 0, manT: 0, shared: 0, eq: {}, cells: {} });
+  const getW = f => W[f] || (W[f] = { fio: f, plan: 0, shifts: 0, fact: 0, trips: 0, man: 0, manT: 0, shared: 0, monthPlan: 0, planLeft: 0, shiftsLeft: 0, eq: {}, cells: {} });
   const getE = e => E[e] || (E[e] = { eq: e, plan: 0, fact: 0, trips: 0, man: 0, manT: 0 });
   const cell = (w, date, sh, eq) => { const k = date + "|" + sh + "|" + eq; return w.cells[k] || (w.cells[k] = { date, sh, eq, plan: 0, fact: 0, trips: 0, hrs: 0 }); };
-  let planAll = 0;
+  let planAll = 0, monthAll = 0;
   rowsP.forEach(r => {
-    if (r[0].slice(0, 7) !== month || shiftOrd(r[0], r[1]) > cutOrd) return;
+    if (r[0].slice(0, 7) !== month) return;
+    monthAll += r[5];
+    if (shiftOrd(r[0], r[1]) > cutOrd) {
+      if (isReal(r[3])) { const w = getW(r[3].trim()); w.monthPlan += r[5]; w.planLeft += r[5]; if (r[4] > 0) w.shiftsLeft++; }
+      return;
+    }
     planAll += r[5]; getE(r[2]).plan += r[5];
-    if (isReal(r[3])) { const w = getW(r[3].trim()); w.plan += r[5]; if (r[4] > 0) w.shifts++; const c = cell(w, r[0], r[1], r[2]); c.plan += r[5]; c.hrs += r[4]; }
+    if (isReal(r[3])) { const w = getW(r[3].trim()); w.plan += r[5]; w.monthPlan += r[5]; if (r[4] > 0) w.shifts++; const c = cell(w, r[0], r[1], r[2]); c.plan += r[5]; c.hrs += r[4]; }
   });
   let factAll = 0, tripsAll = 0, manAll = 0, manTAll = 0, unT = 0, unTr = 0, sharedTr = 0, anN = 0, anT = 0;
   Object.keys(factShifts).forEach(sk => {
@@ -315,7 +320,7 @@ function compute(plan, factShifts, kind, month, cutOrd) {
     });
   });
   return { workers: Object.values(W), equip: Object.values(E), unassigned: Object.values(U),
-    tot: { plan: planAll, fact: factAll, trips: tripsAll, man: manAll, manT: manTAll, unT, unTr, sharedTr, anN, anT } };
+    tot: { plan: planAll, monthAll, fact: factAll, trips: tripsAll, man: manAll, manT: manTAll, unT, unTr, sharedTr, anN, anT } };
 }
 
 // Разбор плана из JSON (kpi-plan-*.json)
@@ -479,7 +484,8 @@ function render() {
   const ks = Object.keys(FACT.shifts).filter(k => k.slice(0, 7) === m);
   $("stats").innerHTML =
     stat("План на срез, т", fmtT(R.plan)) + stat("Факт, т", fmtT(R.fact)) +
-    stat("Факт / план", p === null ? "—" : p.toFixed(1) + " %") + stat("Рейсов", fmtN(R.trips)) +
+    stat("Факт / план", p === null ? "—" : p.toFixed(1) + " %") + stat("План месяца, т", fmtT(R.monthAll)) +
+    stat("Осталось до плана месяца, т", fmtT(Math.max(0, R.monthAll - R.fact))) + stat("Рейсов", fmtN(R.trips)) +
     stat("Из них добавлено вручную", R.trips ? fmtN(R.man) + " (" + (R.man / R.trips * 100).toFixed(0) + " %)" : "—") +
     stat("Без работника, т", fmtT(R.unT) + " (" + (R.fact ? (R.unT / R.fact * 100).toFixed(1) : "0") + " %)");
   banner("warnBanner", !ks.length ? "Факт за выбранный месяц не загружен." :
@@ -505,7 +511,9 @@ function sortBy(tab, k) { const s = SORT[tab]; SORT[tab] = [k, s[0] === k ? -s[1
 
 function workerRows(kind) {
   const q = $("fSearch").value.trim().toLowerCase();
-  return RES[kind].workers.map(w => Object.assign({}, w, { pct: pct(w.fact, w.plan), diff: w.fact - w.plan,
+  return RES[kind].workers.map(w => Object.assign({}, w, { pct: pct(w.fact, w.plan), diff: w.fact - w.plan, rem: w.monthPlan - w.fact,
+    need: w.shiftsLeft > 0 ? Math.max(0, w.monthPlan - w.fact) / w.shiftsLeft : null,
+    perShift: w.shiftsLeft > 0 ? w.planLeft / w.shiftsLeft : null,
     eqs: Object.keys(w.eq).sort((a, b) => w.eq[b] - w.eq[a]) }))
     .map(w => Object.assign(w, { eqsS: w.eqs.join(" ") }))
     .filter(w => !q || w.fio.toLowerCase().indexOf(q) >= 0 || w.eqs.join(" ").toLowerCase().indexOf(q) >= 0);
@@ -517,13 +525,15 @@ function renderTable() {
     const rows = sortRows(workerRows(TAB), TAB);
     const lab = TAB === "drivers" ? "Самосвалы" : "Экскаваторы";
     let h = '<table class="kpi"><thead><tr>' + th("ФИО", "fio", TAB) + th(lab, "eqsS", TAB) + th("Смен по плану", "shifts", TAB, 1) + th("План, т", "plan", TAB, 1) +
-      th("Факт, т", "fact", TAB, 1) + th("Отклонение, т", "diff", TAB, 1) + th("Рейсов", "trips", TAB, 1) + th("Вручную, т", "manT", TAB, 1) + th("Факт / план", "pct", TAB) + "</tr></thead><tbody>";
-    let sp = 0, sf = 0;
-    rows.forEach(w => { sp += w.plan; sf += w.fact;
+      th("Факт, т", "fact", TAB, 1) + th("Отклонение, т", "diff", TAB, 1) + th("Рейсов", "trips", TAB, 1) + th("Вручную, т", "manT", TAB, 1) + th("Факт / план", "pct", TAB) +
+      th("План месяца, т", "monthPlan", TAB, 1) + th("Осталось до плана, т", "rem", TAB, 1) + th("Смен осталось", "shiftsLeft", TAB, 1) + th("Нужно за смену, т", "need", TAB, 1) + "</tr></thead><tbody>";
+    let sp = 0, sf = 0, sm = 0, sr = 0;
+    rows.forEach(w => { sp += w.plan; sf += w.fact; sm += w.monthPlan; sr += Math.max(0, w.rem);
       h += '<tr class="click" onclick="openWorker(\'' + TAB + "'," + JSON.stringify(w.fio).replace(/"/g, "&quot;") + ')"><td><b>' + esc(w.fio) + "</b>" + (w.shared ? '<div class="sub">часть рейсов разделена (день заезда/выезда)</div>' : "") + "</td><td>" + esc(w.eqs.slice(0, 4).join(", ")) + (w.eqs.length > 4 ? " +" + (w.eqs.length - 4) : "") +
         '</td><td class="num">' + w.shifts + '</td><td class="num">' + fmtT(w.plan) + '</td><td class="num">' + fmtT(w.fact) + '</td><td class="num">' + (w.diff >= 0 ? "+" : "") + fmtT(w.diff) +
-        '</td><td class="num">' + fmtN(w.trips) + '</td><td class="num">' + (w.manT ? fmtT(w.manT) : "") + "</td><td>" + kpiBadge(w.pct) + "</td></tr>"; });
-    h += "</tbody><tfoot><tr><td>Итого по показанным</td><td></td><td></td><td class=\"num\">" + fmtT(sp) + '</td><td class="num">' + fmtT(sf) + '</td><td class="num">' + (sf - sp >= 0 ? "+" : "") + fmtT(sf - sp) + "</td><td></td><td></td><td>" + (sp ? (sf / sp * 100).toFixed(1) + " %" : "") + "</td></tr></tfoot></table>";
+        '</td><td class="num">' + fmtN(w.trips) + '</td><td class="num">' + (w.manT ? fmtT(w.manT) : "") + "</td><td>" + kpiBadge(w.pct) + '</td><td class="num">' + fmtT(w.monthPlan) + '</td><td class="num">' + (w.rem > 0 ? fmtT(w.rem) : (w.monthPlan > 0 ? '<span class="badge b-green">выполнен +' + fmtT(-w.rem) + "</span>" : "")) +
+        '</td><td class="num">' + (w.shiftsLeft || "") + '</td><td class="num">' + (w.need === null ? "" : fmtT(w.need) + (w.perShift ? '<div class="sub">план за смену ' + fmtT(w.perShift) + "</div>" : "")) + "</td></tr>"; });
+    h += "</tbody><tfoot><tr><td>Итого по показанным</td><td></td><td></td><td class=\"num\">" + fmtT(sp) + '</td><td class="num">' + fmtT(sf) + '</td><td class="num">' + (sf - sp >= 0 ? "+" : "") + fmtT(sf - sp) + "</td><td></td><td></td><td>" + (sp ? (sf / sp * 100).toFixed(1) + " %" : "") + '</td><td class="num">' + fmtT(sm) + '</td><td class="num">' + fmtT(sr) + "</td><td></td><td></td></tr></tfoot></table>";
     host.innerHTML = rows.length ? h : '<div class="empty">Нет данных по фильтру.</div>';
   } else if (TAB === "eq") {
     const q = $("fSearch").value.trim().toLowerCase();
@@ -553,7 +563,7 @@ function ctlRow(l, a, b) { return "<tr><td>" + l + '</td><td class="num">' + fmt
 function openWorker(kind, fio) {
   const w = RES[kind].workers.find(x => x.fio === fio); if (!w) return;
   const cells = Object.values(w.cells).sort((a, b) => shiftOrd(a.date, a.sh) - shiftOrd(b.date, b.sh));
-  let h = '<div class="modal-head"><div><h2>' + esc(fio) + '</h2><div class="sub">План ' + fmtT(w.plan) + " т, факт " + fmtT(w.fact) + " т" + (w.plan ? ", " + (w.fact / w.plan * 100).toFixed(1) + " %" : "") + '</div></div><button class="btn ghost" onclick="closeModal()">Закрыть</button></div>';
+  let h = '<div class="modal-head"><div><h2>' + esc(fio) + '</h2><div class="sub">План ' + fmtT(w.plan) + " т, факт " + fmtT(w.fact) + " т" + (w.plan ? ", " + (w.fact / w.plan * 100).toFixed(1) + " %" : "") + '</div><div class="sub">План месяца ' + fmtT(w.monthPlan) + " т, осталось " + fmtT(Math.max(0, w.monthPlan - w.fact)) + " т" + (w.shiftsLeft ? ", смен осталось " + w.shiftsLeft + ", нужно за смену " + fmtT(Math.max(0, w.monthPlan - w.fact) / w.shiftsLeft) + " т" : "") + '</div></div><button class="btn ghost" onclick="closeModal()">Закрыть</button></div>';
   h += '<table class="mini"><thead><tr><th>Сутки</th><th>Смена</th><th>Техника</th><th class="num">План, т</th><th class="num">Факт, т</th><th class="num">Рейсов</th><th>Факт / план</th></tr></thead><tbody>' +
     cells.map(c => "<tr><td>" + fmtD(c.date) + "</td><td>" + (c.sh === SH_N ? "Ночь" : "День") + "</td><td>" + esc(c.eq) + '</td><td class="num">' + fmtT(c.plan) + '</td><td class="num">' + fmtT(c.fact) + '</td><td class="num">' + (c.trips ? (Math.abs(c.trips - Math.round(c.trips)) < 0.01 ? fmtN(c.trips) : c.trips.toFixed(1)) : "") + "</td><td>" + (c.plan ? (c.fact / c.plan * 100).toFixed(0) + " %" : "") + "</td></tr>").join("") + "</tbody></table>";
   $("modalBox").innerHTML = h; $("modalBg").style.display = "flex";
@@ -565,8 +575,8 @@ function exportXlsx() {
   const wb = XLSX.utils.book_new(); const m = $("fMonth").value;
   [["Водители", "drivers"], ["Машинисты", "exc"]].forEach(([nm, kd]) => {
     const rows = RES[kd].workers.slice().sort((a, b) => a.fio.localeCompare(b.fio, "ru"));
-    const data = [["ФИО", "Техника", "Смен по плану", "План, т", "Факт, т", "Отклонение, т", "Рейсов", "Вручную, т", "Факт/план, %"]]
-      .concat(rows.map(w => [w.fio, Object.keys(w.eq).join(", "), w.shifts, Math.round(w.plan), Math.round(w.fact), Math.round(w.fact - w.plan), Math.round(w.trips), Math.round(w.manT), w.plan ? +(w.fact / w.plan * 100).toFixed(1) : null]));
+    const data = [["ФИО", "Техника", "Смен по плану", "План, т", "Факт, т", "Отклонение, т", "Рейсов", "Вручную, т", "Факт/план, %", "План месяца, т", "Осталось до плана, т", "Смен осталось", "Нужно за смену, т"]]
+      .concat(rows.map(w => [w.fio, Object.keys(w.eq).join(", "), w.shifts, Math.round(w.plan), Math.round(w.fact), Math.round(w.fact - w.plan), Math.round(w.trips), Math.round(w.manT), w.plan ? +(w.fact / w.plan * 100).toFixed(1) : null, Math.round(w.monthPlan), Math.round(Math.max(0, w.monthPlan - w.fact)), w.shiftsLeft, w.shiftsLeft ? Math.round(Math.max(0, w.monthPlan - w.fact) / w.shiftsLeft) : null]));
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(data), nm);
   });
   const eqd = [["Техника", "Тип", "План, т", "Факт, т", "Рейсов", "Вручную, рейсов"]];
