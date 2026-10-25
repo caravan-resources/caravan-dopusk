@@ -174,7 +174,7 @@ table.mini td { padding:6px 8px; border-bottom:1px solid var(--border); }
 
     <div class="foot" id="foot">
       Вкладки «Вывозка»: сколько массы вывез каждый оператор на каждой технике за период до среза (смена засчитывается, если по ней есть рейсы). Порядок расчёта. Производственные сутки и месяц отсчитываются от 19:00: ночная смена 19:00–07:00, начатая в 19:00 дня D, относится к суткам D+1. Октябрь начинается в 19:00 30.09.2026 и заканчивается в 19:00 31.10.2026.
-      Рейс относится к смене по времени погрузки (Time Full). Масса рейса — Computed Tonnage, приведённая к номиналу машины: Санни 65 т, Тонли 70 т (класс определяется по рейсам машины; машина без рейсов на 65 и 70 т принимается за Санни). Рейсы, добавленные диспетчером вручную (колонка Extra Load), входят в факт.
+      Рейс относится к смене по времени погрузки (Time Full). Масса рейса — Computed Tonnage, приведённая к номиналу машины: Тонли (HT201–HT210) — 70 т, остальные самосвалы (Санни) — 65 т. Рейсы, добавленные диспетчером вручную (колонка Extra Load), входят в факт.
       В выгрузке нет водителей и машинистов: рейс закрепляется за работником по плану («дата + смена + самосвал» или «дата + смена + экскаватор»). Если на технике в смене два работника с табельными часами (день заезда или выезда группы), масса делится пропорционально табельным часам.
       План на срез — сумма плана по заданию за смены до выбранного среза включительно. «Осталось до плана» — план месяца минус факт на срез. «Нужно за смену» — остаток, делённый на число оставшихся смен работника по плану; для сравнения под ним указан плановый тоннаж за смену. Пороги цвета заданы условно, это не нормативы.
     </div>
@@ -225,6 +225,9 @@ function parseCSV(text) {
   return rows;
 }
 
+// Номинальная масса рейса: Тонли (HT201…HT210) — 70 т, Санни (прочие самосвалы) — 65 т
+function nominalTons(truck) { const m = /^HT(\d+)$/i.exec(String(truck).trim()); return m && +m[1] >= 201 && +m[1] <= 210 ? 70 : 65; }
+
 // Разбор выгрузки Hexagon -> агрегаты по сменам
 function parseHexagon(text) {
   const rows = parseCSV(text);
@@ -235,24 +238,20 @@ function parseHexagon(text) {
   const miss = need.filter(n => ix[n] === undefined);
   if (miss.length) throw new Error("В файле нет колонок: " + miss.join(", ") + ".");
   const info = { rows: 0, bad: 0, tons: 0, trips: 0, manual: 0, manualTons: 0, adj: 0, adjT: 0, adjEq: {}, min: null, max: null };
-  // Проход 1: разбор рейсов и класс машины. Санни — 65 т, Тонли — 70 т; класс определяется по рейсам самой машины,
-  // машина, у которой нет ни одного рейса на 65 или 70 т (в выгрузке — HT152, 57 т), принимается за Санни (65 т).
-  const recs = []; const cls = {};
+  // Номинал машины: Тонли — HT201…HT210, 70 т; остальные самосвалы (Санни) — 65 т.
+  const recs = [];
   for (let r = 1; r < rows.length; r++) {
     const a = rows[r];
     if (a.length < 3 || (a.length === 1 && a[0] === "")) continue;
     const t = parseHexTime(a[ix["Time Full"]]); const tons = parseFloat(a[ix["Computed Tonnage"]]);
     const truck = (a[ix["Truck"]] || "").trim(), shovel = (a[ix["Shovel"]] || "").trim();
     if (!t || !isFinite(tons) || !truck) { info.bad++; continue; }
-    const c = cls[truck] || (cls[truck] = { n65: 0, n70: 0 });
-    if (Math.round(tons) === 65) c.n65++; else if (Math.round(tons) === 70) c.n70++;
     recs.push({ t, tons, truck, shovel, man: (a[ix["Extra Load"]] || "").trim() !== "" ? 1 : 0, te: parseHexTime(a[ix["Time Empty"]]) });
   }
-  const nominal = tk => (cls[tk].n70 > cls[tk].n65 ? 70 : 65);
   // Проход 2: приведение массы к номиналу машины и агрегация по сменам
   const shifts = {};
   recs.forEach(R => {
-    const nom = nominal(R.truck); let tons = R.tons;
+    const nom = nominalTons(R.truck); let tons = R.tons;
     if (Math.abs(tons - nom) > 0.5) { info.adj++; info.adjT += nom - tons; info.adjEq[R.truck] = (info.adjEq[R.truck] || 0) + 1; tons = nom; }
     const t = R.t; const ps = prodShift(t); const key = ps.date + "|" + ps.sh; const man = R.man; const truck = R.truck, shovel = R.shovel;
     const dur = R.te ? (R.te.ms - t.ms) / 60000 : null;
