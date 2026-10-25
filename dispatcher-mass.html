@@ -118,7 +118,6 @@ table.mini td { padding:6px 8px; border-bottom:1px solid var(--border); }
       <p>Факт: выгрузка Hexagon «Shift Load Dump». План: книга KPI («План по заданию, т» и «План тоннажа, т»)</p>
     </div>
     <div>
-      <a href="dispatcher-kpi.html">KPI по осмотрам</a>
       <button onclick="logout()">Выйти</button>
     </div>
   </div>
@@ -160,15 +159,17 @@ table.mini td { padding:6px 8px; border-bottom:1px solid var(--border); }
     <div class="stats-grid" id="stats"></div>
 
     <div class="tabs" id="tabs">
-      <div class="tab on" data-t="drivers" onclick="setTab('drivers')">Водители самосвалов</div>
-      <div class="tab" data-t="exc" onclick="setTab('exc')">Машинисты экскаваторов</div>
+      <div class="tab on" data-t="haulD" onclick="setTab('haulD')">Вывозка: водители</div>
+      <div class="tab" data-t="haulE" onclick="setTab('haulE')">Вывозка: машинисты</div>
+      <div class="tab" data-t="drivers" onclick="setTab('drivers')">KPI водителей</div>
+      <div class="tab" data-t="exc" onclick="setTab('exc')">KPI машинистов</div>
       <div class="tab" data-t="eq" onclick="setTab('eq')">По технике</div>
       <div class="tab" data-t="ctl" onclick="setTab('ctl')">Контроль данных</div>
     </div>
     <div class="tablewrap" id="tableHost"></div>
 
     <div class="foot" id="foot">
-      Порядок расчёта. Производственные сутки и месяц отсчитываются от 19:00: ночная смена 19:00–07:00, начатая в 19:00 дня D, относится к суткам D+1. Октябрь начинается в 19:00 30.09.2026 и заканчивается в 19:00 31.10.2026.
+      Вкладки «Вывозка»: сколько массы вывез каждый оператор на каждой технике за период до среза (смена засчитывается, если по ней есть рейсы). Порядок расчёта. Производственные сутки и месяц отсчитываются от 19:00: ночная смена 19:00–07:00, начатая в 19:00 дня D, относится к суткам D+1. Октябрь начинается в 19:00 30.09.2026 и заканчивается в 19:00 31.10.2026.
       Рейс относится к смене по времени погрузки (Time Full). Масса рейса — Computed Tonnage. Рейсы, добавленные диспетчером вручную (колонка Extra Load), входят в факт.
       В выгрузке нет водителей и машинистов: рейс закрепляется за работником по плану («дата + смена + самосвал» или «дата + смена + экскаватор»). Если на технике в смене два работника с табельными часами (день заезда или выезда группы), масса делится пропорционально табельным часам.
       План на срез — сумма плана по заданию за смены до выбранного среза включительно. «Осталось до плана» — план месяца минус факт на срез. «Нужно за смену» — остаток, делённый на число оставшихся смен работника по плану; для сравнения под ним указан плановый тоннаж за смену. Пороги цвета заданы условно, это не нормативы.
@@ -362,7 +363,7 @@ function planFromSheets(drvAoa, excAoa) {
 const CFG = { PIN: "2508", PLAN_KEY: "dispMass.plans.v1", FACT_KEY: "dispMass.fact.v1", AUTO_PLAN: "kpi-plan-2026-10.json" };
 let PLANS = {};           // { "2026-10": plan }
 let FACT = { shifts: {}, files: [] };
-let TAB = "drivers", SORT = { drivers: ["fio", 1], exc: ["fio", 1], eq: ["eq", 1], ctl: ["tons", -1] };
+let TAB = "haulD", SORT = { drivers: ["fio", 1], exc: ["fio", 1], eq: ["eq", 1], ctl: ["tons", -1] };
 let RES = null;
 
 function $(id) { return document.getElementById(id); }
@@ -519,8 +520,42 @@ function workerRows(kind) {
     .filter(w => !q || w.fio.toLowerCase().indexOf(q) >= 0 || w.eqs.join(" ").toLowerCase().indexOf(q) >= 0);
 }
 
+// Вывозка: оператор -> техника -> смен, рейсов, масса (из ячеек «дата|смена|техника»)
+function haulRows(kind) {
+  const q = $("fSearch").value.trim().toLowerCase();
+  return RES[kind].workers.map(w => {
+    const m = {};
+    Object.values(w.cells).forEach(c => {
+      if (!(c.fact > 0 || c.trips > 0)) return;
+      const e = m[c.eq] || (m[c.eq] = { eq: c.eq, tons: 0, trips: 0, shifts: 0 });
+      e.tons += c.fact; e.trips += c.trips; e.shifts++;
+    });
+    const items = Object.values(m).sort((a, b) => b.tons - a.tons);
+    return { fio: w.fio, items, tons: items.reduce((x, e) => x + e.tons, 0), trips: items.reduce((x, e) => x + e.trips, 0), shifts: Object.values(w.cells).filter(c => c.fact > 0 || c.trips > 0).length };
+  }).filter(r => r.tons > 0 && (!q || r.fio.toLowerCase().indexOf(q) >= 0 || r.items.some(e => e.eq.toLowerCase().indexOf(q) >= 0)))
+    .sort((a, b) => a.fio.localeCompare(b.fio, "ru"));
+}
+function renderHaul(kind) {
+  const rows = haulRows(kind), T = RES[kind].tot;
+  const avg = (t, n) => n > 0 ? (t / n).toFixed(1).replace(".", ",") : "";
+  let h = '<table class="kpi"><thead><tr><th>Фамилия, имя, отчество</th><th>' + (kind === "drivers" ? "Самосвал" : "Экскаватор") + '</th><th class="num">Смен</th><th class="num">Рейсов</th><th class="num">Масса, т</th><th class="num">Т за рейс</th></tr></thead><tbody>';
+  let st = 0, sr = 0;
+  rows.forEach(r => {
+    st += r.tons; sr += r.trips;
+    const multi = r.items.length > 1;
+    h += '<tr class="click" onclick="openWorker(\'' + (kind === "drivers" ? "drivers" : "exc") + "'," + JSON.stringify(r.fio).replace(/"/g, "&quot;") + ')"><td><b>' + esc(r.fio) + "</b></td><td>" + (multi ? '<span class="sub">техники: ' + r.items.length + "</span>" : esc(r.items[0].eq)) +
+      '</td><td class="num">' + r.shifts + '</td><td class="num">' + fmtN(r.trips) + '</td><td class="num"><b>' + fmtT(r.tons) + '</b></td><td class="num">' + avg(r.tons, r.trips) + "</td></tr>";
+    if (multi) r.items.forEach(e => { h += '<tr><td></td><td>&nbsp;&nbsp;' + esc(e.eq) + '</td><td class="num">' + e.shifts + '</td><td class="num">' + fmtN(e.trips) + '</td><td class="num">' + fmtT(e.tons) + '</td><td class="num">' + avg(e.tons, e.trips) + "</td></tr>"; });
+  });
+  h += '</tbody><tfoot><tr><td>Итого по операторам</td><td></td><td></td><td class="num">' + fmtN(sr) + '</td><td class="num">' + fmtT(st) + "</td><td></td></tr>" +
+    '<tr><td>Не закреплено за оператором</td><td class="sub">вакансии и техника вне плана смены</td><td></td><td class="num">' + fmtN(T.unTr) + '</td><td class="num">' + fmtT(T.unT) + "</td><td></td></tr>" +
+    '<tr><td>Всего по выгрузке за период</td><td></td><td></td><td class="num">' + fmtN(T.trips) + '</td><td class="num">' + fmtT(T.fact) + "</td><td></td></tr></tfoot></table>";
+  return rows.length ? h : '<div class="empty">Нет данных. Загрузите план и выгрузку Hexagon.</div>';
+}
+
 function renderTable() {
   const host = $("tableHost"); if (!RES) return;
+  if (TAB === "haulD" || TAB === "haulE") { host.innerHTML = renderHaul(TAB === "haulD" ? "drivers" : "exc"); return; }
   if (TAB === "drivers" || TAB === "exc") {
     const rows = sortRows(workerRows(TAB), TAB);
     const lab = TAB === "drivers" ? "Самосвалы" : "Экскаваторы";
@@ -573,6 +608,11 @@ function closeModal() { $("modalBg").style.display = "none"; }
 function exportXlsx() {
   if (!RES) return; if (typeof XLSX === "undefined") { alert("Библиотека выгрузки не загрузилась (нет связи с cdnjs.cloudflare.com)."); return; }
   const wb = XLSX.utils.book_new(); const m = $("fMonth").value;
+  [["Вывозка водители", "drivers", "Самосвал"], ["Вывозка машинисты", "exc", "Экскаватор"]].forEach(([nm, kd, lab]) => {
+    const d = [["ФИО", lab, "Смен", "Рейсов", "Масса, т"]];
+    haulRows(kd).forEach(r => r.items.forEach(e => d.push([r.fio, e.eq, e.shifts, Math.round(e.trips), Math.round(e.tons)])));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(d), nm);
+  });
   [["Водители", "drivers"], ["Машинисты", "exc"]].forEach(([nm, kd]) => {
     const rows = RES[kd].workers.slice().sort((a, b) => a.fio.localeCompare(b.fio, "ru"));
     const data = [["ФИО", "Техника", "Смен по плану", "План, т", "Факт, т", "Отклонение, т", "Рейсов", "Вручную, т", "Факт/план, %", "План месяца, т", "Осталось до плана, т", "Смен осталось", "Нужно за смену, т"]]
