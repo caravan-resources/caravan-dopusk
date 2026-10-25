@@ -531,25 +531,25 @@ function haulRows(kind) {
       e.tons += c.fact; e.trips += c.trips; e.shifts++;
     });
     const items = Object.values(m).sort((a, b) => b.tons - a.tons);
-    return { fio: w.fio, items, tons: items.reduce((x, e) => x + e.tons, 0), trips: items.reduce((x, e) => x + e.trips, 0), shifts: Object.values(w.cells).filter(c => c.fact > 0 || c.trips > 0).length };
+    const rem = w.monthPlan - w.fact; return { fio: w.fio, monthPlan: w.monthPlan, rem, shiftsLeft: w.shiftsLeft, need: w.shiftsLeft > 0 ? Math.max(0, rem) / w.shiftsLeft : null, items, tons: items.reduce((x, e) => x + e.tons, 0), trips: items.reduce((x, e) => x + e.trips, 0), shifts: Object.values(w.cells).filter(c => c.fact > 0 || c.trips > 0).length };
   }).filter(r => r.tons > 0 && (!q || r.fio.toLowerCase().indexOf(q) >= 0 || r.items.some(e => e.eq.toLowerCase().indexOf(q) >= 0)))
     .sort((a, b) => a.fio.localeCompare(b.fio, "ru"));
 }
 function renderHaul(kind) {
   const rows = haulRows(kind), T = RES[kind].tot;
   const avg = (t, n) => n > 0 ? (t / n).toFixed(1).replace(".", ",") : "";
-  let h = '<table class="kpi"><thead><tr><th>Фамилия, имя, отчество</th><th>' + (kind === "drivers" ? "Самосвал" : "Экскаватор") + '</th><th class="num">Смен</th><th class="num">Рейсов</th><th class="num">Масса, т</th><th class="num">Т за рейс</th></tr></thead><tbody>';
-  let st = 0, sr = 0;
+  let h = '<table class="kpi"><thead><tr><th>Фамилия, имя, отчество</th><th>' + (kind === "drivers" ? "Самосвал" : "Экскаватор") + '</th><th class="num">Смен</th><th class="num">Рейсов</th><th class="num">Масса, т</th><th class="num">Т за рейс</th><th class="num">План месяца, т</th><th class="num">Осталось до плана, т</th><th class="num">Смен осталось</th><th class="num">Нужно за смену, т</th></tr></thead><tbody>';
+  let st = 0, sr = 0, sm = 0, srem = 0;
   rows.forEach(r => {
-    st += r.tons; sr += r.trips;
+    st += r.tons; sr += r.trips; sm += r.monthPlan; srem += Math.max(0, r.rem);
     const multi = r.items.length > 1;
     h += '<tr class="click" onclick="openWorker(\'' + (kind === "drivers" ? "drivers" : "exc") + "'," + JSON.stringify(r.fio).replace(/"/g, "&quot;") + ')"><td><b>' + esc(r.fio) + "</b></td><td>" + (multi ? '<span class="sub">техники: ' + r.items.length + "</span>" : esc(r.items[0].eq)) +
-      '</td><td class="num">' + r.shifts + '</td><td class="num">' + fmtN(r.trips) + '</td><td class="num"><b>' + fmtT(r.tons) + '</b></td><td class="num">' + avg(r.tons, r.trips) + "</td></tr>";
-    if (multi) r.items.forEach(e => { h += '<tr><td></td><td>&nbsp;&nbsp;' + esc(e.eq) + '</td><td class="num">' + e.shifts + '</td><td class="num">' + fmtN(e.trips) + '</td><td class="num">' + fmtT(e.tons) + '</td><td class="num">' + avg(e.tons, e.trips) + "</td></tr>"; });
+      '</td><td class="num">' + r.shifts + '</td><td class="num">' + fmtN(r.trips) + '</td><td class="num"><b>' + fmtT(r.tons) + '</b></td><td class="num">' + avg(r.tons, r.trips) + '</td><td class="num">' + fmtT(r.monthPlan) + '</td><td class="num">' + (r.rem > 0 ? "<b>" + fmtT(r.rem) + "</b>" : (r.monthPlan > 0 ? '<span class="badge b-green">выполнен +' + fmtT(-r.rem) + "</span>" : "")) + '</td><td class="num">' + (r.shiftsLeft || "") + '</td><td class="num">' + (r.need === null ? "" : fmtT(r.need)) + "</td></tr>";
+    if (multi) r.items.forEach(e => { h += '<tr><td></td><td>&nbsp;&nbsp;' + esc(e.eq) + '</td><td class="num">' + e.shifts + '</td><td class="num">' + fmtN(e.trips) + '</td><td class="num">' + fmtT(e.tons) + '</td><td class="num">' + avg(e.tons, e.trips) + '</td><td></td><td></td><td></td><td></td></tr>'; });
   });
-  h += '</tbody><tfoot><tr><td>Итого по операторам</td><td></td><td></td><td class="num">' + fmtN(sr) + '</td><td class="num">' + fmtT(st) + "</td><td></td></tr>" +
-    '<tr><td>Не закреплено за оператором</td><td class="sub">вакансии и техника вне плана смены</td><td></td><td class="num">' + fmtN(T.unTr) + '</td><td class="num">' + fmtT(T.unT) + "</td><td></td></tr>" +
-    '<tr><td>Всего по выгрузке за период</td><td></td><td></td><td class="num">' + fmtN(T.trips) + '</td><td class="num">' + fmtT(T.fact) + "</td><td></td></tr></tfoot></table>";
+  h += '</tbody><tfoot><tr><td>Итого по операторам</td><td></td><td></td><td class="num">' + fmtN(sr) + '</td><td class="num">' + fmtT(st) + '</td><td></td><td class="num">' + fmtT(sm) + '</td><td class="num">' + fmtT(srem) + "</td><td></td><td></td></tr>" +
+    '<tr><td>Не закреплено за оператором</td><td class="sub">вакансии и техника вне плана смены</td><td></td><td class="num">' + fmtN(T.unTr) + '</td><td class="num">' + fmtT(T.unT) + "</td><td></td><td></td><td></td><td></td><td></td></tr>" +
+    '<tr><td>Всего по выгрузке за период</td><td></td><td></td><td class="num">' + fmtN(T.trips) + '</td><td class="num">' + fmtT(T.fact) + '</td><td></td><td class="num">' + fmtT(T.monthAll) + '</td><td class="num">' + fmtT(Math.max(0, T.monthAll - T.fact)) + "</td><td></td><td></td></tr></tfoot></table>";
   return rows.length ? h : '<div class="empty">Нет данных. Загрузите план и выгрузку Hexagon.</div>';
 }
 
@@ -609,8 +609,8 @@ function exportXlsx() {
   if (!RES) return; if (typeof XLSX === "undefined") { alert("Библиотека выгрузки не загрузилась (нет связи с cdnjs.cloudflare.com)."); return; }
   const wb = XLSX.utils.book_new(); const m = $("fMonth").value;
   [["Вывозка водители", "drivers", "Самосвал"], ["Вывозка машинисты", "exc", "Экскаватор"]].forEach(([nm, kd, lab]) => {
-    const d = [["ФИО", lab, "Смен", "Рейсов", "Масса, т"]];
-    haulRows(kd).forEach(r => r.items.forEach(e => d.push([r.fio, e.eq, e.shifts, Math.round(e.trips), Math.round(e.tons)])));
+    const d = [["ФИО", lab, "Смен", "Рейсов", "Масса, т", "План месяца, т", "Осталось до плана, т", "Смен осталось", "Нужно за смену, т"]];
+    haulRows(kd).forEach(r => r.items.forEach((e, i) => d.push([r.fio, e.eq, e.shifts, Math.round(e.trips), Math.round(e.tons)].concat(i === 0 ? [Math.round(r.monthPlan), Math.round(Math.max(0, r.rem)), r.shiftsLeft, r.need === null ? null : Math.round(r.need)] : [null, null, null, null]))));
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(d), nm);
   });
   [["Водители", "drivers"], ["Машинисты", "exc"]].forEach(([nm, kd]) => {
