@@ -127,18 +127,19 @@ table.mini td { padding:6px 8px; border-bottom:1px solid var(--border); }
   </div>
 
   <div class="wrap">
+    <div class="sub" style="margin-bottom:8px">Можно загрузить оба файла сразу, в любом порядке, или перетащить их на страницу. Тип файла (книга KPI или выгрузка Hexagon) определяется автоматически.</div>
     <div class="two">
       <div class="panel">
         <h3>1. План месяца</h3>
         <div class="src-state" id="planState">План не загружен.</div>
-        <label class="btn gold filebtn">Загрузить план (книга KPI .xlsx или .json)
-          <input type="file" id="planFile" accept=".xlsx,.xlsm,.json" onchange="onPlanFile(this)"></label>
+        <label class="btn gold filebtn">Загрузить файл плана (книга KPI)
+          <input type="file" id="planFile" accept=".xlsx,.xlsm,.xls,.json,.csv,.txt" multiple onchange="onFiles(this.files); this.value=''"></label>
       </div>
       <div class="panel">
         <h3>2. Выгрузка Hexagon</h3>
         <div class="src-state" id="factState">Выгрузка не загружена.</div>
-        <label class="btn gold filebtn">Загрузить выгрузку (.csv)
-          <input type="file" id="factFile" accept=".csv,.txt" multiple onchange="onFactFile(this)"></label>
+        <label class="btn gold filebtn">Загрузить выгрузку Hexagon
+          <input type="file" id="factFile" accept=".xlsx,.xlsm,.xls,.json,.csv,.txt" multiple onchange="onFiles(this.files); this.value=''"></label>
         <button class="btn ghost" onclick="clearFact()">Очистить факт</button>
       </div>
     </div>
@@ -449,43 +450,66 @@ function updateSourceStates() {
   $("factState").innerHTML = "Смен в базе: <b>" + ks.length + "</b>. Период рейсов: <b>" + fmtDT(mn) + " — " + fmtDT(mx) + "</b>.<br>Рейсов: " + fmtN(tr) + ", масса " + fmtT(tn) + " т.";
 }
 
-async function onPlanFile(inp) {
-  const f = inp.files[0]; inp.value = ""; if (!f) return;
-  banner("errBanner", ""); banner("warnBanner", "");
-  try {
-    let plan;
-    if (/\.json$/i.test(f.name)) plan = planFromJson(JSON.parse(await f.text()));
-    else {
-      if (typeof XLSX === "undefined") throw new Error("Библиотека чтения Excel не загрузилась (нет связи с cdnjs.cloudflare.com). Загрузите файл kpi-plan-*.json.");
-      banner("infoBanner", "Чтение книги KPI, подождите…");
-      const wb = XLSX.read(await f.arrayBuffer(), { type: "array", sheets: ["План водителей", "План экскаваторщиков"] });
-      if (!wb.Sheets["План водителей"] || !wb.Sheets["План экскаваторщиков"]) throw new Error("В книге нет листов «План водителей» и «План экскаваторщиков».");
+// Единая загрузка: тип файла определяется по содержимому (книга Excel / JSON плана / CSV Hexagon), а не по кнопке и расширению.
+async function ingestFile(f) {
+  const buf = await f.arrayBuffer(); const u = new Uint8Array(buf.slice(0, 4));
+  const isBook = (u[0] === 0x50 && u[1] === 0x4B) || (u[0] === 0xD0 && u[1] === 0xCF);
+  if (isBook) {
+    if (typeof XLSX === "undefined") return { kind: "skip", msg: "«" + f.name + "»: библиотека чтения Excel не загрузилась (нет связи с cdnjs.cloudflare.com). Файл пропущен, попробуйте позже." };
+    let wb;
+    try { wb = XLSX.read(buf, { type: "array", sheets: ["План водителей", "План экскаваторщиков"] }); }
+    catch (e) { return { kind: "skip", msg: "«" + f.name + "»: не удалось прочитать как книгу Excel. Файл пропущен." }; }
+    if (wb.Sheets["План водителей"] && wb.Sheets["План экскаваторщиков"]) {
       const aoa = n => XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: true, defval: null });
-      plan = planFromSheets(aoa("План водителей"), aoa("План экскаваторщиков"));
+      const plan = planFromSheets(aoa("План водителей"), aoa("План экскаваторщиков"));
+      PLANS[plan.month] = plan;
+      return { kind: "plan", month: plan.month, msg: "План на " + plan.month + " загружен из «" + f.name + "»." };
     }
-    PLANS[plan.month] = plan; if (!store(CFG.PLAN_KEY, PLANS)) banner("warnBanner", "План загружен, но не сохранён в браузере (нет места или хранилище отключено). После перезагрузки страницы его придётся загрузить заново.");
-    else banner("infoBanner", "");
-    refreshMonths(); $("fMonth").value = plan.month; cutToData(true); updateSourceStates(); render();
-  } catch (e) { banner("infoBanner", ""); banner("errBanner", "План не загружен: " + e.message); }
+    let names = []; try { names = XLSX.read(buf, { type: "array", bookSheets: true }).SheetNames; } catch (e) {}
+    return { kind: "skip", msg: "«" + f.name + "»: это не книга KPI самосвалов и экскаваторов (нет листов «План водителей» и «План экскаваторщиков»" + (names.length ? "; в файле: " + names.slice(0, 6).join(", ") + (names.length > 6 ? "…" : "") : "") + "). Файл пропущен, загруженный план не изменён." };
+  }
+  const text = (u[0] === 0xFF && u[1] === 0xFE ? new TextDecoder("utf-16le") : new TextDecoder("utf-8")).decode(buf).replace(/^\uFEFF/, "");
+  const head = text.trimStart().slice(0, 3000);
+  if (head[0] === "{") {
+    try { const plan = planFromJson(JSON.parse(text)); PLANS[plan.month] = plan; return { kind: "plan", month: plan.month, msg: "План на " + plan.month + " загружен из «" + f.name + "»." }; }
+    catch (e) { return { kind: "skip", msg: "«" + f.name + "»: JSON не похож на файл плана. Файл пропущен." }; }
+  }
+  if (/Time Full/.test(head) && /Computed Tonnage/.test(head)) {
+    const r = parseHexagon(text);
+    if (!r.info.rows) return { kind: "skip", msg: "«" + f.name + "»: в выгрузке не найдено ни одного рейса" + (r.info.bad ? " (строк с ошибками: " + r.info.bad + ")" : "") + ". Файл пропущен." };
+    const m = mergeFact(FACT.shifts, r.shifts); FACT.shifts = m.shifts;
+    FACT.files.push({ name: f.name, at: Date.now(), rows: r.info.rows, tons: r.info.tons, from: r.info.min, to: r.info.max });
+    return { kind: "fact", msg: (r.info.dev ? "Рейсов с массой, отличной от ожидаемой для машины и материала: " + fmtN(r.info.dev) + " (отклонение " + (r.info.devT >= 0 ? "+" : "") + fmtT(r.info.devT) + " т; машины: " + Object.keys(r.info.devEq).sort().map(k => k + " (" + r.info.devEq[k] + ")").join(", ") + "). Масса взята как в Hexagon. " : "") +
+      "«" + f.name + "»: рейсов " + fmtN(r.info.rows) + ", " + fmtT(r.info.tons) + " т; смен добавлено " + m.added + ", обновлено " + m.replaced + ", оставлено прежних " + m.kept + (r.info.bad ? "; пропущено строк с ошибками: " + r.info.bad : "") + "." };
+  }
+  return { kind: "skip", msg: "«" + f.name + "»: файл не распознан (ни книга KPI, ни выгрузка Hexagon «Shift Load Dump»). Пропущен." };
 }
 
-async function onFactFile(inp) {
-  const files = Array.from(inp.files); inp.value = ""; if (!files.length) return;
-  banner("errBanner", ""); banner("warnBanner", "");
-  const msgs = [];
+async function onFiles(list) {
+  const files = Array.from(list || []); if (!files.length) return;
+  banner("errBanner", ""); banner("warnBanner", ""); banner("infoBanner", "Чтение файлов, подождите…");
+  const ok = [], skipped = []; let planMonth = null, planTouched = false, factTouched = false;
   for (const f of files) {
     try {
-      const r = parseHexagon(await f.text());
-      if (!r.info.rows) throw new Error("не найдено ни одного рейса" + (r.info.bad ? " (строк с ошибками: " + r.info.bad + ")" : ""));
-      const m = mergeFact(FACT.shifts, r.shifts); FACT.shifts = m.shifts;
-      FACT.files.push({ name: f.name, at: Date.now(), rows: r.info.rows, tons: r.info.tons, from: r.info.min, to: r.info.max });
-      msgs.push((r.info.dev ? "Рейсов с массой, отличной от ожидаемой для машины и материала: " + fmtN(r.info.dev) + " (отклонение " + (r.info.devT >= 0 ? "+" : "") + fmtT(r.info.devT) + " т; машины: " + Object.keys(r.info.devEq).sort().map(k => k + " (" + r.info.devEq[k] + ")").join(", ") + "). Масса взята как в Hexagon. " : "") + f.name + ": рейсов " + fmtN(r.info.rows) + ", " + fmtT(r.info.tons) + " т; смен добавлено " + m.added + ", обновлено " + m.replaced + ", оставлено прежних " + m.kept + (r.info.bad ? "; пропущено строк с ошибками: " + r.info.bad : "") + ".");
-    } catch (e) { banner("errBanner", "Файл «" + f.name + "» не загружен: " + e.message); }
+      const r = await ingestFile(f);
+      if (r.kind === "skip") skipped.push(r.msg);
+      else { ok.push(r.msg); if (r.kind === "plan") { planMonth = r.month; planTouched = true; } else factTouched = true; }
+    } catch (e) { skipped.push("«" + f.name + "»: файл не прочитан (" + e.message + "). Пропущен."); }
   }
-  if (!store(CFG.FACT_KEY, FACT)) banner("warnBanner", "Факт загружен, но не сохранён в браузере. После перезагрузки страницы файл придётся загрузить заново.");
-  if (msgs.length) banner("infoBanner", msgs.join(" "));
+  let storeFail = false;
+  if (planTouched && !store(CFG.PLAN_KEY, PLANS)) storeFail = true;
+  if (factTouched && !store(CFG.FACT_KEY, FACT)) storeFail = true;
+  if (storeFail) skipped.push("Данные загружены, но не сохранены в браузере (нет места или хранилище отключено): после перезагрузки страницы файлы придётся загрузить снова.");
+  const fm = {}; Object.keys(FACT.shifts).forEach(k => { fm[k.slice(0, 7)] = 1; });
+  const noPlan = Object.keys(fm).filter(m => !PLANS[m]);
+  if (factTouched && noPlan.length) ok.push("В выгрузке есть данные за " + noPlan.sort().join(", ") + ", плана на этот месяц нет: загрузите книгу KPI.");
+  refreshMonths(); if (planMonth) $("fMonth").value = planMonth;
   cutToData(true); updateSourceStates(); render();
+  const prevWarn = $("warnBanner").style.display === "block" ? $("warnBanner").textContent : "";
+  banner("infoBanner", ok.join(" ")); banner("warnBanner", skipped.concat(prevWarn ? [prevWarn] : []).join(" "));
 }
+document.addEventListener("dragover", e => { e.preventDefault(); });
+document.addEventListener("drop", e => { e.preventDefault(); if ($("app").style.display === "block" && e.dataTransfer && e.dataTransfer.files.length) onFiles(e.dataTransfer.files); });
 function clearFact() {
   if (!confirm("Удалить загруженный факт из браузера?")) return;
   FACT = { shifts: {}, files: [] }; try { localStorage.removeItem(CFG.FACT_KEY); } catch (e) {}
