@@ -181,7 +181,7 @@ table.mini td { padding:6px 8px; border-bottom:1px solid var(--border); }
       <div class="tab" data-t="drivers" onclick="setTab('drivers')">KPI водителей</div>
       <div class="tab" data-t="exc" onclick="setTab('exc')">KPI машинистов</div>
       <div class="tab" data-t="eq" onclick="setTab('eq')">По технике</div>
-      <div class="tab" data-t="dt" onclick="setTab('dt')">Простои техники</div>
+      <div class="tab" data-t="dt" onclick="setTab('dt')">Простои: статусы Hexagon</div>
       <div class="tab" data-t="ctl" onclick="setTab('ctl')">Контроль данных</div>
     </div>
     <div class="tablewrap" id="tableHost"></div>
@@ -1141,7 +1141,7 @@ function renderDowntime() {
   const rs = Object.values(sum.reasons).sort((a, b) => b.h - a.h).slice(0, 20);
   h += '<h3 style="font-size:14px;margin-top:18px">Причины ремонта и ожидания (первые 20 по часам)</h3>' + (rs.length ? '<table class="mini"><thead><tr><th>Причина</th><th class="num">Часов</th><th class="num">Единиц техники</th><th>Больше всего</th></tr></thead><tbody>' +
     rs.map(o => { const top = Object.keys(o.eqs).sort((a, b) => o.eqs[b] - o.eqs[a]).slice(0, 3).map(e => e + " (" + fmtN(o.eqs[e]) + " ч)").join(", "); return "<tr><td>" + esc(o.rs) + '</td><td class="num">' + fmtN(o.h) + '</td><td class="num">' + Object.keys(o.eqs).length + "</td><td>" + esc(top) + "</td></tr>"; }).join("") + "</tbody></table>" : '<div class="sub">Нет.</div>');
-  h += '<div class="sub" style="margin-top:10px">Готовность = доля времени вне ремонта (Down). «Т за час в работе» = масса / часы в статусе Ready. В таблице только самосвалы и экскаваторы, участвующие в плане или в рейсах. Состояние «в ремонте / в ожидании» дано на конец данных статусов.</div></div>';
+  h += '<div class="sub" style="margin-top:10px">Готовность = доля времени вне ремонта (Down). «Т за час в работе» = масса / часы в статусе Ready. В таблице только самосвалы и экскаваторы, участвующие в плане или в рейсах. Состояние «в ремонте / в ожидании» дано на конец данных статусов. Это простой по статусам Hexagon (часы). Он не складывается с простоем по плану (смены без рейсов, вкладка «Контроль данных»): оба показателя описывают одно и то же время разными способами, поэтому их нельзя суммировать.</div></div>';
   return h;
 }
 
@@ -1186,12 +1186,12 @@ function renderTable() {
       h += rows.length ? '<table class="mini"><thead><tr><th>Техника</th><th>Причина</th><th class="num">Рейсов</th><th class="num">Масса, т</th><th>Статус сейчас</th></tr></thead><tbody>' +
         rows.map(u => "<tr><td>" + esc(u.eq) + "</td><td>" + esc(u.why) + '</td><td class="num">' + fmtN(u.trips) + '</td><td class="num">' + fmtT(u.tons) + "</td><td>" + statusNowHtml(STL && statusAt(STL, u.eq, Math.floor((Date.now() + 5 * 3600000) / 60000))) + "</td></tr>").join("") + "</tbody></table>" : '<div class="sub" style="margin-bottom:14px">Нет.</div>';
     });
-    [["drivers", "Простой самосвалов: смены по плану без рейсов"], ["exc", "Простой экскаваторов: смены по плану без рейсов"]].forEach(([kd, title]) => {
+    [["drivers", "Простой самосвалов по плану: смены без рейсов"], ["exc", "Простой экскаваторов по плану: смены без рейсов"]].forEach(([kd, title]) => {
       const rows = RES[kd].idle || [];
       h += '<h3 style="font-size:14px">' + title + "</h3>";
       h += rows.length ? '<table class="mini"><thead><tr><th>Техника</th><th class="num">Смен в плане</th><th class="num">Без рейсов</th><th class="num">Ремонт</th><th class="num">Резерв</th><th class="num">В работе, рейсов нет</th><th class="num">Статус не отмечен</th><th>Статус сейчас</th></tr></thead><tbody>' +
         rows.map(e => '<tr class="click" onclick="openIdle(\'' + kd + "','" + esc(e.eq) + '\')"><td><b>' + esc(e.eq) + '</b></td><td class="num">' + e.planShifts + '</td><td class="num">' + e.idle + '</td><td class="num">' + (e.rep || "") + '</td><td class="num">' + (e.res || "") + '</td><td class="num">' + (e.work || "") + '</td><td class="num">' + (e.none || "") + "</td><td>" + statusNowHtml(e.now) + "</td></tr>").join("") + "</tbody></table>" +
-        '<div class="sub" style="margin-bottom:14px">' + (STL ? "Статус в смене определяется по журналу: «Ремонт» или «Резерв» в начале, конце или в течение смены." : "История статусов не загружена: причины простоя неизвестны.") + " Нажмите на строку, чтобы увидеть смены и закреплённых по плану работников.</div>" : '<div class="sub" style="margin-bottom:14px">Нет.</div>';
+        '<div class="sub" style="margin-bottom:14px">' + (STL ? "Статус в смене определяется по журналу: «Ремонт» или «Резерв» в начале, конце или в течение смены." : "История статусов не загружена: причины простоя неизвестны.") + " Это простой по плану (смены без рейсов); он не суммируется с часами простоя по статусам Hexagon (вкладка «Простои: статусы Hexagon»). Нажмите на строку, чтобы увидеть смены и закреплённых по плану работников.</div>" : '<div class="sub" style="margin-bottom:14px">Нет.</div>';
     });
     [["drivers", "самосвалов"], ["exc", "экскаваторов"]].forEach(([kd, t]) => {
       const nm = Object.keys(RES[kd].unmatched || {}).sort((a, b) => RES[kd].unmatched[b] - RES[kd].unmatched[a]);
