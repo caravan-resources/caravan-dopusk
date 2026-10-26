@@ -43,6 +43,7 @@ input:focus, select:focus, textarea:focus { border-color:var(--gold); }
 .btn-gold { background:var(--gold); color:var(--navy); }
 .btn-ghost { background:var(--light); color:var(--navy); }
 .btn-red { background:var(--redbg); color:var(--red); border:1.5px solid var(--red); }
+.btn-reserve { background:#EFF6FF; color:#1D4ED8; border:1.5px solid #1D4ED8; }
 .btn:disabled { opacity:.5; cursor:not-allowed; }
 
 .emp-item {
@@ -142,6 +143,7 @@ input:focus, select:focus, textarea:focus { border-color:var(--gold); }
       <div class="card-title" id="hubEquipmentTitle" style="margin-bottom:16px"></div>
       <button class="btn btn-gold" style="margin-bottom:10px" onclick="startFlow('inspection')">📋 Провести осмотр</button>
       <button class="btn btn-ghost" style="margin-bottom:10px" onclick="startFlow('fuel')">⛽ Записать заправку</button>
+      <button class="btn btn-reserve" style="margin-bottom:10px" onclick="markReserve(this)">⏸ Поставить в резерв</button>
       <button class="btn btn-red" onclick="markRepair(this)">🔧 Отправить в ремонт</button>
       <button class="btn btn-ghost" id="endShiftBtn" style="display:none; margin-top:10px" onclick="endShift()">⏹ Закончить смену (остановить трекер)</button>
       <div style="margin-top:14px"><a href="#" onclick="changeDeviceEquipment(); return false;" style="font-size:12px; color:var(--gray)">сменить закреплённую технику на этом телефоне</a></div>
@@ -190,8 +192,17 @@ input:focus, select:focus, textarea:focus { border-color:var(--gold); }
       <div class="hint" id="equipmentSubtitle"></div>
     </div>
 
+    <label class="card" id="handoverCard" for="handoverToggle" style="display:flex;align-items:center;gap:10px;cursor:pointer">
+      <input type="checkbox" id="handoverToggle" onchange="toggleHandover(this.checked)" style="width:22px;height:22px;flex-shrink:0">
+      <div>
+        <div style="font-weight:800">Принимаю технику в середине смены</div>
+        <div class="hint" style="margin:2px 0 0">Обед, подмена, пересменка. Остаток топлива вносится только в начале смены — здесь его указывать не нужно. Ваша работа на этой машине учтётся.</div>
+      </div>
+    </label>
+
     <div class="card" id="fuelCard" style="display:none">
       <div class="card-title" id="fuelCardTitle">Уровень топлива</div>
+      <div class="hint" style="margin-bottom:8px">Необязательно. Вносится только в начале смены.</div>
       <input type="number" id="fuelLevel" min="0" placeholder="Введите количество">
     </div>
 
@@ -330,15 +341,19 @@ async function setEquipmentStatusCall(status) {
   return res.json();
 }
 
-async function markRepair(btn) {
-  if (!confirm(`Отметить ${equipment.equipmentId} как «В ремонте»?`)) return;
+// Ручная смена статуса техники плашкой на экране выбора действия. «Ремонт» и
+// «Резерв» идут одним путём; обратно в «В работе» техника возвращается сама —
+// при следующей сдаче чек-листа (см. submitChecklist). Общий обработчик
+// выделен 26.10.2026 при добавлении «Резерв», поведение «Ремонт» не менялось.
+async function markEquipmentStatus(btn, status, cfg) {
+  if (!confirm(cfg.confirmText)) return;
   btn.disabled = true;
   try {
-    const data = await setEquipmentStatusCall("Ремонт");
+    const data = await setEquipmentStatusCall(status);
     if (data.ok) {
-      document.getElementById("statusResultIcon").textContent = "🔧";
-      document.getElementById("statusResultTitle").textContent = "Отмечено: в ремонте";
-      document.getElementById("statusResultSub").textContent = `${equipment.equipmentId} — статус обновлён.`;
+      document.getElementById("statusResultIcon").textContent = cfg.icon;
+      document.getElementById("statusResultTitle").textContent = cfg.title;
+      document.getElementById("statusResultSub").textContent = cfg.sub;
     } else if (data.unavailable) {
       document.getElementById("statusResultIcon").textContent = "⚠";
       document.getElementById("statusResultTitle").textContent = "Пока недоступно";
@@ -356,6 +371,24 @@ async function markRepair(btn) {
     btn.disabled = false;
     showScreen("StatusResult");
   }
+}
+
+function markRepair(btn) {
+  return markEquipmentStatus(btn, "Ремонт", {
+    confirmText: `Отметить ${equipment.equipmentId} как «В ремонте»?`,
+    icon: "🔧",
+    title: "Отмечено: в ремонте",
+    sub: `${equipment.equipmentId} — статус обновлён.`,
+  });
+}
+
+function markReserve(btn) {
+  return markEquipmentStatus(btn, "Резерв", {
+    confirmText: `Поставить ${equipment.equipmentId} в резерв?\n\nТехника не будет считаться ни на линии, ни в ремонте. На линию вернётся автоматически при следующем заполнении чек-листа.`,
+    icon: "⏸",
+    title: "Отмечено: в резерве",
+    sub: `${equipment.equipmentId} — в резерве. После следующего осмотра техника вернётся на линию автоматически.`,
+  });
 }
 
 function renderEmpList(query) {
@@ -466,6 +499,7 @@ function showForm() {
   document.getElementById("equipmentTitle").textContent = equipment.equipmentId + " — " + equipment.model;
   document.getElementById("equipmentSubtitle").textContent = (equipment.type||"") + (equipment.site?" · "+equipment.site:"");
 
+  document.getElementById("handoverToggle").checked = false; // сброс при каждом новом открытии формы
   if (template.fuelLevelField) {
     const f = template.fuelLevelField;
     document.getElementById("fuelCard").style.display = "block";
@@ -515,6 +549,17 @@ function setItemStatus(key, status) {
   commentEl.classList.toggle("show", status === "defect");
 }
 
+// «Принимаю технику в середине смены» — второй водитель садится на обеде/при
+// подмене. Остаток топлива пишется только в начале смены, поэтому поле
+// скрывается и очищается; в запись добавляется пункт «Тип осмотра», чтобы
+// осмотр мог быть засчитан сменщику на этой машине (KPI). Добавлено 26.10.2026.
+function toggleHandover(checked) {
+  const f = template && template.fuelLevelField;
+  if (!f) return;
+  document.getElementById("fuelCard").style.display = checked ? "none" : "block";
+  if (checked) document.getElementById("fuelLevel").value = "";
+}
+
 // «Без замечаний» — один тап вместо отметки каждого пункта по отдельности.
 // Поле "Общие замечания" ниже (generalComment) — отдельное и всегда видимое,
 // этот переключатель на него не влияет вообще. Добавлено 26.08.2026.
@@ -550,9 +595,15 @@ async function submitChecklist() {
     section: v.section, itemText: v.itemText, status: v.status, comment: v.comment,
   }));
 
-  if (template.fuelLevelField) {
+  const isHandover = document.getElementById("handoverToggle").checked;
+  if (isHandover) {
+    // Метка осмотра в середине смены. Для обычного осмотра в начале смены
+    // метки нет — не плодим строки в листе записей (он близок к лимиту ячеек).
+    items.push({ section: "Общее", itemText: "Тип осмотра", status: "Приём техники в середине смены", comment: "" });
+  } else if (template.fuelLevelField) {
+    // Остаток топлива необязателен: пустое поле строкой не пишется.
     const fuelVal = document.getElementById("fuelLevel").value;
-    items.push({ section: "Общее", itemText: template.fuelLevelField.label, status: fuelVal || "", comment: "" });
+    if (fuelVal) items.push({ section: "Общее", itemText: template.fuelLevelField.label, status: fuelVal, comment: "" });
   }
 
   const hourMeterVal = document.getElementById("hourMeter").value;
