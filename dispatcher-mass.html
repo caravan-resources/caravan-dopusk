@@ -136,11 +136,12 @@ table.mini td { padding:6px 8px; border-bottom:1px solid var(--border); }
           <input type="file" id="planFile" accept=".xlsx,.xlsm,.xls,.json,.csv,.txt" multiple onchange="onFiles(this.files); this.value=''"></label>
       </div>
       <div class="panel">
-        <h3>2. Выгрузка Hexagon</h3>
+        <h3>2. Выгрузка Hexagon (рейсы и статусы техники)</h3>
         <div class="src-state" id="factState">Выгрузка не загружена.</div>
+        <div class="src-state" id="statState"></div>
         <label class="btn gold filebtn">Загрузить выгрузку Hexagon
           <input type="file" id="factFile" accept=".xlsx,.xlsm,.xls,.json,.csv,.txt" multiple onchange="onFiles(this.files); this.value=''"></label>
-        <button class="btn ghost" onclick="clearFact()">Очистить факт</button>
+        <button class="btn ghost" onclick="clearFact()">Очистить факт и статусы</button>
       </div>
     </div>
 
@@ -160,6 +161,7 @@ table.mini td { padding:6px 8px; border-bottom:1px solid var(--border); }
       <div class="field"><label>Срез: до даты</label><input type="date" id="fCutDate" onchange="render()"></div>
       <div class="field"><label>Срез: смена</label>
         <select id="fCutShift" onchange="render()"><option value="Д">День (до 19:00)</option><option value="Н">Ночь (до 07:00)</option></select></div>
+      <div class="field"><label>Ремонт техники (Down)</label><select id="fAdj" onchange="render()"><option value="1">Вычитать из плана</option><option value="0">Не вычитать</option></select></div>
       <div class="field"><label>Зелёный от, %</label><input type="number" id="pGreen" value="100" min="1" max="200" onchange="render()"></div>
       <div class="field"><label>Жёлтый от, %</label><input type="number" id="pYellow" value="90" min="1" max="200" onchange="render()"></div>
       <div class="field"><label>Оператор рейса определяется</label>
@@ -178,6 +180,7 @@ table.mini td { padding:6px 8px; border-bottom:1px solid var(--border); }
       <div class="tab" data-t="drivers" onclick="setTab('drivers')">KPI водителей</div>
       <div class="tab" data-t="exc" onclick="setTab('exc')">KPI машинистов</div>
       <div class="tab" data-t="eq" onclick="setTab('eq')">По технике</div>
+      <div class="tab" data-t="dt" onclick="setTab('dt')">Простои техники</div>
       <div class="tab" data-t="ctl" onclick="setTab('ctl')">Контроль данных</div>
     </div>
     <div class="tablewrap" id="tableHost"></div>
@@ -187,6 +190,7 @@ table.mini td { padding:6px 8px; border-bottom:1px solid var(--border); }
       Рейс относится к смене по времени погрузки (Time Full). Масса рейса — Computed Tonnage без изменений. Для контроля сравнивается с ожидаемой: Тонли (HT201–HT210) — 70 т, остальные самосвалы (Санни) — 65 т, HT152 (кузов меньшей кубатуры) — 57 т; материал Mud (глина) — 53, 48 и 43 т соответственно. Рейсы, добавленные диспетчером вручную (колонка Extra Load), входят в факт.
       В выгрузке нет водителей и машинистов. Рейс закрепляется за автором последнего чек-листа на этой технике: осмотр не позже момента погрузки и не раньше чем за час до начала смены (чек-лист заполняется при каждой смене оператора, в том числе в обед). Если чек-листа нет, оператор берётся из плана («дата + смена + самосвал» или «дата + смена + экскаватор»). Если на технике в смене два работника с табельными часами (день заезда или выезда группы), масса делится пропорционально табельным часам.
       План на срез — сумма плана по заданию за смены до выбранного среза включительно. «Осталось до плана» — план месяца минус факт на срез. «Нужно за смену» — остаток, делённый на число оставшихся смен работника по плану; для сравнения под ним указан плановый тоннаж за смену. Пороги цвета заданы условно, это не нормативы.
+      Статусы техники (лист «Статуса» выгрузки Hexagon): интервал статуса делится по границам смен 07:00 и 19:00. Если включено «Вычитать из плана», плановый тоннаж смены уменьшается пропорционально доле времени, которое техника была в статусе Down (ремонт): например, 6 часов ремонта из 12 снимают половину плана смены. Ожидание (Standby) и задержки (Delay: обед, заправка, пересменка) из плана не вычитаются, они показаны справочно. Если статусов на смену нет, план не меняется. Часы ремонта и ожидания делятся между работниками смены так же, как масса, по табельным часам.
     </div>
   </div>
 </div>
@@ -245,10 +249,16 @@ function expectedTons(truck, material) {
 }
 
 // Разбор выгрузки Hexagon -> агрегаты по сменам
-function parseHexagon(text) {
-  const rows = parseCSV(text);
+// Время из ячейки книги Excel (серийное число) или из текста
+function hexTimeFrom(v) {
+  if (typeof v === "number") { const ms = Math.round((v - 25569) * 86400) * 1000; const d = new Date(ms); return { ms, y: d.getUTCFullYear(), mo: d.getUTCMonth() + 1, d: d.getUTCDate(), h: d.getUTCHours() }; }
+  return parseHexTime(v);
+}
+function cs(v) { return v == null ? "" : String(v).trim(); }
+function parseHexagon(text) { return parseHexRows(parseCSV(text)); }
+function parseHexRows(rows) {
   if (!rows.length) throw new Error("Файл пуст.");
-  const hdr = rows[0].map(s => s.trim());
+  const hdr = rows[0].map(cs);
   const need = ["Time Full", "Time Empty", "Truck", "Shovel", "Computed Tonnage", "Extra Load"];
   const ix = {}; hdr.forEach((h, i) => { ix[h] = i; });
   const miss = need.filter(n => ix[n] === undefined);
@@ -257,11 +267,11 @@ function parseHexagon(text) {
   const recs = [];
   for (let r = 1; r < rows.length; r++) {
     const a = rows[r];
-    if (a.length < 3 || (a.length === 1 && a[0] === "")) continue;
-    const t = parseHexTime(a[ix["Time Full"]]); const tons = parseFloat(a[ix["Computed Tonnage"]]);
-    const truck = (a[ix["Truck"]] || "").trim(), shovel = (a[ix["Shovel"]] || "").trim();
+    if (a.length < 3 || (a.length === 1 && a[0] === "") || a.every(x => x == null || x === "")) continue;
+    const t = hexTimeFrom(a[ix["Time Full"]]); const tons = parseFloat(a[ix["Computed Tonnage"]]);
+    const truck = cs(a[ix["Truck"]]), shovel = cs(a[ix["Shovel"]]);
     if (!t || !isFinite(tons) || !truck) { info.bad++; continue; }
-    recs.push({ t, tons, truck, shovel, mat: ix["Material"] === undefined ? null : (a[ix["Material"]] || "").trim(), man: (a[ix["Extra Load"]] || "").trim() !== "" ? 1 : 0, te: parseHexTime(a[ix["Time Empty"]]) });
+    recs.push({ t, tons, truck, shovel, mat: ix["Material"] === undefined ? null : cs(a[ix["Material"]]), man: cs(a[ix["Extra Load"]]) !== "" ? 1 : 0, te: hexTimeFrom(a[ix["Time Empty"]]) });
   }
   // Проход 2: агрегация по сменам; масса — Computed Tonnage как есть, отклонения от ожидаемой считаются для контроля
   const shifts = {};
@@ -496,8 +506,68 @@ function buildIndex(planRows) {
   return idx;
 }
 
+
+// ---- Статусы техники (лист «Статуса» / выгрузка статусов Hexagon) ----
+// Интервал статуса режется по границам смен (07:00 и 19:00); накапливаются часы Ready / Delay / Standby / Down.
+const ST_IDX = { Ready: 0, Delay: 1, Standby: 2, Down: 3 };
+function nextBoundary(ms) {
+  const d = new Date(ms), h = d.getUTCHours(), base = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+  return h < 7 ? base + 7 * 36e5 : (h < 19 ? base + 19 * 36e5 : base + 31 * 36e5);
+}
+function parseStatusRows(rows) {
+  if (!rows.length) throw new Error("Файл пуст.");
+  const hdr = rows[0].map(cs); const ix = {}; hdr.forEach((h, i) => { ix[h] = i; });
+  const miss = ["Time", "Time End", "Equipment", "Status"].filter(n => ix[n] === undefined);
+  if (miss.length) throw new Error("В файле нет колонок: " + miss.join(", ") + ".");
+  const sh = {}, types = {}, last = {}; const info = { rows: 0, bad: 0, unknown: 0, min: null, max: null, eq: 0 };
+  const eqSeen = {};
+  for (let r = 1; r < rows.length; r++) {
+    const a = rows[r]; if (!a || a.every(x => x == null || x === "")) continue;
+    const t0 = hexTimeFrom(a[ix["Time"]]), t1 = hexTimeFrom(a[ix["Time End"]]); const eq = cs(a[ix["Equipment"]]); const st = cs(a[ix["Status"]]);
+    if (!t0 || !t1 || !eq || t1.ms <= t0.ms) { info.bad++; continue; }
+    const k = ST_IDX[st]; if (k === undefined) { info.unknown++; continue; }
+    const rs = ix["Reason"] === undefined ? "" : cs(a[ix["Reason"]]);
+    if (ix["Type"] !== undefined && cs(a[ix["Type"]])) types[eq] = cs(a[ix["Type"]]);
+    eqSeen[eq] = 1; info.rows++;
+    if (info.min === null || t0.ms < info.min) info.min = t0.ms; if (info.max === null || t1.ms > info.max) info.max = t1.ms;
+    if (!last[eq] || t0.ms >= last[eq].ms) last[eq] = { ms: t0.ms, st, rs };
+    let cur = t0.ms;
+    while (cur < t1.ms) {
+      const seg = Math.min(t1.ms, nextBoundary(cur)); const hrs = (seg - cur) / 36e5;
+      const c = new Date(cur); const ps = prodShift({ y: c.getUTCFullYear(), mo: c.getUTCMonth() + 1, d: c.getUTCDate(), h: c.getUTCHours() });
+      const key = ps.date + "|" + ps.sh; const S = sh[key] || (sh[key] = { e: {}, r: {} });
+      (S.e[eq] || (S.e[eq] = [0, 0, 0, 0]))[k] += hrs;
+      if ((k === 2 || k === 3) && rs) S.r[eq + "|" + rs] = (S.r[eq + "|" + rs] || 0) + hrs;
+      cur = seg;
+    }
+  }
+  const rd = v => Math.round(v * 100) / 100;
+  Object.keys(sh).forEach(key => { const S = sh[key]; Object.keys(S.e).forEach(e => { S.e[e] = S.e[e].map(rd); }); Object.keys(S.r).forEach(q => { S.r[q] = rd(S.r[q]); }); });
+  info.eq = Object.keys(eqSeen).length;
+  return { shifts: sh, types, last, info };
+}
+function statTotal(S) { let t = 0; Object.keys(S.e).forEach(e => { S.e[e].forEach(v => { t += v; }); }); return t; }
+// Слияние: при совпадении смены остаётся версия с большим покрытием часов
+function mergeStat(base, add) {
+  const res = Object.assign({}, base); let added = 0, replaced = 0, kept = 0;
+  Object.keys(add).forEach(k => {
+    if (!res[k]) { res[k] = add[k]; added++; }
+    else if (statTotal(add[k]) >= statTotal(res[k])) { res[k] = add[k]; replaced++; }
+    else kept++;
+  });
+  return { shifts: res, added, replaced, kept };
+}
+// Статус техники в смене: часы по статусам; null, если данных нет
+function statCell(stat, date, sh, eq) {
+  const s = stat && stat[date + "|" + sh]; const e = s && s.e && s.e[eq]; if (!e) return null;
+  const tot = e[0] + e[1] + e[2] + e[3]; return tot > 0 ? { e, tot } : null;
+}
+function shortReason(rs) { return String(rs || "").replace(/^(Down|Standby|Delay|Ready)\s+\d+\s*/i, ""); }
+
 // kind: "drivers" | "exc"; month "YYYY-MM"; cutOrd — включительно
+// stat — часы статусов по сменам (может быть пустым); adj — вычитать из плана смены долю времени ремонта (Down) техники
 function compute(plan, factShifts, kind, month, cutOrd, opts) {
+  const stat = opts && opts.stat, adj = opts && opts.adj;
   const tl = opts && opts.tl, matchName = opts && opts.match;
   const planNames = plan.drivers.concat(plan.excavators).map(r => r[3]).filter(isReal);
   // имена из чек-листов тоже участвуют в объединении: в них встречаются опечатки («Майдобек» вместо «Майдабек»),
@@ -507,19 +577,31 @@ function compute(plan, factShifts, kind, month, cutOrd, opts) {
   const rowsP = (kind === "drivers" ? plan.drivers : plan.excavators).map(r => isReal(r[3]) ? [r[0], r[1], r[2], CN.canon(r[3]), r[4], r[5]] : r);
   const idx = buildIndex(rowsP);
   const W = {}; const E = {}; const U = {}; const NM = {};
-  const getW = f => W[f] || (W[f] = { fio: f, plan: 0, shifts: 0, fact: 0, trips: 0, man: 0, manT: 0, shared: 0, monthPlan: 0, planLeft: 0, shiftsLeft: 0, eq: {}, cells: {} });
+  const hasStat = !!stat && Object.keys(stat).length > 0;
+  const getW = f => W[f] || (W[f] = { fio: f, plan: 0, planRaw: 0, dnH: 0, sbH: 0, rdH: 0, dlH: 0, shifts: 0, fact: 0, trips: 0, man: 0, manT: 0, shared: 0, monthPlan: 0, planLeft: 0, shiftsLeft: 0, eq: {}, cells: {} });
   const getE = e => E[e] || (E[e] = { eq: e, plan: 0, fact: 0, trips: 0, man: 0, manT: 0 });
-  const cell = (w, date, sh, eq) => { const k = date + "|" + sh + "|" + eq; return w.cells[k] || (w.cells[k] = { date, sh, eq, plan: 0, fact: 0, trips: 0, hrs: 0, chk: 0, pl: 0 }); };
-  let planAll = 0, monthAll = 0;
+  const cell = (w, date, sh, eq) => { const k = date + "|" + sh + "|" + eq; return w.cells[k] || (w.cells[k] = { date, sh, eq, plan: 0, planRaw: 0, dn: 0, sb: 0, fact: 0, trips: 0, hrs: 0, chk: 0, pl: 0 }); };
+  let planAll = 0, planRawAll = 0, monthAll = 0, noStat = 0;
   rowsP.forEach(r => {
     if (r[0].slice(0, 7) !== month) return;
-    monthAll += r[5];
     if (shiftOrd(r[0], r[1]) > cutOrd) {
+      monthAll += r[5];
       if (isReal(r[3])) { const w = getW(r[3].trim()); w.monthPlan += r[5]; w.planLeft += r[5]; if (r[4] > 0) w.shiftsLeft++; }
       return;
     }
-    planAll += r[5]; getE(r[2]).plan += r[5];
-    if (isReal(r[3])) { const w = getW(r[3].trim()); w.plan += r[5]; w.monthPlan += r[5]; if (r[4] > 0) w.shifts++; const c = cell(w, r[0], r[1], r[2]); c.plan += r[5]; c.hrs += r[4]; }
+    const sd = statCell(stat, r[0], r[1], r[2]);
+    const pe = adj && sd ? r[5] * (sd.tot - sd.e[3]) / sd.tot : r[5];
+    monthAll += pe; planAll += pe; planRawAll += r[5]; getE(r[2]).plan += pe;
+    if (hasStat && !sd && r[4] > 0) noStat++;
+    if (isReal(r[3])) {
+      const w = getW(r[3].trim()); w.plan += pe; w.planRaw += r[5]; w.monthPlan += pe; if (r[4] > 0) w.shifts++;
+      const c = cell(w, r[0], r[1], r[2]); c.plan += pe; c.planRaw += r[5]; c.hrs += r[4];
+      if (sd && r[4] > 0) {
+        const lst = (idx[r[0] + "|" + r[1] + "|" + r[2]] || []).filter(x => x.h > 0 && isReal(x.fio)); const sum = lst.reduce((q, x) => q + x.h, 0);
+        const f = sum > 0 ? r[4] / sum : 1;
+        w.rdH += sd.e[0] * f; w.dlH += sd.e[1] * f; w.sbH += sd.e[2] * f; w.dnH += sd.e[3] * f; c.dn += sd.e[3] * f; c.sb += sd.e[2] * f;
+      }
+    }
   });
   let factAll = 0, tripsAll = 0, manAll = 0, manTAll = 0, unT = 0, unTr = 0, sharedTr = 0, anN = 0, anT = 0, devN = 0, devT = 0;
   let chkTr = 0, chkT = 0, fbTr = 0, fbT = 0, subTr = 0, subT = 0;
@@ -573,7 +655,7 @@ function compute(plan, factShifts, kind, month, cutOrd, opts) {
     }
   });
   return { workers: Object.values(W), equip: Object.values(E), unassigned: Object.values(U), unmatched: NM, merges: CN.merges,
-    tot: { plan: planAll, monthAll, fact: factAll, trips: tripsAll, man: manAll, manT: manTAll, unT, unTr, sharedTr, anN, anT, devN, devT, chkTr, chkT, fbTr, fbT, subTr, subT } };
+    tot: { plan: planAll, planRaw: planRawAll, cut: planRawAll - planAll, noStat, hasStat, monthAll, fact: factAll, trips: tripsAll, man: manAll, manT: manTAll, unT, unTr, sharedTr, anN, anT, devN, devT, chkTr, chkT, fbTr, fbT, subTr, subT } };
 }
 
 // Разбор плана из JSON (kpi-plan-*.json)
@@ -612,14 +694,15 @@ function planFromSheets(drvAoa, excAoa) {
 }
 // ==CALC-END==
 
-const CFG = { PIN: "2508", PLAN_KEY: "dispMass.plans.v1", FACT_KEY: "dispMass.fact.v1", AUTO_PLAN: "kpi-plan-2026-10.json",
+const CFG = { PIN: "2508", PLAN_KEY: "dispMass.plans.v1", FACT_KEY: "dispMass.fact.v1", STAT_KEY: "dispMass.stat.v1", AUTO_PLAN: "kpi-plan-2026-10.json",
   SHEET_URL: "https://script.google.com/macros/s/AKfycbwhdMV20k8US2BXUz1Xk2XCXE9MEwpHpQaadTF9xEfzbU1--dHL-Zuj06K2qXW-rFtKGw/exec", CHK_KEY: "dispMass.chk.v1", SL_KEY: "dispMass.stl.v1", CHK_MAX_DAYS: 100 };
 let CHK = { recs: [], ok: false, at: null, err: "" }; // recs: [{id,e,n,d}]
 let TL = null, MATCH = null, NAMES = [];
 let SL = { rows: [], ok: false, at: null, err: "" }, STL = null; // журнал статусов техники
 let PLANS = {};           // { "2026-10": plan }
 let FACT = { shifts: {}, files: [] };
-let TAB = "haulD", SORT = { drivers: ["fio", 1], exc: ["fio", 1], eq: ["eq", 1], ctl: ["tons", -1] };
+let STAT = { shifts: {}, types: {}, last: {}, files: [], min: null, max: null };   // статусы техники
+let TAB = "haulD", SORT = { drivers: ["fio", 1], exc: ["fio", 1], eq: ["eq", 1], ctl: ["tons", -1], dt: ["dn", -1] };
 let RES = null;
 
 function $(id) { return document.getElementById(id); }
@@ -648,6 +731,7 @@ function banner(id, msg) { const b = $(id); if (msg) { b.textContent = msg; b.st
 async function init() {
   PLANS = load(CFG.PLAN_KEY) || {};
   const f = load(CFG.FACT_KEY); if (f && f.shifts) FACT = f;
+  const sx = load(CFG.STAT_KEY); if (sx && sx.shifts) STAT = Object.assign(STAT, sx);
   if (!Object.keys(PLANS).length) {
     try {
       const r = await fetch(CFG.AUTO_PLAN, { cache: "no-cache" });
@@ -746,11 +830,30 @@ function updateSourceStates() {
   const ms = Object.keys(PLANS).sort();
   $("planState").innerHTML = ms.length ? ms.map(m => { const p = PLANS[m]; const t = p.drivers.reduce((s, r) => s + r[5], 0);
     return "<b>" + m + "</b>: строк водителей " + p.drivers.length + ", экскаваторов " + p.excavators.length + ", план " + fmtT(t) + " т"; }).join("<br>") : "План не загружен. Загрузите книгу KPI или файл kpi-plan-*.json.";
+  const sk = Object.keys(STAT.shifts);
+  $("statState").innerHTML = sk.length ? "Статусы техники: смен <b>" + sk.length + "</b>, единиц техники " + Object.keys(STAT.types).length + ". Период: <b>" + fmtDT(STAT.min) + " — " + fmtDT(STAT.max) + "</b>." : "Статусы техники не загружены (лист «Статуса» книги выгрузки).";
   const ks = Object.keys(FACT.shifts);
   if (!ks.length) { $("factState").textContent = "Выгрузка не загружена."; return; }
   let mn = Infinity, mx = -Infinity, tr = 0, tn = 0;
   ks.forEach(k => { const S = FACT.shifts[k]; if (S.min < mn) mn = S.min; if (S.max > mx) mx = S.max; tr += S.trips; tn += S.tons; });
   $("factState").innerHTML = "Смен в базе: <b>" + ks.length + "</b>. Период рейсов: <b>" + fmtDT(mn) + " — " + fmtDT(mx) + "</b>.<br>Рейсов: " + fmtN(tr) + ", масса " + fmtT(tn) + " т.";
+}
+
+function ingestTrips(r, label) {
+  if (!r.info.rows) return { kind: "skip", msg: "«" + label + "»: в выгрузке не найдено ни одного рейса" + (r.info.bad ? " (строк с ошибками: " + r.info.bad + ")" : "") + ". Пропущено." };
+  const m = mergeFact(FACT.shifts, r.shifts); FACT.shifts = m.shifts;
+  FACT.files.push({ name: label, at: Date.now(), rows: r.info.rows, tons: r.info.tons, from: r.info.min, to: r.info.max });
+  return { kind: "fact", msg: (r.info.dev ? "Рейсов с массой, отличной от ожидаемой для машины и материала: " + fmtN(r.info.dev) + " (отклонение " + (r.info.devT >= 0 ? "+" : "") + fmtT(r.info.devT) + " т; машины: " + Object.keys(r.info.devEq).sort().map(k => k + " (" + r.info.devEq[k] + ")").join(", ") + "). Масса взята как в Hexagon. " : "") +
+    "«" + label + "»: рейсов " + fmtN(r.info.rows) + ", " + fmtT(r.info.tons) + " т; смен добавлено " + m.added + ", обновлено " + m.replaced + ", оставлено прежних " + m.kept + (r.info.bad ? "; пропущено строк с ошибками: " + r.info.bad : "") + "." };
+}
+function ingestStatus(r, label) {
+  if (!r.info.rows) return { kind: "skip", msg: "«" + label + "»: статусов техники не найдено" + (r.info.bad ? " (строк с ошибками: " + r.info.bad + ")" : "") + ". Пропущено." };
+  const m = mergeStat(STAT.shifts, r.shifts); STAT.shifts = m.shifts;
+  Object.assign(STAT.types, r.types);
+  Object.keys(r.last).forEach(e => { if (!STAT.last[e] || r.last[e].ms >= STAT.last[e].ms) STAT.last[e] = r.last[e]; });
+  if (STAT.min === null || r.info.min < STAT.min) STAT.min = r.info.min; if (STAT.max === null || r.info.max > STAT.max) STAT.max = r.info.max;
+  STAT.files.push({ name: label, at: Date.now(), rows: r.info.rows });
+  return { kind: "stat", msg: "«" + label + "»: статусов техники " + fmtN(r.info.rows) + " записей по " + r.info.eq + " ед. техники; смен добавлено " + m.added + ", обновлено " + m.replaced + ", оставлено прежних " + m.kept + (r.info.unknown ? "; неизвестных статусов пропущено " + r.info.unknown : "") + (r.info.bad ? "; строк с ошибками " + r.info.bad : "") + "." };
 }
 
 // Единая загрузка: тип файла определяется по содержимому (книга Excel / JSON плана / CSV Hexagon), а не по кнопке и расширению.
@@ -760,16 +863,26 @@ async function ingestFile(f) {
   if (isBook) {
     if (typeof XLSX === "undefined") return { kind: "skip", msg: "«" + f.name + "»: библиотека чтения Excel не загрузилась (нет связи с cdnjs.cloudflare.com). Файл пропущен, попробуйте позже." };
     let wb;
-    try { wb = XLSX.read(buf, { type: "array", sheets: ["План водителей", "План экскаваторщиков"] }); }
+    try { wb = XLSX.read(buf, { type: "array", sheets: ["План водителей", "План экскаваторщиков", "Рейсы", "Статуса"] }); }
     catch (e) { return { kind: "skip", msg: "«" + f.name + "»: не удалось прочитать как книгу Excel. Файл пропущен." }; }
+    const aoa = n => XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: true, defval: null });
+    const res = [];
     if (wb.Sheets["План водителей"] && wb.Sheets["План экскаваторщиков"]) {
-      const aoa = n => XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: true, defval: null });
       const plan = planFromSheets(aoa("План водителей"), aoa("План экскаваторщиков"));
       PLANS[plan.month] = plan;
-      return { kind: "plan", month: plan.month, msg: "План на " + plan.month + " загружен из «" + f.name + "»." };
+      res.push({ kind: "plan", month: plan.month, msg: "План на " + plan.month + " загружен из «" + f.name + "»." });
     }
+    if (wb.Sheets["Рейсы"]) {
+      try { res.push(ingestTrips(parseHexRows(aoa("Рейсы")), f.name + ", лист «Рейсы»")); }
+      catch (e) { res.push({ kind: "skip", msg: "«" + f.name + "», лист «Рейсы»: не прочитан (" + e.message + ")." }); }
+    }
+    if (wb.Sheets["Статуса"]) {
+      try { res.push(ingestStatus(parseStatusRows(aoa("Статуса")), f.name + ", лист «Статуса»")); }
+      catch (e) { res.push({ kind: "skip", msg: "«" + f.name + "», лист «Статуса»: не прочитан (" + e.message + ")." }); }
+    }
+    if (res.length) return res;
     let names = []; try { names = XLSX.read(buf, { type: "array", bookSheets: true }).SheetNames; } catch (e) {}
-    return { kind: "skip", msg: "«" + f.name + "»: это не книга KPI самосвалов и экскаваторов (нет листов «План водителей» и «План экскаваторщиков»" + (names.length ? "; в файле: " + names.slice(0, 6).join(", ") + (names.length > 6 ? "…" : "") : "") + "). Файл пропущен, загруженный план не изменён." };
+    return { kind: "skip", msg: "«" + f.name + "»: в книге нет ни планов («План водителей», «План экскаваторщиков»), ни выгрузки Hexagon (листы «Рейсы», «Статуса»)" + (names.length ? "; в файле: " + names.slice(0, 6).join(", ") + (names.length > 6 ? "…" : "") : "") + ". Файл пропущен, загруженные данные не изменены." };
   }
   const text = (u[0] === 0xFF && u[1] === 0xFE ? new TextDecoder("utf-16le") : new TextDecoder("utf-8")).decode(buf).replace(/^\uFEFF/, "");
   const head = text.trimStart().slice(0, 3000);
@@ -777,31 +890,28 @@ async function ingestFile(f) {
     try { const plan = planFromJson(JSON.parse(text)); PLANS[plan.month] = plan; return { kind: "plan", month: plan.month, msg: "План на " + plan.month + " загружен из «" + f.name + "»." }; }
     catch (e) { return { kind: "skip", msg: "«" + f.name + "»: JSON не похож на файл плана. Файл пропущен." }; }
   }
-  if (/Time Full/.test(head) && /Computed Tonnage/.test(head)) {
-    const r = parseHexagon(text);
-    if (!r.info.rows) return { kind: "skip", msg: "«" + f.name + "»: в выгрузке не найдено ни одного рейса" + (r.info.bad ? " (строк с ошибками: " + r.info.bad + ")" : "") + ". Файл пропущен." };
-    const m = mergeFact(FACT.shifts, r.shifts); FACT.shifts = m.shifts;
-    FACT.files.push({ name: f.name, at: Date.now(), rows: r.info.rows, tons: r.info.tons, from: r.info.min, to: r.info.max });
-    return { kind: "fact", msg: (r.info.dev ? "Рейсов с массой, отличной от ожидаемой для машины и материала: " + fmtN(r.info.dev) + " (отклонение " + (r.info.devT >= 0 ? "+" : "") + fmtT(r.info.devT) + " т; машины: " + Object.keys(r.info.devEq).sort().map(k => k + " (" + r.info.devEq[k] + ")").join(", ") + "). Масса взята как в Hexagon. " : "") +
-      "«" + f.name + "»: рейсов " + fmtN(r.info.rows) + ", " + fmtT(r.info.tons) + " т; смен добавлено " + m.added + ", обновлено " + m.replaced + ", оставлено прежних " + m.kept + (r.info.bad ? "; пропущено строк с ошибками: " + r.info.bad : "") + "." };
-  }
-  return { kind: "skip", msg: "«" + f.name + "»: файл не распознан (ни книга KPI, ни выгрузка Hexagon «Shift Load Dump»). Пропущен." };
+  if (/Time Full/.test(head) && /Computed Tonnage/.test(head)) return ingestTrips(parseHexagon(text), f.name);
+  if (/Time End/.test(head) && /Equipment/.test(head) && /Status/.test(head)) return ingestStatus(parseStatusRows(parseCSV(text)), f.name);
+  return { kind: "skip", msg: "«" + f.name + "»: файл не распознан (ни книга KPI, ни выгрузка Hexagon: рейсы или статусы). Пропущен." };
 }
 
 async function onFiles(list) {
   const files = Array.from(list || []); if (!files.length) return;
   banner("errBanner", ""); banner("warnBanner", ""); banner("infoBanner", "Чтение файлов, подождите…");
-  const ok = [], skipped = []; let planMonth = null, planTouched = false, factTouched = false;
+  const ok = [], skipped = []; let planMonth = null, planTouched = false, factTouched = false, statTouched = false;
   for (const f of files) {
     try {
-      const r = await ingestFile(f);
-      if (r.kind === "skip") skipped.push(r.msg);
-      else { ok.push(r.msg); if (r.kind === "plan") { planMonth = r.month; planTouched = true; } else factTouched = true; }
+      const rs = [].concat(await ingestFile(f));
+      rs.forEach(r => {
+        if (r.kind === "skip") skipped.push(r.msg);
+        else { ok.push(r.msg); if (r.kind === "plan") { planMonth = r.month; planTouched = true; } else if (r.kind === "stat") statTouched = true; else factTouched = true; }
+      });
     } catch (e) { skipped.push("«" + f.name + "»: файл не прочитан (" + e.message + "). Пропущен."); }
   }
   let storeFail = false;
   if (planTouched && !store(CFG.PLAN_KEY, PLANS)) storeFail = true;
   if (factTouched && !store(CFG.FACT_KEY, FACT)) storeFail = true;
+  if (statTouched && !store(CFG.STAT_KEY, STAT)) storeFail = true;
   if (storeFail) skipped.push("Данные загружены, но не сохранены в браузере (нет места или хранилище отключено): после перезагрузки страницы файлы придётся загрузить снова.");
   const fm = {}; Object.keys(FACT.shifts).forEach(k => { fm[k.slice(0, 7)] = 1; });
   const noPlan = Object.keys(fm).filter(m => !PLANS[m]);
@@ -815,8 +925,9 @@ async function onFiles(list) {
 document.addEventListener("dragover", e => { e.preventDefault(); });
 document.addEventListener("drop", e => { e.preventDefault(); if ($("app").style.display === "block" && e.dataTransfer && e.dataTransfer.files.length) onFiles(e.dataTransfer.files); });
 function clearFact() {
-  if (!confirm("Удалить загруженный факт из браузера?")) return;
-  FACT = { shifts: {}, files: [] }; try { localStorage.removeItem(CFG.FACT_KEY); } catch (e) {}
+  if (!confirm("Удалить загруженные рейсы и статусы техники из браузера?")) return;
+  FACT = { shifts: {}, files: [] }; STAT = { shifts: {}, types: {}, last: {}, files: [], min: null, max: null };
+  try { localStorage.removeItem(CFG.FACT_KEY); localStorage.removeItem(CFG.STAT_KEY); } catch (e) {}
   banner("infoBanner", ""); updateSourceStates(); cutToData(true); render();
 }
 
@@ -829,7 +940,8 @@ function render() {
   if (!plan) { $("stats").innerHTML = ""; $("tableHost").innerHTML = '<div class="empty">Загрузите план месяца.</div>'; RES = null; return; }
   const c = cutOrd();
   const o = $("fSrc").value === "chk" && TL ? { tl: TL, match: MATCH, names: NAMES } : null;
-  RES = { drivers: compute(plan, FACT.shifts, "drivers", m, c, o), exc: compute(plan, FACT.shifts, "exc", m, c, o) };
+  const adj = $("fAdj").value === "1"; const o2 = Object.assign({}, o || {}, { stat: STAT.shifts, adj });
+  RES = { drivers: compute(plan, FACT.shifts, "drivers", m, c, o2), exc: compute(plan, FACT.shifts, "exc", m, c, o2) };
   const nowMin = Math.floor((Date.now() + 5 * 3600000) / 60000);
   RES.drivers.idle = idleAnalysis(plan, FACT.shifts, "drivers", m, c, STL, nowMin, TL);
   RES.exc.idle = idleAnalysis(plan, FACT.shifts, "exc", m, c, STL, nowMin, TL);
@@ -842,9 +954,11 @@ function render() {
     stat("Осталось до плана месяца, т", fmtT(Math.max(0, R.monthAll - R.fact))) + stat("Рейсов", fmtN(R.trips)) +
     stat("Из них добавлено вручную", R.trips ? fmtN(R.man) + " (" + (R.man / R.trips * 100).toFixed(0) + " %)" : "—") +
     stat("Без работника, т", fmtT(R.unT) + " (" + (R.fact ? (R.unT / R.fact * 100).toFixed(1) : "0") + " %)") +
+    (R.hasStat ? stat("Снято из плана за ремонт, т", $("fAdj").value === "1" ? fmtT(R.cut) : "не применяется") : "") +
     (R.chkTr + R.fbTr > 0 ? stat("Рейсов по чек-листам", fmtN(R.chkTr) + " (" + (R.chkTr / R.trips * 100).toFixed(0) + " %)") + stat("Рейсов у подменных", fmtN(R.subTr)) : "");
   banner("warnBanner", !ks.length ? "Факт за выбранный месяц не загружен." :
-    (R.unT / (R.fact || 1) > 0.1 ? "Более 10 % массы не закреплено за работниками (вакансии или техника вне плана). Подробности на вкладке «Контроль данных»." : ""));
+    [R.unT / (R.fact || 1) > 0.1 ? "Более 10 % массы не закреплено за работниками (вакансии или техника вне плана). Подробности на вкладке «Контроль данных»." : "",
+      (R.hasStat && STAT.max !== null && Math.max.apply(null, ks.map(k => FACT.shifts[k].max)) > STAT.max + 36e5 ? "Статусы техники заканчиваются " + fmtDT(STAT.max) + ", а рейсы идут позже: по последним сменам поправка на ремонт не применена. " : "") + (R.hasStat && R.noStat ? "Для " + R.noStat + " строк плана (смена + техника) статусов нет, план по ним не уменьшен. Загрузите выгрузку статусов за весь период." : "")].filter(Boolean).join(" "));
   renderTable();
 }
 function stat(l, v) { return '<div class="stat-card"><div class="stat-val">' + v + '</div><div class="stat-lbl">' + l + "</div></div>"; }
@@ -862,11 +976,11 @@ function sortRows(rows, key) {
     return (typeof x === "string" ? x.localeCompare(y, "ru") : x - y) * dir; });
 }
 function th(label, k, tab, num) { return '<th class="' + (num ? "num" : "") + '" onclick="sortBy(\'' + tab + "','" + k + "')\">" + label + "</th>"; }
-function sortBy(tab, k) { const s = SORT[tab]; SORT[tab] = [k, s[0] === k ? -s[1] : (k === "fio" || k === "eq" ? 1 : -1)]; renderTable(); }
+function sortBy(tab, k) { const s = SORT[tab]; SORT[tab] = [k, s[0] === k ? -s[1] : (k === "fio" || k === "eq" || k === "kind" || k === "type" ? 1 : -1)]; renderTable(); }
 
 function workerRows(kind) {
   const q = $("fSearch").value.trim().toLowerCase();
-  return RES[kind].workers.map(w => Object.assign({}, w, { pct: pct(w.fact, w.plan), diff: w.fact - w.plan, rem: w.monthPlan - w.fact,
+  return RES[kind].workers.map(w => Object.assign({}, w, { pct: pct(w.fact, w.plan), diff: w.fact - w.plan, cut: w.planRaw - w.plan, rem: w.monthPlan - w.fact,
     need: w.shiftsLeft > 0 ? Math.max(0, w.monthPlan - w.fact) / w.shiftsLeft : null,
     perShift: w.shiftsLeft > 0 ? w.planLeft / w.shiftsLeft : null,
     eqs: Object.keys(w.eq).sort((a, b) => w.eq[b] - w.eq[a]) }))
@@ -881,48 +995,94 @@ function haulRows(kind) {
     const m = {};
     Object.values(w.cells).forEach(c => {
       if (!(c.fact > 0 || c.trips > 0)) return;
-      const e = m[c.eq] || (m[c.eq] = { eq: c.eq, tons: 0, trips: 0, shifts: 0 });
-      e.tons += c.fact; e.trips += c.trips; e.shifts++;
+      const e = m[c.eq] || (m[c.eq] = { eq: c.eq, tons: 0, trips: 0, shifts: 0, dn: 0, sb: 0 });
+      e.tons += c.fact; e.trips += c.trips; e.shifts++; e.dn += c.dn; e.sb += c.sb;
     });
     const items = Object.values(m).sort((a, b) => b.tons - a.tons);
-    const rem = w.monthPlan - w.fact; return { fio: w.fio, monthPlan: w.monthPlan, rem, shiftsLeft: w.shiftsLeft, need: w.shiftsLeft > 0 ? Math.max(0, rem) / w.shiftsLeft : null, items, tons: items.reduce((x, e) => x + e.tons, 0), trips: items.reduce((x, e) => x + e.trips, 0), shifts: Object.values(w.cells).filter(c => c.fact > 0 || c.trips > 0).length };
+    const rem = w.monthPlan - w.fact; return { fio: w.fio, monthPlan: w.monthPlan, rem, cut: w.planRaw - w.plan, dnH: w.dnH, sbH: w.sbH, shiftsLeft: w.shiftsLeft, need: w.shiftsLeft > 0 ? Math.max(0, rem) / w.shiftsLeft : null, items, tons: items.reduce((x, e) => x + e.tons, 0), trips: items.reduce((x, e) => x + e.trips, 0), shifts: Object.values(w.cells).filter(c => c.fact > 0 || c.trips > 0).length };
   }).filter(r => r.tons > 0 && (!q || r.fio.toLowerCase().indexOf(q) >= 0 || r.items.some(e => e.eq.toLowerCase().indexOf(q) >= 0)))
     .sort((a, b) => a.fio.localeCompare(b.fio, "ru"));
 }
+// Состояние техники на конец данных статусов (если в ремонте или в ожидании)
+function curState(eq) {
+  const l = STAT.last[eq]; if (!l || (l.st !== "Down" && l.st !== "Standby")) return "";
+  return '<div class="sub">' + (l.st === "Down" ? "в ремонте" : "в ожидании") + ": " + esc(shortReason(l.rs)) + ", с " + fmtDT(l.ms) + "</div>";
+}
+function hrs1(v) { return v > 0.04 ? v.toFixed(1).replace(".", ",") : ""; }
 function renderHaul(kind) {
-  const rows = haulRows(kind), T = RES[kind].tot;
+  const rows = haulRows(kind), T = RES[kind].tot, hs = T.hasStat, adj = $("fAdj").value === "1";
   const avg = (t, n) => n > 0 ? (t / n).toFixed(1).replace(".", ",") : "";
-  let h = '<table class="kpi"><thead><tr><th>Фамилия, имя, отчество</th><th>' + (kind === "drivers" ? "Самосвал" : "Экскаватор") + '</th><th class="num">Смен</th><th class="num">Рейсов</th><th class="num">Масса, т</th><th class="num">Т за рейс</th><th class="num">План месяца, т</th><th class="num">Осталось до плана, т</th><th class="num">Смен осталось</th><th class="num">Нужно за смену, т</th></tr></thead><tbody>';
-  let st = 0, sr = 0, sm = 0, srem = 0;
+  const ex = hs ? 3 : 0; // число добавочных колонок
+  let h = '<table class="kpi"><thead><tr><th>Фамилия, имя, отчество</th><th>' + (kind === "drivers" ? "Самосвал" : "Экскаватор") + '</th><th class="num">Смен</th><th class="num">Рейсов</th><th class="num">Масса, т</th><th class="num">Т за рейс</th>' +
+    (hs ? '<th class="num">Ремонт техники, ч</th><th class="num">Ожидание, ч</th><th class="num">Снято из плана, т</th>' : "") +
+    '<th class="num">План месяца' + (hs && adj ? " с поправкой" : "") + ', т</th><th class="num">Осталось до плана, т</th><th class="num">Смен осталось</th><th class="num">Нужно за смену, т</th></tr></thead><tbody>';
+  const blank = n => new Array(n + 1).join("<td></td>");
+  let st = 0, sr = 0, sm = 0, srem = 0, sdn = 0, ssb = 0, scut = 0;
   rows.forEach(r => {
-    st += r.tons; sr += r.trips; sm += r.monthPlan; srem += Math.max(0, r.rem);
+    st += r.tons; sr += r.trips; sm += r.monthPlan; srem += Math.max(0, r.rem); sdn += r.dnH; ssb += r.sbH; scut += r.cut;
     const multi = r.items.length > 1;
-    h += '<tr class="click" onclick="openWorker(\'' + (kind === "drivers" ? "drivers" : "exc") + "'," + JSON.stringify(r.fio).replace(/"/g, "&quot;") + ')"><td><b>' + esc(r.fio) + "</b></td><td>" + (multi ? '<span class="sub">техники: ' + r.items.length + "</span>" : esc(r.items[0].eq)) +
-      '</td><td class="num">' + r.shifts + '</td><td class="num">' + fmtN(r.trips) + '</td><td class="num"><b>' + fmtT(r.tons) + '</b></td><td class="num">' + avg(r.tons, r.trips) + '</td><td class="num">' + fmtT(r.monthPlan) + '</td><td class="num">' + (r.rem > 0 ? "<b>" + fmtT(r.rem) + "</b>" : (r.monthPlan > 0 ? '<span class="badge b-green">выполнен +' + fmtT(-r.rem) + "</span>" : "")) + '</td><td class="num">' + (r.shiftsLeft || "") + '</td><td class="num">' + (r.need === null ? "" : fmtT(r.need)) + "</td></tr>";
-    if (multi) r.items.forEach(e => { h += '<tr><td></td><td>&nbsp;&nbsp;' + esc(e.eq) + '</td><td class="num">' + e.shifts + '</td><td class="num">' + fmtN(e.trips) + '</td><td class="num">' + fmtT(e.tons) + '</td><td class="num">' + avg(e.tons, e.trips) + '</td><td></td><td></td><td></td><td></td></tr>'; });
+    h += '<tr class="click" onclick="openWorker(\'' + (kind === "drivers" ? "drivers" : "exc") + "'," + JSON.stringify(r.fio).replace(/"/g, "&quot;") + ')"><td><b>' + esc(r.fio) + "</b></td><td>" + (multi ? '<span class="sub">техники: ' + r.items.length + "</span>" : esc(r.items[0].eq) + curState(r.items[0].eq)) +
+      '</td><td class="num">' + r.shifts + '</td><td class="num">' + fmtN(r.trips) + '</td><td class="num"><b>' + fmtT(r.tons) + '</b></td><td class="num">' + avg(r.tons, r.trips) + '</td>' +
+      (hs ? '<td class="num">' + hrs1(r.dnH) + '</td><td class="num">' + hrs1(r.sbH) + '</td><td class="num">' + (r.cut > 0.5 ? fmtT(r.cut) : "") + "</td>" : "") +
+      '<td class="num">' + fmtT(r.monthPlan) + '</td><td class="num">' + (r.rem > 0 ? "<b>" + fmtT(r.rem) + "</b>" : (r.monthPlan > 0 ? '<span class="badge b-green">выполнен +' + fmtT(-r.rem) + "</span>" : "")) + '</td><td class="num">' + (r.shiftsLeft || "") + '</td><td class="num">' + (r.need === null ? "" : fmtT(r.need)) + "</td></tr>";
+    if (multi) r.items.forEach(e => { h += '<tr><td></td><td>&nbsp;&nbsp;' + esc(e.eq) + curState(e.eq) + '</td><td class="num">' + e.shifts + '</td><td class="num">' + fmtN(e.trips) + '</td><td class="num">' + fmtT(e.tons) + '</td><td class="num">' + avg(e.tons, e.trips) + '</td>' + (hs ? '<td class="num">' + hrs1(e.dn) + '</td><td class="num">' + hrs1(e.sb) + "</td><td></td>" : "") + blank(4) + '</tr>'; });
   });
-  h += '</tbody><tfoot><tr><td>Итого по операторам</td><td></td><td></td><td class="num">' + fmtN(sr) + '</td><td class="num">' + fmtT(st) + '</td><td></td><td class="num">' + fmtT(sm) + '</td><td class="num">' + fmtT(srem) + "</td><td></td><td></td></tr>" +
-    '<tr><td>Не закреплено за оператором</td><td class="sub">вакансии и техника вне плана смены</td><td></td><td class="num">' + fmtN(T.unTr) + '</td><td class="num">' + fmtT(T.unT) + "</td><td></td><td></td><td></td><td></td><td></td></tr>" +
-    '<tr><td>Всего по выгрузке за период</td><td></td><td></td><td class="num">' + fmtN(T.trips) + '</td><td class="num">' + fmtT(T.fact) + '</td><td></td><td class="num">' + fmtT(T.monthAll) + '</td><td class="num">' + fmtT(Math.max(0, T.monthAll - T.fact)) + "</td><td></td><td></td></tr></tfoot></table>";
+  h += '</tbody><tfoot><tr><td>Итого по операторам</td><td></td><td></td><td class="num">' + fmtN(sr) + '</td><td class="num">' + fmtT(st) + '</td><td></td>' + (hs ? '<td class="num">' + hrs1(sdn) + '</td><td class="num">' + hrs1(ssb) + '</td><td class="num">' + (scut > 0.5 ? fmtT(scut) : "") + "</td>" : "") + '<td class="num">' + fmtT(sm) + '</td><td class="num">' + fmtT(srem) + "</td><td></td><td></td></tr>" +
+    '<tr><td>Не закреплено за оператором</td><td class="sub">вакансии и техника вне плана смены</td><td></td><td class="num">' + fmtN(T.unTr) + '</td><td class="num">' + fmtT(T.unT) + "</td>" + blank(5 + ex) + "</tr>" +
+    '<tr><td>Всего по выгрузке за период</td><td></td><td></td><td class="num">' + fmtN(T.trips) + '</td><td class="num">' + fmtT(T.fact) + '</td><td></td>' + blank(ex) + '<td class="num">' + fmtT(T.monthAll) + '</td><td class="num">' + fmtT(Math.max(0, T.monthAll - T.fact)) + "</td><td></td><td></td></tr></tfoot></table>";
   return rows.length ? h : '<div class="empty">Нет данных. Загрузите план и выгрузку Hexagon.</div>';
+}
+
+// Сводка статусов техники до среза: часы по единицам и причины простоев
+function statSummary(month, cut, only) {
+  const eqs = {}, reasons = {};
+  Object.keys(STAT.shifts).forEach(sk => {
+    const p = sk.split("|"); if (p[0].slice(0, 7) !== month || shiftOrd(p[0], p[1]) > cut) return;
+    const S = STAT.shifts[sk];
+    Object.keys(S.e).forEach(eq => { if (!only[eq]) return; const o = eqs[eq] || (eqs[eq] = [0, 0, 0, 0]); for (let i = 0; i < 4; i++) o[i] += S.e[eq][i]; });
+    Object.keys(S.r || {}).forEach(k => { const i = k.indexOf("|"), eq = k.slice(0, i), rs = k.slice(i + 1); if (!only[eq]) return;
+      const o = reasons[rs] || (reasons[rs] = { rs, h: 0, eqs: {} }); o.h += S.r[k]; o.eqs[eq] = (o.eqs[eq] || 0) + S.r[k]; });
+  });
+  return { eqs, reasons };
+}
+function renderDowntime() {
+  if (!Object.keys(STAT.shifts).length) return '<div class="empty">Статусы техники не загружены. Загрузите книгу выгрузки Hexagon с листом «Статуса».</div>';
+  const m = $("fMonth").value, q = $("fSearch").value.trim().toLowerCase();
+  const fact = {}, kindOf = {}; RES.drivers.equip.forEach(e => { fact[e.eq] = (fact[e.eq] || 0) + e.fact; kindOf[e.eq] = "Самосвал"; }); RES.exc.equip.forEach(e => { fact[e.eq] = (fact[e.eq] || 0) + e.fact; kindOf[e.eq] = "Экскаватор"; });
+  const sum = statSummary(m, cutOrd(), kindOf);
+  const rows = Object.keys(sum.eqs).filter(eq => !q || eq.toLowerCase().indexOf(q) >= 0).map(eq => { const a = sum.eqs[eq], tot = a[0] + a[1] + a[2] + a[3];
+    return { eq, kind: kindOf[eq], type: STAT.types[eq] || "", tot, rd: a[0], dl: a[1], sb: a[2], dn: a[3], avail: tot ? (tot - a[3]) / tot * 100 : null, tons: fact[eq] || 0, tph: a[0] > 0 && fact[eq] ? fact[eq] / a[0] : null }; });
+  const k = SORT.dt[0], d = SORT.dt[1]; rows.sort((x, y) => (typeof x[k] === "string" ? x[k].localeCompare(y[k], "ru") : ((x[k] == null ? -1 : x[k]) - (y[k] == null ? -1 : y[k]))) * d);
+  const h1 = (l, key, num) => '<th class="' + (num ? "num" : "") + '" onclick="sortBy(\'dt\',\'' + key + '\')">' + l + "</th>";
+  let h = '<div style="padding:16px"><table class="kpi"><thead><tr>' + h1("Техника", "eq") + h1("Тип", "kind") + h1("Модель", "type") + h1("Часов", "tot", 1) + h1("В работе (Ready), ч", "rd", 1) + h1("Задержки, ч", "dl", 1) + h1("Ожидание, ч", "sb", 1) + h1("Ремонт, ч", "dn", 1) + h1("Готовность, %", "avail", 1) + h1("Масса, т", "tons", 1) + h1("Т за час в работе", "tph", 1) + "</tr></thead><tbody>";
+  const T = [0, 0, 0, 0, 0];
+  rows.forEach(r => { T[0] += r.tot; T[1] += r.rd; T[2] += r.dl; T[3] += r.sb; T[4] += r.dn;
+    h += "<tr><td><b>" + esc(r.eq) + curState(r.eq) + "</b></td><td>" + r.kind + "</td><td>" + esc(r.type) + '</td><td class="num">' + fmtN(r.tot) + '</td><td class="num">' + fmtN(r.rd) + '</td><td class="num">' + fmtN(r.dl) + '</td><td class="num">' + fmtN(r.sb) + '</td><td class="num"><b>' + fmtN(r.dn) + '</b></td><td class="num">' + (r.avail === null ? "" : r.avail.toFixed(0)) + '</td><td class="num">' + fmtT(r.tons) + '</td><td class="num">' + (r.tph === null ? "" : r.tph.toFixed(1).replace(".", ",")) + "</td></tr>"; });
+  h += '</tbody><tfoot><tr><td>Итого</td><td></td><td></td><td class="num">' + fmtN(T[0]) + '</td><td class="num">' + fmtN(T[1]) + '</td><td class="num">' + fmtN(T[2]) + '</td><td class="num">' + fmtN(T[3]) + '</td><td class="num">' + fmtN(T[4]) + '</td><td class="num">' + (T[0] ? ((T[0] - T[4]) / T[0] * 100).toFixed(0) : "") + "</td><td></td><td></td></tr></tfoot></table>";
+  const rs = Object.values(sum.reasons).sort((a, b) => b.h - a.h).slice(0, 20);
+  h += '<h3 style="font-size:14px;margin-top:18px">Причины ремонта и ожидания (первые 20 по часам)</h3>' + (rs.length ? '<table class="mini"><thead><tr><th>Причина</th><th class="num">Часов</th><th class="num">Единиц техники</th><th>Больше всего</th></tr></thead><tbody>' +
+    rs.map(o => { const top = Object.keys(o.eqs).sort((a, b) => o.eqs[b] - o.eqs[a]).slice(0, 3).map(e => e + " (" + fmtN(o.eqs[e]) + " ч)").join(", "); return "<tr><td>" + esc(o.rs) + '</td><td class="num">' + fmtN(o.h) + '</td><td class="num">' + Object.keys(o.eqs).length + "</td><td>" + esc(top) + "</td></tr>"; }).join("") + "</tbody></table>" : '<div class="sub">Нет.</div>');
+  h += '<div class="sub" style="margin-top:10px">Готовность = доля времени вне ремонта (Down). «Т за час в работе» = масса / часы в статусе Ready. В таблице только самосвалы и экскаваторы, участвующие в плане или в рейсах. Состояние «в ремонте / в ожидании» дано на конец данных статусов.</div></div>';
+  return h;
 }
 
 function renderTable() {
   const host = $("tableHost"); if (!RES) return;
   if (TAB === "haulD" || TAB === "haulE") { host.innerHTML = renderHaul(TAB === "haulD" ? "drivers" : "exc"); return; }
+  if (TAB === "dt") { host.innerHTML = renderDowntime(); return; }
   if (TAB === "drivers" || TAB === "exc") {
     const rows = sortRows(workerRows(TAB), TAB);
     const lab = TAB === "drivers" ? "Самосвалы" : "Экскаваторы";
     let h = '<table class="kpi"><thead><tr>' + th("ФИО", "fio", TAB) + th(lab, "eqsS", TAB) + th("Смен по плану", "shifts", TAB, 1) + th("План, т", "plan", TAB, 1) +
-      th("Факт, т", "fact", TAB, 1) + th("Отклонение, т", "diff", TAB, 1) + th("Рейсов", "trips", TAB, 1) + th("Вручную, т", "manT", TAB, 1) + th("Факт / план", "pct", TAB) +
+      th("Факт, т", "fact", TAB, 1) + th("Отклонение, т", "diff", TAB, 1) + th("Рейсов", "trips", TAB, 1) + th("Вручную, т", "manT", TAB, 1) + th("Факт / план", "pct", TAB) + (RES[TAB].tot.hasStat ? th("Ремонт техники, ч", "dnH", TAB, 1) + th("Снято из плана, т", "cut", TAB, 1) : "") +
       th("План месяца, т", "monthPlan", TAB, 1) + th("Осталось до плана, т", "rem", TAB, 1) + th("Смен осталось", "shiftsLeft", TAB, 1) + th("Нужно за смену, т", "need", TAB, 1) + "</tr></thead><tbody>";
     let sp = 0, sf = 0, sm = 0, sr = 0;
     rows.forEach(w => { sp += w.plan; sf += w.fact; sm += w.monthPlan; sr += Math.max(0, w.rem);
       h += '<tr class="click" onclick="openWorker(\'' + TAB + "'," + JSON.stringify(w.fio).replace(/"/g, "&quot;") + ')"><td><b>' + esc(w.fio) + "</b>" + (w.shared ? '<div class="sub">рейсы частично разделены</div>' : "") + "</td><td>" + esc(w.eqs.slice(0, 4).join(", ")) + (w.eqs.length > 4 ? " +" + (w.eqs.length - 4) : "") +
         '</td><td class="num">' + w.shifts + '</td><td class="num">' + fmtT(w.plan) + '</td><td class="num">' + fmtT(w.fact) + '</td><td class="num">' + (w.diff >= 0 ? "+" : "") + fmtT(w.diff) +
-        '</td><td class="num">' + fmtN(w.trips) + '</td><td class="num">' + (w.manT ? fmtT(w.manT) : "") + "</td><td>" + kpiBadge(w.pct) + '</td><td class="num">' + fmtT(w.monthPlan) + '</td><td class="num">' + (w.rem > 0 ? fmtT(w.rem) : (w.monthPlan > 0 ? '<span class="badge b-green">выполнен +' + fmtT(-w.rem) + "</span>" : "")) +
+        '</td><td class="num">' + fmtN(w.trips) + '</td><td class="num">' + (w.manT ? fmtT(w.manT) : "") + "</td><td>" + kpiBadge(w.pct) + "</td>" + (RES[TAB].tot.hasStat ? '<td class="num">' + hrs1(w.dnH) + '</td><td class="num">' + (w.cut > 0.5 ? fmtT(w.cut) : "") + "</td>" : "") + '<td class="num">' + fmtT(w.monthPlan) + '</td><td class="num">' + (w.rem > 0 ? fmtT(w.rem) : (w.monthPlan > 0 ? '<span class="badge b-green">выполнен +' + fmtT(-w.rem) + "</span>" : "")) +
         '</td><td class="num">' + (w.shiftsLeft || "") + '</td><td class="num">' + (w.need === null ? "" : fmtT(w.need) + (w.perShift ? '<div class="sub">план за смену ' + fmtT(w.perShift) + "</div>" : "")) + "</td></tr>"; });
-    h += "</tbody><tfoot><tr><td>Итого по показанным</td><td></td><td></td><td class=\"num\">" + fmtT(sp) + '</td><td class="num">' + fmtT(sf) + '</td><td class="num">' + (sf - sp >= 0 ? "+" : "") + fmtT(sf - sp) + "</td><td></td><td></td><td>" + (sp ? (sf / sp * 100).toFixed(1) + " %" : "") + '</td><td class="num">' + fmtT(sm) + '</td><td class="num">' + fmtT(sr) + "</td><td></td><td></td></tr></tfoot></table>";
+    h += "</tbody><tfoot><tr><td>Итого по показанным</td><td></td><td></td><td class=\"num\">" + fmtT(sp) + '</td><td class="num">' + fmtT(sf) + '</td><td class="num">' + (sf - sp >= 0 ? "+" : "") + fmtT(sf - sp) + "</td><td></td><td></td><td>" + (sp ? (sf / sp * 100).toFixed(1) + " %" : "") + "</td>" + (RES[TAB].tot.hasStat ? "<td></td><td></td>" : "") + '<td class="num">' + fmtT(sm) + '</td><td class="num">' + fmtT(sr) + "</td><td></td><td></td></tr></tfoot></table>";
     host.innerHTML = rows.length ? h : '<div class="empty">Нет данных по фильтру.</div>';
   } else if (TAB === "eq") {
     const q = $("fSearch").value.trim().toLowerCase();
@@ -939,7 +1099,8 @@ function renderTable() {
       ctlRow("Рейсов на операторах не из плана смены (подмены)", R.subTr, X.subTr) +
       ctlRow("Рейсов, разделённых между двумя работниками по плану (день заезда/выезда)", R.sharedTr, X.sharedTr) +
       ctlRow("Рейсов с подозрительной длительностью (меньше 0 или больше 120 мин)", R.anN, X.anN) + ctlRow("Масса таких рейсов, т", R.anT, X.anT) +
-      ctlRow("Рейсов, где масса отличается от ожидаемой для машины и материала (Санни 65, Тонли 70, HT152 57 т; Mud — 48, 53, 43 т)", R.devN, X.devN) + ctlRow("Отклонение таких рейсов от ожидаемой массы, т", R.devT, X.devT) + "</tbody></table>";
+      ctlRow("Рейсов, где масса отличается от ожидаемой для машины и материала (Санни 65, Тонли 70, HT152 57 т; Mud — 48, 53, 43 т)", R.devN, X.devN) + ctlRow("Отклонение таких рейсов от ожидаемой массы, т", R.devT, X.devT) +
+      (R.hasStat ? ctlRow("Снято из плана за ремонт техники (Down), т", R.cut, X.cut) + ctlRow("Строк плана (смена + техника) без статусов: поправка не применена", R.noStat, X.noStat) : "") + "</tbody></table>";
     [["drivers", "Самосвалы без работника в плане"], ["exc", "Экскаваторы без работника в плане"]].forEach(([kd, title]) => {
       const rows = sortRows(RES[kd].unassigned.map(u => Object.assign({}, u)), "ctl");
       h += "<h3 style=\"font-size:14px\">" + title + "</h3>";
@@ -980,9 +1141,9 @@ function ctlRow(l, a, b) { return "<tr><td>" + l + '</td><td class="num">' + fmt
 function openWorker(kind, fio) {
   const w = RES[kind].workers.find(x => x.fio === fio); if (!w) return;
   const cells = Object.values(w.cells).sort((a, b) => shiftOrd(a.date, a.sh) - shiftOrd(b.date, b.sh));
-  let h = '<div class="modal-head"><div><h2>' + esc(fio) + '</h2><div class="sub">План ' + fmtT(w.plan) + " т, факт " + fmtT(w.fact) + " т" + (w.plan ? ", " + (w.fact / w.plan * 100).toFixed(1) + " %" : "") + '</div><div class="sub">План месяца ' + fmtT(w.monthPlan) + " т, осталось " + fmtT(Math.max(0, w.monthPlan - w.fact)) + " т" + (w.shiftsLeft ? ", смен осталось " + w.shiftsLeft + ", нужно за смену " + fmtT(Math.max(0, w.monthPlan - w.fact) / w.shiftsLeft) + " т" : "") + '</div></div><button class="btn ghost" onclick="closeModal()">Закрыть</button></div>';
-  h += '<table class="mini"><thead><tr><th>Сутки</th><th>Смена</th><th>Техника</th><th class="num">План, т</th><th class="num">Факт, т</th><th class="num">Рейсов</th><th>Факт / план</th><th>Оператор определён</th></tr></thead><tbody>' +
-    cells.map(c => "<tr><td>" + fmtD(c.date) + "</td><td>" + (c.sh === SH_N ? "Ночь" : "День") + "</td><td>" + esc(c.eq) + '</td><td class="num">' + fmtT(c.plan) + '</td><td class="num">' + fmtT(c.fact) + '</td><td class="num">' + (c.trips ? (Math.abs(c.trips - Math.round(c.trips)) < 0.01 ? fmtN(c.trips) : c.trips.toFixed(1)) : "") + "</td><td>" + (c.plan ? (c.fact / c.plan * 100).toFixed(0) + " %" : "") + "</td><td>" + (c.chk && c.pl ? "чек-лист и план" : c.chk ? "по чек-листу" : c.pl ? "по плану" : "") + "</td></tr>").join("") + "</tbody></table>";
+  let h = '<div class="modal-head"><div><h2>' + esc(fio) + '</h2><div class="sub">План ' + fmtT(w.plan) + " т, факт " + fmtT(w.fact) + " т" + (w.plan ? ", " + (w.fact / w.plan * 100).toFixed(1) + " %" : "") + (w.planRaw - w.plan > 0.5 ? "; по книге " + fmtT(w.planRaw) + " т, снято за ремонт техники " + fmtT(w.planRaw - w.plan) + " т (" + hrs1(w.dnH) + " ч)" : "") + '</div><div class="sub">План месяца ' + fmtT(w.monthPlan) + " т, осталось " + fmtT(Math.max(0, w.monthPlan - w.fact)) + " т" + (w.shiftsLeft ? ", смен осталось " + w.shiftsLeft + ", нужно за смену " + fmtT(Math.max(0, w.monthPlan - w.fact) / w.shiftsLeft) + " т" : "") + '</div></div><button class="btn ghost" onclick="closeModal()">Закрыть</button></div>';
+  h += '<table class="mini"><thead><tr><th>Сутки</th><th>Смена</th><th>Техника</th><th class="num">План, т</th><th class="num">Ремонт, ч</th><th class="num">Факт, т</th><th class="num">Рейсов</th><th>Факт / план</th><th>Оператор определён</th></tr></thead><tbody>' +
+    cells.map(c => "<tr><td>" + fmtD(c.date) + "</td><td>" + (c.sh === SH_N ? "Ночь" : "День") + "</td><td>" + esc(c.eq) + '</td><td class="num">' + fmtT(c.plan) + (c.planRaw - c.plan > 0.5 ? '<div class="sub">по книге ' + fmtT(c.planRaw) + "</div>" : "") + '</td><td class="num">' + hrs1(c.dn) + '</td><td class="num">' + fmtT(c.fact) + '</td><td class="num">' + (c.trips ? (Math.abs(c.trips - Math.round(c.trips)) < 0.01 ? fmtN(c.trips) : c.trips.toFixed(1)) : "") + "</td><td>" + (c.plan ? (c.fact / c.plan * 100).toFixed(0) + " %" : "") + "</td><td>" + (c.chk && c.pl ? "чек-лист и план" : c.chk ? "по чек-листу" : c.pl ? "по плану" : "") + "</td></tr>").join("") + "</tbody></table>";
   $("modalBox").innerHTML = h; $("modalBg").style.display = "flex";
 }
 function closeModal() { $("modalBg").style.display = "none"; }
@@ -991,25 +1152,35 @@ function exportXlsx() {
   if (!RES) return; if (typeof XLSX === "undefined") { alert("Библиотека выгрузки не загрузилась (нет связи с cdnjs.cloudflare.com)."); return; }
   const wb = XLSX.utils.book_new(); const m = $("fMonth").value;
   [["Вывозка водители", "drivers", "Самосвал"], ["Вывозка машинисты", "exc", "Экскаватор"]].forEach(([nm, kd, lab]) => {
-    const d = [["ФИО", lab, "Смен", "Рейсов", "Масса, т", "План месяца, т", "Осталось до плана, т", "Смен осталось", "Нужно за смену, т"]];
-    haulRows(kd).forEach(r => r.items.forEach((e, i) => d.push([r.fio, e.eq, e.shifts, Math.round(e.trips), Math.round(e.tons)].concat(i === 0 ? [Math.round(r.monthPlan), Math.round(Math.max(0, r.rem)), r.shiftsLeft, r.need === null ? null : Math.round(r.need)] : [null, null, null, null]))));
+    const d = [["ФИО", lab, "Смен", "Рейсов", "Масса, т", "Ремонт техники, ч", "Ожидание, ч", "Снято из плана за ремонт, т", "План месяца, т", "Осталось до плана, т", "Смен осталось", "Нужно за смену, т"]];
+    haulRows(kd).forEach(r => r.items.forEach((e, i) => d.push([r.fio, e.eq, e.shifts, Math.round(e.trips), Math.round(e.tons), +e.dn.toFixed(1), +e.sb.toFixed(1)].concat(i === 0 ? [Math.round(r.cut), Math.round(r.monthPlan), Math.round(Math.max(0, r.rem)), r.shiftsLeft, r.need === null ? null : Math.round(r.need)] : [null, null, null, null, null]))));
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(d), nm);
   });
   [["Водители", "drivers"], ["Машинисты", "exc"]].forEach(([nm, kd]) => {
     const rows = RES[kd].workers.slice().sort((a, b) => a.fio.localeCompare(b.fio, "ru"));
-    const data = [["ФИО", "Техника", "Смен по плану", "План, т", "Факт, т", "Отклонение, т", "Рейсов", "Вручную, т", "Факт/план, %", "План месяца, т", "Осталось до плана, т", "Смен осталось", "Нужно за смену, т"]]
-      .concat(rows.map(w => [w.fio, Object.keys(w.eq).join(", "), w.shifts, Math.round(w.plan), Math.round(w.fact), Math.round(w.fact - w.plan), Math.round(w.trips), Math.round(w.manT), w.plan ? +(w.fact / w.plan * 100).toFixed(1) : null, Math.round(w.monthPlan), Math.round(Math.max(0, w.monthPlan - w.fact)), w.shiftsLeft, w.shiftsLeft ? Math.round(Math.max(0, w.monthPlan - w.fact) / w.shiftsLeft) : null]));
+    const data = [["ФИО", "Техника", "Смен по плану", "План, т", "Факт, т", "Отклонение, т", "Рейсов", "Вручную, т", "Факт/план, %", "Ремонт техники, ч", "Снято из плана, т", "План месяца, т", "Осталось до плана, т", "Смен осталось", "Нужно за смену, т"]]
+      .concat(rows.map(w => [w.fio, Object.keys(w.eq).join(", "), w.shifts, Math.round(w.plan), Math.round(w.fact), Math.round(w.fact - w.plan), Math.round(w.trips), Math.round(w.manT), w.plan ? +(w.fact / w.plan * 100).toFixed(1) : null, +w.dnH.toFixed(1), Math.round(w.planRaw - w.plan), Math.round(w.monthPlan), Math.round(Math.max(0, w.monthPlan - w.fact)), w.shiftsLeft, w.shiftsLeft ? Math.round(Math.max(0, w.monthPlan - w.fact) / w.shiftsLeft) : null]));
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(data), nm);
   });
   const eqd = [["Техника", "Тип", "План, т", "Факт, т", "Рейсов", "Вручную, рейсов"]];
   RES.drivers.equip.forEach(e => eqd.push([e.eq, "Самосвал", Math.round(e.plan), Math.round(e.fact), e.trips, e.man]));
   RES.exc.equip.forEach(e => eqd.push([e.eq, "Экскаватор", Math.round(e.plan), Math.round(e.fact), e.trips, e.man]));
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(eqd), "Техника");
+  if (Object.keys(STAT.shifts).length) {
+    const kindOf = {}; RES.drivers.equip.forEach(e => { kindOf[e.eq] = "Самосвал"; }); RES.exc.equip.forEach(e => { kindOf[e.eq] = "Экскаватор"; });
+    const fact = {}; RES.drivers.equip.concat(RES.exc.equip).forEach(e => { fact[e.eq] = (fact[e.eq] || 0) + e.fact; });
+    const sum = statSummary(m, cutOrd(), kindOf);
+    const dd = [["Техника", "Тип", "Модель", "Часов", "В работе, ч", "Задержки, ч", "Ожидание, ч", "Ремонт, ч", "Готовность, %", "Масса, т"]];
+    Object.keys(sum.eqs).sort().forEach(eq => { const a = sum.eqs[eq], t = a[0] + a[1] + a[2] + a[3]; dd.push([eq, kindOf[eq], STAT.types[eq] || "", Math.round(t), Math.round(a[0]), Math.round(a[1]), Math.round(a[2]), Math.round(a[3]), t ? Math.round((t - a[3]) / t * 100) : null, Math.round(fact[eq] || 0)]); });
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(dd), "Простои техники");
+    const rr = [["Причина", "Часов", "Единиц техники"]]; Object.values(sum.reasons).sort((a, b) => b.h - a.h).forEach(o => rr.push([o.rs, Math.round(o.h), Object.keys(o.eqs).length]));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rr), "Причины простоев");
+  }
   const un = [["Тип", "Техника", "Причина", "Рейсов", "Масса, т"]];
   RES.drivers.unassigned.forEach(u => un.push(["Самосвал", u.eq, u.why, u.trips, Math.round(u.tons)]));
   RES.exc.unassigned.forEach(u => un.push(["Экскаватор", u.eq, u.why, u.trips, Math.round(u.tons)]));
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(un), "Без работника");
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Месяц", m], ["Срез до", $("fCutDate").value + " " + ($("fCutShift").value === SH_N ? "ночь" : "день")], ["Начало месяца", "19:00 последнего дня предыдущего месяца"], ["Оператор рейса", $("fSrc").value === "chk" && TL ? "по чек-листам, запасной вариант — план" : "по плану"]]), "Параметры");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Месяц", m], ["Срез до", $("fCutDate").value + " " + ($("fCutShift").value === SH_N ? "ночь" : "день")], ["Начало месяца", "19:00 последнего дня предыдущего месяца"], ["Ремонт техники (Down)", $("fAdj").value === "1" ? "вычтен из плана смены" : "не вычитался"], ["Оператор рейса", $("fSrc").value === "chk" && TL ? "по чек-листам, запасной вариант — план" : "по плану"]]), "Параметры");
   XLSX.writeFile(wb, "KPI_масса_" + m + ".xlsx");
 }
 </script>
