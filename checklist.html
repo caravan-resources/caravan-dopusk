@@ -44,6 +44,7 @@ input:focus, select:focus, textarea:focus { border-color:var(--gold); }
 .btn-ghost { background:var(--light); color:var(--navy); }
 .btn-red { background:var(--redbg); color:var(--red); border:1.5px solid var(--red); }
 .btn-reserve { background:#EFF6FF; color:#1D4ED8; border:1.5px solid #1D4ED8; }
+.btn-hot { background:#FFF7ED; color:#9A3412; border:1.5px solid #EA580C; }
 .btn:disabled { opacity:.5; cursor:not-allowed; }
 
 .emp-item {
@@ -141,7 +142,9 @@ input:focus, select:focus, textarea:focus { border-color:var(--gold); }
   <div id="screenHub">
     <div class="card" style="text-align:center">
       <div class="card-title" id="hubEquipmentTitle" style="margin-bottom:16px"></div>
-      <button class="btn btn-gold" style="margin-bottom:10px" onclick="startFlow('inspection')">📋 Провести осмотр</button>
+      <button class="btn btn-gold" style="margin-bottom:10px" onclick="startFlow('inspection')">📋 Осмотр в начале смены</button>
+      <button class="btn btn-hot" style="margin-bottom:6px" onclick="startFlow('handover')">🔄 Горячая пересменка</button>
+      <div style="font-size:11px;color:var(--gray);margin-bottom:12px">Горячая пересменка: принимаю работающую технику, сажусь вместо другого водителя или возвращаюсь с обеда.</div>
       <button class="btn btn-ghost" style="margin-bottom:10px" onclick="startFlow('fuel')">⛽ Записать заправку</button>
       <button class="btn btn-reserve" style="margin-bottom:10px" onclick="markReserve(this)">⏸ Поставить в резерв</button>
       <button class="btn btn-red" onclick="markRepair(this)">🔧 Отправить в ремонт</button>
@@ -192,8 +195,8 @@ input:focus, select:focus, textarea:focus { border-color:var(--gold); }
       <div class="hint" id="equipmentSubtitle"></div>
     </div>
 
-    <label class="card" id="handoverCard" for="handoverToggle" style="display:flex;align-items:center;gap:10px;cursor:pointer">
-      <input type="checkbox" id="handoverToggle" onchange="toggleHandover(this.checked)" style="width:22px;height:22px;flex-shrink:0">
+    <label class="card" id="handoverCard" for="handoverToggle" style="display:none;align-items:center;gap:10px">
+      <input type="checkbox" id="handoverToggle" onchange="toggleHandover(this.checked)" disabled style="width:22px;height:22px;flex-shrink:0">
       <div>
         <div style="font-weight:800">Горячая пересменка</div>
         <div class="hint" style="margin:2px 0 0">Принимаю работающую технику без остановки: сажусь вместо другого водителя или возвращаюсь с обеда. Остаток топлива вносится только в начале смены — здесь его указывать не нужно. Ваша работа на этой машине учтётся.</div>
@@ -314,19 +317,20 @@ async function init() {
   }
 }
 
-let flowMode = "inspection"; // "inspection" или "fuel" — куда ведёт поиск сотрудника
+let flowMode = "inspection"; // "inspection", "handover" (горячая пересменка) или "fuel" — куда ведёт поиск сотрудника
 
 function startFlow(mode) {
   flowMode = mode;
-  if (mode === "inspection" && !equipment.templateId) {
+  const isCheck = mode === "inspection" || mode === "handover";
+  if (isCheck && !equipment.templateId) {
     showError("Шаблон не назначен", `Для техники «${equipment.equipmentId}» ещё не выбран шаблон чек-листа. Обратитесь к инструктору.`);
     return;
   }
-  if (mode === "inspection" && !template) {
+  if (isCheck && !template) {
     showError("Шаблон не найден", `Шаблон «${equipment.templateId}» не найден на сервере. Обратитесь к инструктору.`);
     return;
   }
-  document.getElementById("searchTitle").textContent = mode === "fuel" ? "Кто заправляет?" : "Кто проводит осмотр?";
+  document.getElementById("searchTitle").textContent = mode === "fuel" ? "Кто заправляет?" : mode === "handover" ? "Кто принимает технику?" : "Кто проводит осмотр?";
   showScreen("Search");
 }
 
@@ -499,7 +503,10 @@ function showForm() {
   document.getElementById("equipmentTitle").textContent = equipment.equipmentId + " — " + equipment.model;
   document.getElementById("equipmentSubtitle").textContent = (equipment.type||"") + (equipment.site?" · "+equipment.site:"");
 
-  document.getElementById("handoverToggle").checked = false; // сброс при каждом новом открытии формы
+  // Горячая пересменка задаётся кнопкой на экране выбора действия (flowMode), а не переключателем в форме.
+  const isHot = flowMode === "handover";
+  document.getElementById("handoverToggle").checked = isHot;
+  document.getElementById("handoverCard").style.display = isHot ? "flex" : "none";
   if (template.fuelLevelField) {
     const f = template.fuelLevelField;
     document.getElementById("fuelCard").style.display = "block";
@@ -510,6 +517,7 @@ function showForm() {
     fuelInput.placeholder = f.unit === "%" ? "Например: 75" : "Например: 150";
     fuelInput.value = "";
   }
+  toggleHandover(isHot); // в горячей пересменке топливо не вносится
   document.getElementById("hourMeter").value = "";
   document.getElementById("odometer").value = "";
 
@@ -635,8 +643,8 @@ async function submitChecklist() {
     });
     const data = await res.json();
     if (data.ok) {
-      document.getElementById("successTitle").textContent = "Чек-лист отправлен";
-      document.getElementById("successSub").textContent = "Спасибо! Осмотр зафиксирован.";
+      document.getElementById("successTitle").textContent = isHandover ? "Горячая пересменка зафиксирована" : "Чек-лист отправлен";
+      document.getElementById("successSub").textContent = isHandover ? "Спасибо! Рейсы с этого момента будут засчитаны вам." : "Спасибо! Осмотр зафиксирован.";
       showScreen("Success");
       // GPS-трекер смены — только после осмотра (не после заправки), запускаем
       // независимо от статуса техники ниже, best-effort, ничего не блокирует.
