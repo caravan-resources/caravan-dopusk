@@ -407,9 +407,24 @@ function statusAt(stl, eq, m) {
   let r = null; for (let i = 0; i < a.length && a[i].m <= m; i++) r = a[i];
   return r;
 }
+// Правило 12 часов (27.10.2026): если на технике нет нового чек-листа более 12 часов, статус «В работе» считается «Резерв» (авто)
+// с момента «последний чек-лист + 12 ч». «Ремонт» и «Резерв» не меняются. tl === null — чек-листы не загружены, правило не применяется.
+const AUTO_RESERVE_MIN = 720;
+function lastChkMin(tl, eq, m) {
+  const a = tl && tl[normEq(eq)]; if (!a) return null;
+  let lo = 0, hi = a.length - 1, ans = -1;
+  while (lo <= hi) { const mid = (lo + hi) >> 1; if (a[mid].m <= m) { ans = mid; lo = mid + 1; } else hi = mid - 1; }
+  return ans < 0 ? null : a[ans].m;
+}
+function effStatusAt(stl, tl, eq, m) {
+  const s = statusAt(stl, eq, m); if (!s || !tl || s.es !== "В работе") return s;
+  const lc = lastChkMin(tl, eq, m);
+  if (lc !== null && m - lc <= AUTO_RESERVE_MIN) return s;
+  return { m: Math.max(s.m, lc === null ? s.m : lc + AUTO_RESERVE_MIN), es: "Резерв", auto: true };
+}
 // Простой по плану: смены, где у техники в плане есть часы, а рейсов в выгрузке нет, и статус техники в эти смены.
 // stl === null — журнал статусов не загружен (причины не определяются).
-function idleAnalysis(plan, factShifts, kind, month, cutOrd, stl, nowMin) {
+function idleAnalysis(plan, factShifts, kind, month, cutOrd, stl, nowMin, tl) {
   const rowsP = kind === "drivers" ? plan.drivers : plan.excavators;
   const worked = new Set();
   Object.keys(factShifts).forEach(sk => factShifts[sk].rows.forEach(r => worked.add(sk + "|" + normEq(kind === "drivers" ? r[0] : r[1]))));
@@ -431,15 +446,15 @@ function idleAnalysis(plan, factShifts, kind, month, cutOrd, stl, nowMin) {
     let label = null;
     if (stl) {
       const set = [];
-      const a = statusAt(stl, c.eq, start), b = statusAt(stl, c.eq, end); if (a) set.push(a.es); if (b) set.push(b.es);
-      ((stl[normEq(c.eq)]) || []).forEach(x => { if (x.m > start && x.m <= end) set.push(x.es); });
+      const a = effStatusAt(stl, tl, c.eq, start), b = effStatusAt(stl, tl, c.eq, end); if (a) set.push(a.es); if (b) set.push(b.es);
+      ((stl[normEq(c.eq)]) || []).forEach(x => { if (x.m > start && x.m <= end) set.push((effStatusAt(stl, tl, c.eq, x.m) || x).es); });
       label = set.indexOf("Ремонт") >= 0 ? "Ремонт" : set.indexOf("Резерв") >= 0 ? "Резерв" : set.indexOf("В работе") >= 0 ? "В работе" : null;
     }
     e.idle++;
     if (label === "Ремонт") e.rep++; else if (label === "Резерв") e.res++; else if (label === "В работе") e.work++; else e.none++;
     e.list.push({ date: c.date, sh: c.sh, label, fios: c.fios });
   });
-  Object.values(E).forEach(e => { const l = stl && statusAt(stl, e.eq, nowMin); e.now = l || null; e.list.sort((x, y) => shiftOrd(x.date, x.sh) - shiftOrd(y.date, y.sh)); });
+  Object.values(E).forEach(e => { const l = stl && effStatusAt(stl, tl, e.eq, nowMin); e.now = l || null; e.list.sort((x, y) => shiftOrd(x.date, x.sh) - shiftOrd(y.date, y.sh)); });
   return Object.values(E).filter(e => e.idle > 0).sort((a, b) => b.idle - a.idle || a.eq.localeCompare(b.eq));
 }
 
@@ -816,8 +831,8 @@ function render() {
   const o = $("fSrc").value === "chk" && TL ? { tl: TL, match: MATCH, names: NAMES } : null;
   RES = { drivers: compute(plan, FACT.shifts, "drivers", m, c, o), exc: compute(plan, FACT.shifts, "exc", m, c, o) };
   const nowMin = Math.floor((Date.now() + 5 * 3600000) / 60000);
-  RES.drivers.idle = idleAnalysis(plan, FACT.shifts, "drivers", m, c, STL, nowMin);
-  RES.exc.idle = idleAnalysis(plan, FACT.shifts, "exc", m, c, STL, nowMin);
+  RES.drivers.idle = idleAnalysis(plan, FACT.shifts, "drivers", m, c, STL, nowMin, TL);
+  RES.exc.idle = idleAnalysis(plan, FACT.shifts, "exc", m, c, STL, nowMin, TL);
   const R = RES.drivers.tot, X = RES.exc.tot;
   const p = pct(R.fact, R.plan);
   const ks = Object.keys(FACT.shifts).filter(k => k.slice(0, 7) === m);
@@ -952,7 +967,7 @@ function renderTable() {
   }
 }
 
-function statusNowHtml(r) { return r ? esc(r.es) + ' <span class="sub">с ' + fmtDT(r.m * 60000) + "</span>" : '<span class="sub">нет данных</span>'; }
+function statusNowHtml(r) { return r ? esc(r.es) + (r.auto ? ' <span class="sub">(нет чек-листа 12 ч)</span>' : "") + ' <span class="sub">с ' + fmtDT(r.m * 60000) + "</span>" : '<span class="sub">нет данных</span>'; }
 function openIdle(kind, eq) {
   const e = (RES[kind].idle || []).find(x => x.eq === eq); if (!e) return;
   let h = '<div class="modal-head"><div><h2>' + esc(eq) + ' — смены без рейсов</h2><div class="sub">Смен в плане ' + e.planShifts + ", без рейсов " + e.idle + '</div></div><button class="btn ghost" onclick="closeModal()">Закрыть</button></div>';
