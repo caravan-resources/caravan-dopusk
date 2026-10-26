@@ -663,10 +663,11 @@ function equipmentStatusColor(es) {
 
 // ── Осмотры в ТЕКУЩЕЙ смене: статус «В работе» не должен переходить в следующую смену ──
 // Статус слота (equipmentStatus) на сервере без срока действия: если водитель в конце смены бросил машину,
-// она так и висела «В работе». Поэтому для слота текущей смены «В работе» показываем только при осмотре,
-// сданном в этой смене (с грейсом час до начала, как в наряде); иначе — «Нет осмотра в смене».
-// «Ремонт» и «Резерв» не сбрасываются. Серверные данные не меняются — это только отображение.
-const SHIFT_INSP = { at: 0, ok: false, busy: false, byEq: {} }; // byEq[equipmentId] = { name, t }
+// она так и висела «В работе». Правило 12 часов (27.10.2026): если на технике нет нового чек-листа более 12 часов,
+// «В работе» для слота текущей смены показывается как «Резерв» (авто). «Ремонт» и «Резерв» не сбрасываются.
+// Серверные данные не меняются — это только отображение.
+const AUTO_RESERVE_MS = 12 * 3600000;
+const SHIFT_INSP = { at: 0, ok: false, busy: false, byEq: {}, lastByEq: {} }; // byEq — осмотр в текущей смене; lastByEq — последний осмотр вообще; { name, t }
 function currentShiftWindowStart(now) {
   const h = now.getHours(), d = new Date(now); d.setMinutes(0, 0, 0);
   if (h >= 7 && h < 19) d.setHours(6);
@@ -680,13 +681,15 @@ async function loadShiftInspections() {
   try {
     const val = await fetchWithRetry(`${CFG.SHEET_URL}?action=getChecklistRecords&days=2`, 90000, 2);
     if (Array.isArray(val)) {
-      const ws = currentShiftWindowStart(new Date()), lim = Date.now() + 60000, by = {};
+      const ws = currentShiftWindowStart(new Date()), lim = Date.now() + 60000, by = {}, last = {};
       val.forEach(r => {
-        const t = new Date(r.date); if (isNaN(t.getTime()) || t < ws || t.getTime() > lim) return;
+        const t = new Date(r.date); if (isNaN(t.getTime()) || t.getTime() > lim) return;
         const k = String(r.equipmentId);
+        if (!last[k] || t > last[k].t) last[k] = { name: String(r.empName || ""), t };
+        if (t < ws) return;
         if (!by[k] || t > by[k].t) by[k] = { name: String(r.empName || ""), t };
       });
-      SHIFT_INSP.byEq = by; SHIFT_INSP.ok = true;
+      SHIFT_INSP.byEq = by; SHIFT_INSP.lastByEq = last; SHIFT_INSP.ok = true;
     }
   } catch (e) { console.error("не удалось загрузить осмотры текущей смены:", e); }
   finally { SHIFT_INSP.busy = false; SHIFT_INSP.at = Date.now(); renderShift(); }
@@ -873,9 +876,15 @@ function renderShift() {
         const isCurSlot = sm === naryadSmenaOfTime(new Date());
         const insp = isCurSlot && SHIFT_INSP.ok ? SHIFT_INSP.byEq[String(g.equipmentId)] : null;
         let es = a.equipmentStatus || "";
-        if (isCurSlot && SHIFT_INSP.ok && g.equipmentId && a.empId && (!es || es === "В работе")) es = insp ? "В работе" : "Нет осмотра в смене";
+        let esNote = "";
+        if (isCurSlot && SHIFT_INSP.ok && g.equipmentId && a.empId && (!es || es === "В работе")) {
+          const lastI = SHIFT_INSP.lastByEq[String(g.equipmentId)];
+          if (lastI && Date.now() - lastI.t.getTime() <= AUTO_RESERVE_MS) es = "В работе";
+          else { es = "Резерв"; esNote = "нет чек-листа более 12 ч"; }
+        }
         const esHtml = (es
           ? `<div style="font-size:11px;font-weight:700;color:${equipmentStatusColor(es)};text-align:right">${es === "Резерв" ? "⏸" : "🔧"} ${es}</div>` : "")
+          + (esNote ? `<div style="font-size:10px;color:var(--gray);text-align:right">${esNote}</div>` : "")
           + (insp && !sameInspPerson(insp.name, a.empName)
             ? `<div style="font-size:11px;color:var(--navy);text-align:right">Фактически: ${escapeHtml(insp.name)}, ${naryadFmtTime(insp.t)}</div>` : "");
         const noteHtml = a.reassignNote
