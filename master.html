@@ -657,7 +657,45 @@ function workStatusColor(ws) {
 function equipmentStatusColor(es) {
   if (es === "Ремонт") return "var(--yellow)";
   if (es === "В работе") return "var(--green)";
+  if (es === "Резерв") return "#1D4ED8";
   return "var(--gray)";
+}
+
+// ── Осмотры в ТЕКУЩЕЙ смене: статус «В работе» не должен переходить в следующую смену ──
+// Статус слота (equipmentStatus) на сервере без срока действия: если водитель в конце смены бросил машину,
+// она так и висела «В работе». Поэтому для слота текущей смены «В работе» показываем только при осмотре,
+// сданном в этой смене (с грейсом час до начала, как в наряде); иначе — «Нет осмотра в смене».
+// «Ремонт» и «Резерв» не сбрасываются. Серверные данные не меняются — это только отображение.
+const SHIFT_INSP = { at: 0, ok: false, busy: false, byEq: {} }; // byEq[equipmentId] = { name, t }
+function currentShiftWindowStart(now) {
+  const h = now.getHours(), d = new Date(now); d.setMinutes(0, 0, 0);
+  if (h >= 7 && h < 19) d.setHours(6);
+  else if (h >= 19) d.setHours(18);
+  else { d.setDate(d.getDate() - 1); d.setHours(18); }
+  return d;
+}
+async function loadShiftInspections() {
+  if (SHIFT_INSP.busy || Date.now() - SHIFT_INSP.at < 5 * 60000) return;
+  SHIFT_INSP.busy = true;
+  try {
+    const val = await fetchWithRetry(`${CFG.SHEET_URL}?action=getChecklistRecords&days=2`, 90000, 2);
+    if (Array.isArray(val)) {
+      const ws = currentShiftWindowStart(new Date()), lim = Date.now() + 60000, by = {};
+      val.forEach(r => {
+        const t = new Date(r.date); if (isNaN(t.getTime()) || t < ws || t.getTime() > lim) return;
+        const k = String(r.equipmentId);
+        if (!by[k] || t > by[k].t) by[k] = { name: String(r.empName || ""), t };
+      });
+      SHIFT_INSP.byEq = by; SHIFT_INSP.ok = true;
+    }
+  } catch (e) { console.error("не удалось загрузить осмотры текущей смены:", e); }
+  finally { SHIFT_INSP.busy = false; SHIFT_INSP.at = Date.now(); renderShift(); }
+}
+function sameInspPerson(a, b) {
+  const t = s => String(s || "").toLowerCase().replace(/ё/g, "е").replace(/[.,]/g, " ").split(/\s+/).filter(Boolean);
+  const x = t(a), y = t(b); if (!x.length || !y.length) return false;
+  const sub = (p, q) => p.every(w => q.some(v => v === w || (w.length === 1 && v[0] === w) || (v.length === 1 && w[0] === v)));
+  return sub(x, y) || sub(y, x);
 }
 
 // Сводка по текущей вахте+участку — сколько техники в ремонте, на больничном
@@ -783,6 +821,7 @@ function renderShift() {
   if (!container) return;
   renderShiftStats();
   renderShiftAbsent();
+  loadShiftInspections();
 
   const { usedTypes, rows } = getShiftGroups();
 
@@ -831,8 +870,14 @@ function renderShift() {
         // Статус техники — ставит сам работник через QR (checklist.html), не мастер.
         // Показываем как маленький значок 🔧, чтобы визуально отличать от статуса
         // работника (wsHtml выше). Добавлено 26.08.2026.
-        const esHtml = a.equipmentStatus
-          ? `<div style="font-size:11px;font-weight:700;color:${equipmentStatusColor(a.equipmentStatus)};text-align:right">🔧 ${a.equipmentStatus}</div>` : "";
+        const isCurSlot = sm === naryadSmenaOfTime(new Date());
+        const insp = isCurSlot && SHIFT_INSP.ok ? SHIFT_INSP.byEq[String(g.equipmentId)] : null;
+        let es = a.equipmentStatus || "";
+        if (isCurSlot && SHIFT_INSP.ok && g.equipmentId && a.empId && (!es || es === "В работе")) es = insp ? "В работе" : "Нет осмотра в смене";
+        const esHtml = (es
+          ? `<div style="font-size:11px;font-weight:700;color:${equipmentStatusColor(es)};text-align:right">${es === "Резерв" ? "⏸" : "🔧"} ${es}</div>` : "")
+          + (insp && !sameInspPerson(insp.name, a.empName)
+            ? `<div style="font-size:11px;color:var(--navy);text-align:right">Фактически: ${escapeHtml(insp.name)}, ${naryadFmtTime(insp.t)}</div>` : "");
         const noteHtml = a.reassignNote
           ? `<div style="font-size:11px;color:var(--gray);font-style:italic;text-align:right">→ ${a.reassignNote}</div>` : "";
         return `<div style="padding:3px 0;${(wsHtml||esHtml||noteHtml) ? "border-bottom:1px dashed var(--border)" : ""}">

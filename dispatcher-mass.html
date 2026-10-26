@@ -144,6 +144,12 @@ table.mini td { padding:6px 8px; border-bottom:1px solid var(--border); }
       </div>
     </div>
 
+    <div class="panel" style="margin-bottom:12px">
+      <h3>3. Чек-листы техники (кто на какой машине работал)</h3>
+      <div class="src-state" id="chkState">Чек-листы не загружены.</div>
+      <button class="btn ghost" id="btnChk" onclick="loadChecklists(true)">Обновить чек-листы</button>
+    </div>
+
     <div class="banner err" id="errBanner"></div>
     <div class="banner warn" id="warnBanner"></div>
     <div class="banner info" id="infoBanner"></div>
@@ -155,6 +161,8 @@ table.mini td { padding:6px 8px; border-bottom:1px solid var(--border); }
         <select id="fCutShift" onchange="render()"><option value="Д">День (до 19:00)</option><option value="Н">Ночь (до 07:00)</option></select></div>
       <div class="field"><label>Зелёный от, %</label><input type="number" id="pGreen" value="100" min="1" max="200" onchange="render()"></div>
       <div class="field"><label>Жёлтый от, %</label><input type="number" id="pYellow" value="90" min="1" max="200" onchange="render()"></div>
+      <div class="field"><label>Оператор рейса определяется</label>
+        <select id="fSrc" onchange="render()"><option value="chk">по чек-листам (запасной вариант — план)</option><option value="plan">только по плану</option></select></div>
       <div class="field"><label>Поиск (ФИО, техника)</label><input type="search" id="fSearch" oninput="render()" placeholder="например HT188"></div>
       <div class="spacer"></div>
       <button class="btn ghost" onclick="cutToData()">Срез по данным</button>
@@ -176,7 +184,7 @@ table.mini td { padding:6px 8px; border-bottom:1px solid var(--border); }
     <div class="foot" id="foot">
       Вкладки «Вывозка»: сколько массы вывез каждый оператор на каждой технике за период до среза (смена засчитывается, если по ней есть рейсы). Порядок расчёта. Производственные сутки и месяц отсчитываются от 19:00: ночная смена 19:00–07:00, начатая в 19:00 дня D, относится к суткам D+1. Октябрь начинается в 19:00 30.09.2026 и заканчивается в 19:00 31.10.2026.
       Рейс относится к смене по времени погрузки (Time Full). Масса рейса — Computed Tonnage без изменений. Для контроля сравнивается с ожидаемой: Тонли (HT201–HT210) — 70 т, остальные самосвалы (Санни) — 65 т, HT152 (кузов меньшей кубатуры) — 57 т; материал Mud (глина) — 53, 48 и 43 т соответственно. Рейсы, добавленные диспетчером вручную (колонка Extra Load), входят в факт.
-      В выгрузке нет водителей и машинистов: рейс закрепляется за работником по плану («дата + смена + самосвал» или «дата + смена + экскаватор»). Если на технике в смене два работника с табельными часами (день заезда или выезда группы), масса делится пропорционально табельным часам.
+      В выгрузке нет водителей и машинистов. Рейс закрепляется за автором последнего чек-листа на этой технике: осмотр не позже момента погрузки и не раньше чем за час до начала смены (чек-лист заполняется при каждой смене оператора, в том числе в обед). Если чек-листа нет, оператор берётся из плана («дата + смена + самосвал» или «дата + смена + экскаватор»). Если на технике в смене два работника с табельными часами (день заезда или выезда группы), масса делится пропорционально табельным часам.
       План на срез — сумма плана по заданию за смены до выбранного среза включительно. «Осталось до плана» — план месяца минус факт на срез. «Нужно за смену» — остаток, делённый на число оставшихся смен работника по плану; для сравнения под ним указан плановый тоннаж за смену. Пороги цвета заданы условно, это не нормативы.
     </div>
   </div>
@@ -262,7 +270,8 @@ function parseHexagon(text) {
     if (dev) { info.dev++; info.devT += tons - expectedTons(R.truck, R.mat); info.devEq[R.truck] = (info.devEq[R.truck] || 0) + 1; }
     const t = R.t; const ps = prodShift(t); const key = ps.date + "|" + ps.sh; const man = R.man; const truck = R.truck, shovel = R.shovel;
     const dur = R.te ? (R.te.ms - t.ms) / 60000 : null;
-    const S = shifts[key] || (shifts[key] = { m: {}, trips: 0, tons: 0, an: [0, 0], dev: [0, 0], min: t.ms, max: t.ms });
+    const S = shifts[key] || (shifts[key] = { m: {}, tr: [], trips: 0, tons: 0, an: [0, 0], dev: [0, 0], min: t.ms, max: t.ms });
+    S.tr.push([Math.floor(t.ms / 60000), truck, shovel, man, Math.round(tons * 100) / 100]);
     const k = truck + "|" + shovel + "|" + man; const e = S.m[k] || (S.m[k] = [truck, shovel, man, 0, 0]);
     e[3]++; e[4] += tons; S.trips++; S.tons += tons;
     if (dev) { S.dev[0]++; S.dev[1] += tons - expectedTons(R.truck, R.mat); }
@@ -273,7 +282,7 @@ function parseHexagon(text) {
     if (info.max === null || t.ms > info.max) info.max = t.ms;
   });
   const out = {};
-  Object.keys(shifts).forEach(k => { const S = shifts[k]; out[k] = { rows: Object.values(S.m), trips: S.trips, tons: S.tons, an: S.an, dev: S.dev, min: S.min, max: S.max }; });
+  Object.keys(shifts).forEach(k => { const S = shifts[k]; out[k] = { rows: Object.values(S.m), tr: S.tr, trips: S.trips, tons: S.tons, an: S.an, dev: S.dev, min: S.min, max: S.max }; });
   return { shifts: out, info };
 }
 
@@ -288,6 +297,60 @@ function mergeFact(base, add) {
   return { shifts: res, added, replaced, kept };
 }
 
+
+// ── Чек-листы: кто на какой технике и с какого момента ──
+const TZ_H = 5; // чек-листы приходят в UTC (ISO), Hexagon — местное время (Алматы)
+function chkMinutes(v) {
+  if (v == null || v === "") return null;
+  const s = String(v).trim();
+  let m = /^(\d{1,2})\.(\d{1,2})\.(\d{4})(?:[ T]+(\d{1,2}):(\d{2}))?/.exec(s);
+  if (m) return Math.floor(Date.UTC(+m[3], +m[2] - 1, +m[1], +(m[4] || 0), +(m[5] || 0)) / 60000);
+  const t = Date.parse(s); if (isNaN(t)) return null;
+  return Math.floor((t + TZ_H * 3600000) / 60000);
+}
+function normEq(s) { return String(s == null ? "" : s).toUpperCase().replace(/[^A-Z0-9А-Я]/g, ""); }
+function normName(s) { return String(s || "").toLowerCase().replace(/ё/g, "е").replace(/[.,]/g, " ").replace(/\s+/g, " ").trim(); }
+// Начало смены в минутах (в той же шкале, что и рейсы): день — 07:00 суток D, ночь — 19:00 дня D-1
+function shiftStartMin(date, sh) {
+  const d0 = Date.parse(date + "T00:00:00Z") / 60000;
+  return sh === SH_D ? d0 + 7 * 60 : d0 - 24 * 60 + 19 * 60;
+}
+// recs: [{e, n, d}] -> { eqNorm: [{m, n}] по возрастанию времени }
+function buildTimeline(recs) {
+  const tl = {};
+  (recs || []).forEach(r => {
+    const m = chkMinutes(r.d), e = normEq(r.e), n = String(r.n || "").trim();
+    if (m === null || !e || !n) return;
+    (tl[e] || (tl[e] = [])).push({ m, n });
+  });
+  Object.keys(tl).forEach(k => tl[k].sort((a, b) => a.m - b.m));
+  return tl;
+}
+// Последний чек-лист на технике не позже момента tMin и не раньше начала смены минус lead минут
+function lastInspector(tl, eq, tMin, startMin, lead) {
+  const a = tl[normEq(eq)]; if (!a) return null;
+  let lo = 0, hi = a.length - 1, ans = -1;
+  while (lo <= hi) { const mid = (lo + hi) >> 1; if (a[mid].m <= tMin) { ans = mid; lo = mid + 1; } else hi = mid - 1; }
+  if (ans < 0 || a[ans].m < startMin - (lead == null ? 60 : lead)) return null;
+  return a[ans];
+}
+// Сопоставление имени из чек-листа с ФИО из плана. pool — список ФИО плана.
+// Совпадение: все слова из чек-листа есть среди слов ФИО (слово или инициал); берём только единственное совпадение.
+function makeNameMatcher(pool) {
+  const list = Array.from(new Set(pool.filter(Boolean))).map(f => ({ fio: f, tok: normName(f).split(" ") }));
+  const cache = {};
+  return function (name) {
+    const key = normName(name); if (!key) return null;
+    if (key in cache) return cache[key];
+    const toks = key.split(" ");
+    const hit = list.filter(x => toks.every(t => x.tok.some(p => p === t || (t.length === 1 && p[0] === t) || (p.length === 1 && t[0] === p))));
+    let res = null;
+    if (hit.length === 1) res = hit[0].fio;
+    else if (hit.length > 1) { const ex = hit.filter(x => normName(x.fio) === key); if (ex.length === 1) res = ex[0].fio; }
+    return (cache[key] = res);
+  };
+}
+
 function isReal(fio) { const s = (fio || "").trim(); return s !== "" && !/^вакан/i.test(s); }
 
 function buildIndex(planRows) {
@@ -297,13 +360,14 @@ function buildIndex(planRows) {
 }
 
 // kind: "drivers" | "exc"; month "YYYY-MM"; cutOrd — включительно
-function compute(plan, factShifts, kind, month, cutOrd) {
+function compute(plan, factShifts, kind, month, cutOrd, opts) {
+  const tl = opts && opts.tl, matchName = opts && opts.match;
   const rowsP = kind === "drivers" ? plan.drivers : plan.excavators;
   const idx = buildIndex(rowsP);
-  const W = {}; const E = {}; const U = {};
+  const W = {}; const E = {}; const U = {}; const NM = {};
   const getW = f => W[f] || (W[f] = { fio: f, plan: 0, shifts: 0, fact: 0, trips: 0, man: 0, manT: 0, shared: 0, monthPlan: 0, planLeft: 0, shiftsLeft: 0, eq: {}, cells: {} });
   const getE = e => E[e] || (E[e] = { eq: e, plan: 0, fact: 0, trips: 0, man: 0, manT: 0 });
-  const cell = (w, date, sh, eq) => { const k = date + "|" + sh + "|" + eq; return w.cells[k] || (w.cells[k] = { date, sh, eq, plan: 0, fact: 0, trips: 0, hrs: 0 }); };
+  const cell = (w, date, sh, eq) => { const k = date + "|" + sh + "|" + eq; return w.cells[k] || (w.cells[k] = { date, sh, eq, plan: 0, fact: 0, trips: 0, hrs: 0, chk: 0, pl: 0 }); };
   let planAll = 0, monthAll = 0;
   rowsP.forEach(r => {
     if (r[0].slice(0, 7) !== month) return;
@@ -316,16 +380,26 @@ function compute(plan, factShifts, kind, month, cutOrd) {
     if (isReal(r[3])) { const w = getW(r[3].trim()); w.plan += r[5]; w.monthPlan += r[5]; if (r[4] > 0) w.shifts++; const c = cell(w, r[0], r[1], r[2]); c.plan += r[5]; c.hrs += r[4]; }
   });
   let factAll = 0, tripsAll = 0, manAll = 0, manTAll = 0, unT = 0, unTr = 0, sharedTr = 0, anN = 0, anT = 0, devN = 0, devT = 0;
+  let chkTr = 0, chkT = 0, fbTr = 0, fbT = 0, subTr = 0, subT = 0;
   Object.keys(factShifts).forEach(sk => {
     const [date, sh] = sk.split("|");
     if (date.slice(0, 7) !== month || shiftOrd(date, sh) > cutOrd) return;
     const S = factShifts[sk]; anN += S.an[0]; anT += S.an[1]; if (S.dev) { devN += S.dev[0]; devT += S.dev[1]; }
-    S.rows.forEach(r => {
-      const eq = kind === "drivers" ? r[0] : r[1]; const trips = r[3], tons = r[4], man = r[2];
+    // fio === null — оператор определяется по плану; иначе — автор последнего чек-листа
+    const place = (eq, trips, tons, man, fio) => {
       factAll += tons; tripsAll += trips; if (man) { manAll += trips; manTAll += tons; }
       const E1 = getE(eq); E1.fact += tons; E1.trips += trips; if (man) { E1.man += trips; E1.manT += tons; }
       const list = idx[date + "|" + sh + "|" + eq] || [];
       const real = list.filter(x => x.h > 0 && isReal(x.fio));
+      if (fio) {
+        const w = getW(fio); chkTr += trips; chkT += tons;
+        if (!real.some(x => normName(x.fio) === normName(fio))) { subTr += trips; subT += tons; }
+        w.fact += tons; w.trips += trips; if (man) { w.man += trips; w.manT += tons; }
+        w.eq[eq] = (w.eq[eq] || 0) + tons;
+        const c = cell(w, date, sh, eq); c.fact += tons; c.trips += trips; c.chk += trips;
+        return;
+      }
+      if (tl) { fbTr += trips; fbT += tons; }
       if (!real.length) {
         const why = list.some(x => x.h > 0) ? "Вакансия" : "Техники нет в плане смены";
         const k = eq + "|" + why; const u = U[k] || (U[k] = { eq, why, tons: 0, trips: 0 });
@@ -338,12 +412,26 @@ function compute(plan, factShifts, kind, month, cutOrd) {
         w.fact += tons * share; w.trips += trips * share; if (man) { w.man += trips * share; w.manT += tons * share; }
         if (real.length > 1) w.shared += trips * share;
         w.eq[eq] = (w.eq[eq] || 0) + tons * share;
-        const c = cell(w, date, sh, eq); c.fact += tons * share; c.trips += trips * share;
+        const c = cell(w, date, sh, eq); c.fact += tons * share; c.trips += trips * share; c.pl += trips * share;
       });
-    });
+    };
+    if (tl && S.tr && S.tr.length) {
+      const start = shiftStartMin(date, sh); const agg = {};
+      S.tr.forEach(t => {
+        const eq = kind === "drivers" ? t[1] : t[2];
+        const who = lastInspector(tl, eq, t[0], start, 60);
+        let fio = null;
+        if (who) { fio = (matchName && matchName(who.n)) || who.n.trim(); if (matchName && !matchName(who.n)) NM[who.n.trim()] = (NM[who.n.trim()] || 0) + 1; }
+        const k = eq + "|" + t[3] + "|" + (fio || ""); const a = agg[k] || (agg[k] = { eq, man: t[3], fio, trips: 0, tons: 0 });
+        a.trips++; a.tons += t[4];
+      });
+      Object.values(agg).forEach(a => place(a.eq, a.trips, a.tons, a.man, a.fio));
+    } else {
+      S.rows.forEach(r => place(kind === "drivers" ? r[0] : r[1], r[3], r[4], r[2], null));
+    }
   });
-  return { workers: Object.values(W), equip: Object.values(E), unassigned: Object.values(U),
-    tot: { plan: planAll, monthAll, fact: factAll, trips: tripsAll, man: manAll, manT: manTAll, unT, unTr, sharedTr, anN, anT, devN, devT } };
+  return { workers: Object.values(W), equip: Object.values(E), unassigned: Object.values(U), unmatched: NM,
+    tot: { plan: planAll, monthAll, fact: factAll, trips: tripsAll, man: manAll, manT: manTAll, unT, unTr, sharedTr, anN, anT, devN, devT, chkTr, chkT, fbTr, fbT, subTr, subT } };
 }
 
 // Разбор плана из JSON (kpi-plan-*.json)
@@ -382,7 +470,10 @@ function planFromSheets(drvAoa, excAoa) {
 }
 // ==CALC-END==
 
-const CFG = { PIN: "2508", PLAN_KEY: "dispMass.plans.v1", FACT_KEY: "dispMass.fact.v1", AUTO_PLAN: "kpi-plan-2026-10.json" };
+const CFG = { PIN: "2508", PLAN_KEY: "dispMass.plans.v1", FACT_KEY: "dispMass.fact.v1", AUTO_PLAN: "kpi-plan-2026-10.json",
+  SHEET_URL: "https://script.google.com/macros/s/AKfycbwhdMV20k8US2BXUz1Xk2XCXE9MEwpHpQaadTF9xEfzbU1--dHL-Zuj06K2qXW-rFtKGw/exec", CHK_KEY: "dispMass.chk.v1", CHK_MAX_DAYS: 100 };
+let CHK = { recs: [], ok: false, at: null, err: "" }; // recs: [{id,e,n,d}]
+let TL = null, MATCH = null;
 let PLANS = {};           // { "2026-10": plan }
 let FACT = { shifts: {}, files: [] };
 let TAB = "haulD", SORT = { drivers: ["fio", 1], exc: ["fio", 1], eq: ["eq", 1], ctl: ["tons", -1] };
@@ -421,6 +512,48 @@ async function init() {
     } catch (e) {}
   }
   refreshMonths(); cutToData(true); updateSourceStates(); render();
+  loadChecklists(false);
+}
+
+// ── Загрузка чек-листов ──
+function chkCompact(r) { return { id: String(r.recordId), e: String(r.equipmentId == null ? "" : r.equipmentId), n: String(r.empName || ""), d: String(r.date || "") }; }
+function rebuildTimeline() {
+  const pool = []; Object.values(PLANS).forEach(p => { p.drivers.concat(p.excavators).forEach(r => { if (isReal(r[3])) pool.push(r[3].trim()); }); });
+  TL = CHK.ok ? buildTimeline(CHK.recs) : null; MATCH = makeNameMatcher(pool);
+}
+function updateChkState() {
+  const el = $("chkState"); if (!el) return;
+  if (CHK.err) { el.innerHTML = '<span style="color:var(--red)">' + esc(CHK.err) + "</span>"; return; }
+  if (!CHK.ok) { el.textContent = "Чек-листы не загружены: оператор рейса определяется по плану."; return; }
+  el.innerHTML = "Осмотров в базе: <b>" + fmtN(CHK.recs.length) + "</b>, обновлено " + (CHK.at ? fmtDT(CHK.at + 5 * 3600000) : "—") + ". Рейсу назначается автор последнего чек-листа на технике в текущей смене.";
+}
+async function loadChecklists(force) {
+  const c = load(CFG.CHK_KEY);
+  if (c && Array.isArray(c.recs) && !CHK.ok) { CHK = { recs: c.recs, ok: true, at: c.at || null, err: "" }; rebuildTimeline(); updateChkState(); render(); }
+  if (!force && c && c.at && Date.now() - c.at < 10 * 60000) return;
+  const ks = Object.keys(FACT.shifts); let first = null;
+  ks.forEach(k => { const d = k.split("|")[0]; if (!first || d < first) first = d; });
+  const today = ymd(Date.now() + 5 * 3600000);
+  const days = Math.min(CFG.CHK_MAX_DAYS, Math.max(35, first ? Math.round((dayNum(today) - dayNum(first))) + 3 : 35));
+  $("btnChk").disabled = true; $("chkState").textContent = "Загрузка чек-листов… на большом листе это может занять до 2–3 минут.";
+  try {
+    let v = null, last;
+    for (let i = 0; i < 2 && !v; i++) {
+      const ctrl = new AbortController(), t = setTimeout(() => ctrl.abort(), 240000);
+      try { const r = await fetch(CFG.SHEET_URL + "?action=getChecklistRecords&days=" + days, { cache: "no-store", signal: ctrl.signal }); v = await r.json(); } catch (e) { last = e; }
+      clearTimeout(t);
+    }
+    if (!Array.isArray(v)) throw last || new Error("неожиданный ответ сервера");
+    const m = new Map(); (CHK.recs || []).forEach(x => m.set(x.id, x));
+    const winFrom = Date.now() - days * 864e5;
+    Array.from(m.keys()).forEach(id => { const mm = chkMinutes(m.get(id).d); if (mm !== null && mm * 60000 >= winFrom) m.delete(id); });
+    v.forEach(r => { if (r.recordId) m.set(String(r.recordId), chkCompact(r)); });
+    CHK = { recs: Array.from(m.values()), ok: true, at: Date.now(), err: "" };
+    store(CFG.CHK_KEY, { at: CHK.at, recs: CHK.recs });
+  } catch (e) {
+    CHK.err = CHK.ok ? "Не удалось обновить чек-листы, использованы сохранённые в браузере." : "Не удалось загрузить чек-листы: расчёт по плану. (" + (e && e.message || e) + ")";
+  }
+  $("btnChk").disabled = false; rebuildTimeline(); updateChkState(); render();
 }
 
 function refreshMonths() {
@@ -504,7 +637,8 @@ async function onFiles(list) {
   const noPlan = Object.keys(fm).filter(m => !PLANS[m]);
   if (factTouched && noPlan.length) ok.push("В выгрузке есть данные за " + noPlan.sort().join(", ") + ", плана на этот месяц нет: загрузите книгу KPI.");
   refreshMonths(); if (planMonth) $("fMonth").value = planMonth;
-  cutToData(true); updateSourceStates(); render();
+  cutToData(true); updateSourceStates(); rebuildTimeline(); render();
+  if (factTouched) loadChecklists(true);
   const prevWarn = $("warnBanner").style.display === "block" ? $("warnBanner").textContent : "";
   banner("infoBanner", ok.join(" ")); banner("warnBanner", skipped.concat(prevWarn ? [prevWarn] : []).join(" "));
 }
@@ -524,7 +658,8 @@ function render() {
   const m = $("fMonth").value, plan = PLANS[m];
   if (!plan) { $("stats").innerHTML = ""; $("tableHost").innerHTML = '<div class="empty">Загрузите план месяца.</div>'; RES = null; return; }
   const c = cutOrd();
-  RES = { drivers: compute(plan, FACT.shifts, "drivers", m, c), exc: compute(plan, FACT.shifts, "exc", m, c) };
+  const o = $("fSrc").value === "chk" && TL ? { tl: TL, match: MATCH } : null;
+  RES = { drivers: compute(plan, FACT.shifts, "drivers", m, c, o), exc: compute(plan, FACT.shifts, "exc", m, c, o) };
   const R = RES.drivers.tot, X = RES.exc.tot;
   const p = pct(R.fact, R.plan);
   const ks = Object.keys(FACT.shifts).filter(k => k.slice(0, 7) === m);
@@ -533,7 +668,8 @@ function render() {
     stat("Факт / план", p === null ? "—" : p.toFixed(1) + " %") + stat("План месяца, т", fmtT(R.monthAll)) +
     stat("Осталось до плана месяца, т", fmtT(Math.max(0, R.monthAll - R.fact))) + stat("Рейсов", fmtN(R.trips)) +
     stat("Из них добавлено вручную", R.trips ? fmtN(R.man) + " (" + (R.man / R.trips * 100).toFixed(0) + " %)" : "—") +
-    stat("Без работника, т", fmtT(R.unT) + " (" + (R.fact ? (R.unT / R.fact * 100).toFixed(1) : "0") + " %)");
+    stat("Без работника, т", fmtT(R.unT) + " (" + (R.fact ? (R.unT / R.fact * 100).toFixed(1) : "0") + " %)") +
+    (R.chkTr + R.fbTr > 0 ? stat("Рейсов по чек-листам", fmtN(R.chkTr) + " (" + (R.chkTr / R.trips * 100).toFixed(0) + " %)") + stat("Рейсов у подменных", fmtN(R.subTr)) : "");
   banner("warnBanner", !ks.length ? "Факт за выбранный месяц не загружен." :
     (R.unT / (R.fact || 1) > 0.1 ? "Более 10 % массы не закреплено за работниками (вакансии или техника вне плана). Подробности на вкладке «Контроль данных»." : ""));
   renderTable();
@@ -626,7 +762,9 @@ function renderTable() {
     const R = RES.drivers.tot, X = RES.exc.tot;
     let h = '<div style="padding:16px"><table class="mini"><thead><tr><th>Показатель</th><th class="num">Водители</th><th class="num">Машинисты</th></tr></thead><tbody>' +
       ctlRow("Факт, т", R.fact, X.fact) + ctlRow("Не закреплено за работником, т", R.unT, X.unT) + ctlRow("Не закреплено, рейсов", R.unTr, X.unTr) +
-      ctlRow("Рейсов, разделённых между двумя работниками (день заезда/выезда)", R.sharedTr, X.sharedTr) +
+      ctlRow("Рейсов определено по чек-листам", R.chkTr, X.chkTr) + ctlRow("Рейсов определено по плану (нет чек-листа в смене)", R.fbTr, X.fbTr) +
+      ctlRow("Рейсов на операторах не из плана смены (подмены)", R.subTr, X.subTr) +
+      ctlRow("Рейсов, разделённых между двумя работниками по плану (день заезда/выезда)", R.sharedTr, X.sharedTr) +
       ctlRow("Рейсов с подозрительной длительностью (меньше 0 или больше 120 мин)", R.anN, X.anN) + ctlRow("Масса таких рейсов, т", R.anT, X.anT) +
       ctlRow("Рейсов, где масса отличается от ожидаемой для машины и материала (Санни 65, Тонли 70, HT152 57 т; Mud — 48, 53, 43 т)", R.devN, X.devN) + ctlRow("Отклонение таких рейсов от ожидаемой массы, т", R.devT, X.devT) + "</tbody></table>";
     [["drivers", "Самосвалы без работника в плане"], ["exc", "Экскаваторы без работника в плане"]].forEach(([kd, title]) => {
@@ -634,6 +772,10 @@ function renderTable() {
       h += "<h3 style=\"font-size:14px\">" + title + "</h3>";
       h += rows.length ? '<table class="mini"><thead><tr><th>Техника</th><th>Причина</th><th class="num">Рейсов</th><th class="num">Масса, т</th></tr></thead><tbody>' +
         rows.map(u => "<tr><td>" + esc(u.eq) + "</td><td>" + esc(u.why) + '</td><td class="num">' + fmtN(u.trips) + '</td><td class="num">' + fmtT(u.tons) + "</td></tr>").join("") + "</tbody></table>" : '<div class="sub" style="margin-bottom:14px">Нет.</div>';
+    });
+    [["drivers", "самосвалов"], ["exc", "экскаваторов"]].forEach(([kd, t]) => {
+      const nm = Object.keys(RES[kd].unmatched || {}).sort((a, b) => RES[kd].unmatched[b] - RES[kd].unmatched[a]);
+      if (nm.length) h += '<h3 style="font-size:14px">Имена из чек-листов, которых нет в плане (' + t + ')</h3><div class="sub" style="margin-bottom:14px">' + nm.map(n => esc(n) + " — " + RES[kd].unmatched[n] + " рейс.").join("; ") + ". Рейсы записаны на имя из чек-листа; проверьте написание ФИО в плане.</div>";
     });
     h += '<div class="sub">Рейсы с подозрительной длительностью остаются в факте; показатель выводится для проверки данных диспетчером.</div></div>';
     host.innerHTML = h;
@@ -645,8 +787,8 @@ function openWorker(kind, fio) {
   const w = RES[kind].workers.find(x => x.fio === fio); if (!w) return;
   const cells = Object.values(w.cells).sort((a, b) => shiftOrd(a.date, a.sh) - shiftOrd(b.date, b.sh));
   let h = '<div class="modal-head"><div><h2>' + esc(fio) + '</h2><div class="sub">План ' + fmtT(w.plan) + " т, факт " + fmtT(w.fact) + " т" + (w.plan ? ", " + (w.fact / w.plan * 100).toFixed(1) + " %" : "") + '</div><div class="sub">План месяца ' + fmtT(w.monthPlan) + " т, осталось " + fmtT(Math.max(0, w.monthPlan - w.fact)) + " т" + (w.shiftsLeft ? ", смен осталось " + w.shiftsLeft + ", нужно за смену " + fmtT(Math.max(0, w.monthPlan - w.fact) / w.shiftsLeft) + " т" : "") + '</div></div><button class="btn ghost" onclick="closeModal()">Закрыть</button></div>';
-  h += '<table class="mini"><thead><tr><th>Сутки</th><th>Смена</th><th>Техника</th><th class="num">План, т</th><th class="num">Факт, т</th><th class="num">Рейсов</th><th>Факт / план</th></tr></thead><tbody>' +
-    cells.map(c => "<tr><td>" + fmtD(c.date) + "</td><td>" + (c.sh === SH_N ? "Ночь" : "День") + "</td><td>" + esc(c.eq) + '</td><td class="num">' + fmtT(c.plan) + '</td><td class="num">' + fmtT(c.fact) + '</td><td class="num">' + (c.trips ? (Math.abs(c.trips - Math.round(c.trips)) < 0.01 ? fmtN(c.trips) : c.trips.toFixed(1)) : "") + "</td><td>" + (c.plan ? (c.fact / c.plan * 100).toFixed(0) + " %" : "") + "</td></tr>").join("") + "</tbody></table>";
+  h += '<table class="mini"><thead><tr><th>Сутки</th><th>Смена</th><th>Техника</th><th class="num">План, т</th><th class="num">Факт, т</th><th class="num">Рейсов</th><th>Факт / план</th><th>Оператор определён</th></tr></thead><tbody>' +
+    cells.map(c => "<tr><td>" + fmtD(c.date) + "</td><td>" + (c.sh === SH_N ? "Ночь" : "День") + "</td><td>" + esc(c.eq) + '</td><td class="num">' + fmtT(c.plan) + '</td><td class="num">' + fmtT(c.fact) + '</td><td class="num">' + (c.trips ? (Math.abs(c.trips - Math.round(c.trips)) < 0.01 ? fmtN(c.trips) : c.trips.toFixed(1)) : "") + "</td><td>" + (c.plan ? (c.fact / c.plan * 100).toFixed(0) + " %" : "") + "</td><td>" + (c.chk && c.pl ? "чек-лист и план" : c.chk ? "по чек-листу" : c.pl ? "по плану" : "") + "</td></tr>").join("") + "</tbody></table>";
   $("modalBox").innerHTML = h; $("modalBg").style.display = "flex";
 }
 function closeModal() { $("modalBg").style.display = "none"; }
@@ -673,7 +815,7 @@ function exportXlsx() {
   RES.drivers.unassigned.forEach(u => un.push(["Самосвал", u.eq, u.why, u.trips, Math.round(u.tons)]));
   RES.exc.unassigned.forEach(u => un.push(["Экскаватор", u.eq, u.why, u.trips, Math.round(u.tons)]));
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(un), "Без работника");
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Месяц", m], ["Срез до", $("fCutDate").value + " " + ($("fCutShift").value === SH_N ? "ночь" : "день")], ["Начало месяца", "19:00 последнего дня предыдущего месяца"]]), "Параметры");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Месяц", m], ["Срез до", $("fCutDate").value + " " + ($("fCutShift").value === SH_N ? "ночь" : "день")], ["Начало месяца", "19:00 последнего дня предыдущего месяца"], ["Оператор рейса", $("fSrc").value === "chk" && TL ? "по чек-листам, запасной вариант — план" : "по плану"]]), "Параметры");
   XLSX.writeFile(wb, "KPI_масса_" + m + ".xlsx");
 }
 </script>
