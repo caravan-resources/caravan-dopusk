@@ -1034,10 +1034,17 @@ function render() {
   const R = RES.drivers.tot, X = RES.exc.tot;
   const p = pct(R.fact, R.plan);
   const ks = Object.keys(FACT.shifts).filter(k => k.slice(0, 7) === m);
+  // План месяца: по карьеру (без фильтров вахты и смены) и отдельно по выбранным вахте и смене
+  const filtered = !!(vf || sf);
+  const Q = filtered ? compute(plan, FACT.shifts, "drivers", m, c, Object.assign({}, o2, { vahta: "", shift: "" })).tot : R;
+  const fl = [vf ? (vf === "B" ? "Вахта 1" : "Вахта 2") : "", sf ? (sf === SH_N ? "ночь" : "день") : ""].filter(Boolean).join(", ");
+  const monthCards = filtered
+    ? stat("План месяца по карьеру, т", fmtT(Q.monthAll)) + stat("Осталось до плана месяца по карьеру, т", fmtT(Math.max(0, Q.monthAll - Q.fact))) +
+      stat("План месяца: " + fl + ", т", fmtT(R.monthAll)) + stat("Осталось до плана месяца: " + fl + ", т", fmtT(Math.max(0, R.monthAll - R.fact)))
+    : stat("План месяца, т", fmtT(R.monthAll)) + stat("Осталось до плана месяца, т", fmtT(Math.max(0, R.monthAll - R.fact)));
   $("stats").innerHTML =
     stat("План на срез, т", fmtT(R.plan)) + stat("Факт, т", fmtT(R.fact)) +
-    stat("Факт / план", p === null ? "—" : p.toFixed(1) + " %") + stat("План месяца, т", fmtT(R.monthAll)) +
-    stat("Осталось до плана месяца, т", fmtT(Math.max(0, R.monthAll - R.fact))) + stat("Рейсов", fmtN(R.trips)) +
+    stat("Факт / план", p === null ? "—" : p.toFixed(1) + " %") + monthCards + stat("Рейсов", fmtN(R.trips)) +
     stat("Из них добавлено вручную", R.trips ? fmtN(R.man) + " (" + (R.man / R.trips * 100).toFixed(0) + " %)" : "—") +
     stat("Без работника, т", fmtT(R.unT) + " (" + (R.fact ? (R.unT / R.fact * 100).toFixed(1) : "0") + " %)") +
     (R.hasStat ? stat("Снято из плана за ремонт, т", $("fAdj").value === "1" ? fmtT(R.cut) : "не применяется") : "") +
