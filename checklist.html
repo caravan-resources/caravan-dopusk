@@ -195,8 +195,8 @@ input:focus, select:focus, textarea:focus { border-color:var(--gold); }
     <label class="card" id="handoverCard" for="handoverToggle" style="display:flex;align-items:center;gap:10px;cursor:pointer">
       <input type="checkbox" id="handoverToggle" onchange="toggleHandover(this.checked)" style="width:22px;height:22px;flex-shrink:0">
       <div>
-        <div style="font-weight:800">Принимаю технику в середине смены</div>
-        <div class="hint" style="margin:2px 0 0">Обед, подмена, пересменка. Остаток топлива вносится только в начале смены — здесь его указывать не нужно. Ваша работа на этой машине учтётся.</div>
+        <div style="font-weight:800">Горячая пересменка</div>
+        <div class="hint" style="margin:2px 0 0">Принимаю работающую технику без остановки: сажусь вместо другого водителя или возвращаюсь с обеда. Остаток топлива вносится только в начале смены — здесь его указывать не нужно. Ваша работа на этой машине учтётся.</div>
       </div>
     </label>
 
@@ -549,7 +549,7 @@ function setItemStatus(key, status) {
   commentEl.classList.toggle("show", status === "defect");
 }
 
-// «Принимаю технику в середине смены» — второй водитель садится на обеде/при
+// «Горячая пересменка» — второй водитель садится на обеде/при
 // подмене. Остаток топлива пишется только в начале смены, поэтому поле
 // скрывается и очищается; в запись добавляется пункт «Тип осмотра», чтобы
 // осмотр мог быть засчитан сменщику на этой машине (KPI). Добавлено 26.10.2026.
@@ -599,7 +599,7 @@ async function submitChecklist() {
   if (isHandover) {
     // Метка осмотра в середине смены. Для обычного осмотра в начале смены
     // метки нет — не плодим строки в листе записей (он близок к лимиту ячеек).
-    items.push({ section: "Общее", itemText: "Тип осмотра", status: "Приём техники в середине смены", comment: "" });
+    items.push({ section: "Общее", itemText: "Тип осмотра", status: "Горячая пересменка", comment: "" });
   } else if (template.fuelLevelField) {
     // Остаток топлива необязателен: пустое поле строкой не пишется.
     const fuelVal = document.getElementById("fuelLevel").value;
