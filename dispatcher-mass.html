@@ -351,6 +351,43 @@ function makeNameMatcher(pool) {
   };
 }
 
+
+// ── Объединение двойников ФИО (ё/е, опечатка в одной букве имени, запись без отчества) ──
+function lev1(a, b) { // true, если строки отличаются не более чем одной правкой
+  if (a === b) return true; const la = a.length, lb = b.length; if (Math.abs(la - lb) > 1) return false;
+  let i = 0; while (i < la && i < lb && a[i] === b[i]) i++;
+  if (la === lb) return a.slice(i + 1) === b.slice(i + 1);
+  return la > lb ? a.slice(i + 1) === b.slice(i) : a.slice(i) === b.slice(i + 1);
+}
+function nameParts(f) { const t = normName(f).split(" "); return { sur: t[0] || "", first: t[1] || "", pat: t[2] || "" }; }
+const sameFirst = (a, b) => a === b || (a.length === 1 && b[0] === a) || (b.length === 1 && a[0] === b) || (a.length > 2 && b.length > 2 && lev1(a, b));
+// Возвращает { canon(fio) -> каноническое ФИО, merges: [[из, в]] }.
+// Объединяются записи с одинаковой фамилией и похожим именем; отчества должны совпадать (или одно пустое).
+// Если запись без отчества подходит к нескольким разным людям, она остаётся как есть.
+function makeCanon(names) {
+  const uniq = Array.from(new Set(names.map(x => String(x || "").trim()).filter(Boolean)));
+  const E = uniq.map(f => Object.assign({ fio: f }, nameParts(f)));
+  const clusters = []; // { sur, first, pat, list: [fio] }
+  E.filter(e => e.pat).forEach(e => {
+    const c = clusters.find(c => c.sur === e.sur && sameFirst(c.first, e.first) && (c.pat === e.pat || (e.pat.length > 3 && lev1(c.pat, e.pat))));
+    if (c) c.list.push(e.fio); else clusters.push({ sur: e.sur, first: e.first, pat: e.pat, list: [e.fio] });
+  });
+  const parts = E.filter(e => !e.pat);
+  parts.forEach(e => {
+    const cand = clusters.filter(c => c.sur === e.sur && sameFirst(c.first, e.first));
+    if (cand.length === 1) { cand[0].list.push(e.fio); return; }
+    if (cand.length > 1) { clusters.push({ sur: e.sur, first: e.first, pat: "", list: [e.fio], solo: true }); return; }
+    const c = clusters.find(c => !c.pat && !c.solo && c.sur === e.sur && sameFirst(c.first, e.first));
+    if (c) c.list.push(e.fio); else clusters.push({ sur: e.sur, first: e.first, pat: "", list: [e.fio] });
+  });
+  const map = {}, merges = [];
+  clusters.forEach(c => {
+    const to = c.list.slice().sort((a, b) => nameParts(b).pat.length - nameParts(a).pat.length || b.length - a.length || a.localeCompare(b, "ru"))[0];
+    c.list.forEach(f => { map[f] = to; if (f !== to) merges.push([f, to]); });
+  });
+  return { canon: f => { const k = String(f || "").trim(); return map[k] || k; }, merges };
+}
+
 function isReal(fio) { const s = (fio || "").trim(); return s !== "" && !/^вакан/i.test(s); }
 
 function buildIndex(planRows) {
@@ -362,7 +399,8 @@ function buildIndex(planRows) {
 // kind: "drivers" | "exc"; month "YYYY-MM"; cutOrd — включительно
 function compute(plan, factShifts, kind, month, cutOrd, opts) {
   const tl = opts && opts.tl, matchName = opts && opts.match;
-  const rowsP = kind === "drivers" ? plan.drivers : plan.excavators;
+  const CN = makeCanon(plan.drivers.concat(plan.excavators).map(r => r[3]).filter(isReal));
+  const rowsP = (kind === "drivers" ? plan.drivers : plan.excavators).map(r => isReal(r[3]) ? [r[0], r[1], r[2], CN.canon(r[3]), r[4], r[5]] : r);
   const idx = buildIndex(rowsP);
   const W = {}; const E = {}; const U = {}; const NM = {};
   const getW = f => W[f] || (W[f] = { fio: f, plan: 0, shifts: 0, fact: 0, trips: 0, man: 0, manT: 0, shared: 0, monthPlan: 0, planLeft: 0, shiftsLeft: 0, eq: {}, cells: {} });
@@ -421,7 +459,7 @@ function compute(plan, factShifts, kind, month, cutOrd, opts) {
         const eq = kind === "drivers" ? t[1] : t[2];
         const who = lastInspector(tl, eq, t[0], start, 60);
         let fio = null;
-        if (who) { fio = (matchName && matchName(who.n)) || who.n.trim(); if (matchName && !matchName(who.n)) NM[who.n.trim()] = (NM[who.n.trim()] || 0) + 1; }
+        if (who) { fio = CN.canon((matchName && matchName(who.n)) || who.n.trim()); if (matchName && !matchName(who.n)) NM[who.n.trim()] = (NM[who.n.trim()] || 0) + 1; }
         const k = eq + "|" + t[3] + "|" + (fio || ""); const a = agg[k] || (agg[k] = { eq, man: t[3], fio, trips: 0, tons: 0 });
         a.trips++; a.tons += t[4];
       });
@@ -430,7 +468,7 @@ function compute(plan, factShifts, kind, month, cutOrd, opts) {
       S.rows.forEach(r => place(kind === "drivers" ? r[0] : r[1], r[3], r[4], r[2], null));
     }
   });
-  return { workers: Object.values(W), equip: Object.values(E), unassigned: Object.values(U), unmatched: NM,
+  return { workers: Object.values(W), equip: Object.values(E), unassigned: Object.values(U), unmatched: NM, merges: CN.merges,
     tot: { plan: planAll, monthAll, fact: factAll, trips: tripsAll, man: manAll, manT: manTAll, unT, unTr, sharedTr, anN, anT, devN, devT, chkTr, chkT, fbTr, fbT, subTr, subT } };
 }
 
@@ -519,7 +557,8 @@ async function init() {
 function chkCompact(r) { return { id: String(r.recordId), e: String(r.equipmentId == null ? "" : r.equipmentId), n: String(r.empName || ""), d: String(r.date || "") }; }
 function rebuildTimeline() {
   const pool = []; Object.values(PLANS).forEach(p => { p.drivers.concat(p.excavators).forEach(r => { if (isReal(r[3])) pool.push(r[3].trim()); }); });
-  TL = CHK.ok ? buildTimeline(CHK.recs) : null; MATCH = makeNameMatcher(pool);
+  const CN = makeCanon(pool);
+  TL = CHK.ok ? buildTimeline(CHK.recs) : null; MATCH = makeNameMatcher(pool.map(CN.canon));
 }
 function updateChkState() {
   const el = $("chkState"); if (!el) return;
@@ -777,6 +816,8 @@ function renderTable() {
       const nm = Object.keys(RES[kd].unmatched || {}).sort((a, b) => RES[kd].unmatched[b] - RES[kd].unmatched[a]);
       if (nm.length) h += '<h3 style="font-size:14px">Имена из чек-листов, которых нет в плане (' + t + ')</h3><div class="sub" style="margin-bottom:14px">' + nm.map(n => esc(n) + " — " + RES[kd].unmatched[n] + " рейс.").join("; ") + ". Рейсы записаны на имя из чек-листа; проверьте написание ФИО в плане.</div>";
     });
+    const mg = RES.drivers.merges.concat(RES.exc.merges.filter(x => !RES.drivers.merges.some(y => y[0] === x[0])));
+    if (mg.length) h += '<h3 style="font-size:14px">Объединены записи одного работника в плане</h3><div class="sub" style="margin-bottom:14px">' + mg.map(x => esc(x[0]) + " → " + esc(x[1])).join("; ") + ". Если это разные люди, пришлите ФИО: правило объединения будет уточнено.</div>";
     h += '<div class="sub">Рейсы с подозрительной длительностью остаются в факте; показатель выводится для проверки данных диспетчером.</div></div>';
     host.innerHTML = h;
   }
