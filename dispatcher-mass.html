@@ -162,7 +162,7 @@ table.mini td { padding:6px 8px; border-bottom:1px solid var(--border); }
       <div class="field"><label>Срез: до даты</label><input type="date" id="fCutDate" onchange="render()"></div>
       <div class="field"><label>Срез: смена</label>
         <select id="fCutShift" onchange="render()"><option value="Д">День (до 19:00)</option><option value="Н">Ночь (до 07:00)</option></select></div>
-      <div class="field"><label>Вахта (группа плана)</label><select id="fVahta" onchange="render()"><option value="">Все</option><option value="A">Группа A</option><option value="B">Группа B</option></select></div>
+      <div class="field"><label>Вахта (группа плана)</label><select id="fVahta" onchange="VT = true; render()"><option value="">Все</option><option value="B">Вахта 1 (группа B)</option><option value="A">Вахта 2 (группа A)</option></select></div>
       <div class="field"><label>Смена</label><select id="fShiftF" onchange="render()"><option value="">Обе</option><option value="Д">День</option><option value="Н">Ночь</option></select></div>
       <div class="field"><label>Ремонт техники (Down)</label><select id="fAdj" onchange="render()"><option value="1">Вычитать из плана</option><option value="0">Не вычитать</option></select></div>
       <div class="field"><label>Зелёный от, %</label><input type="number" id="pGreen" value="100" min="1" max="200" onchange="render()"></div>
@@ -793,7 +793,16 @@ function noteColor(t) { return t === "red" ? "var(--red)" : t === "yellow" ? "va
 // Комментарий под ФИО, если вывозки нет или она меньше 10 % плана
 function lowFact(w) { return w.plan > 0 && (w.fact <= 0 || w.fact / w.plan < 0.1); }
 function noteSub(w) { if (!lowFact(w)) return ""; const n = noteFor(w.fio); return n ? '<div class="sub" style="color:' + noteColor(n.tone) + '">' + esc(n.short) + "</div>" : ""; }
+// Соответствие вахт группам плана определено по наряду мастера: группа B = Вахта-1, группа A = Вахта-2 (совпало у 128 из 129 работников).
+let VT = false, VAUTO = false;   // VT: фильтр вахты менял пользователь; VAUTO: автовыбор работающей вахты уже выполнен
+function updateVahtaLabels() {
+  const act = (SA.act && SA.act["Алмалы"]) || ""; const o = $("fVahta"); if (!o) return;
+  [["B", "Вахта 1 (группа B)", "Вахта-1"], ["A", "Вахта 2 (группа A)", "Вахта-2"]].forEach(([g, lab, v]) => { const op = o.querySelector('option[value="' + g + '"]'); if (op) op.textContent = lab + (act === v ? " — сейчас работает" : ""); });
+  // При первой загрузке наряда фильтр сам переключается на работающую вахту, если пользователь его ещё не менял
+  if (!VT && !VAUTO && act) { const g = act === "Вахта-1" ? "B" : act === "Вахта-2" ? "A" : ""; if (g) { o.value = g; VAUTO = true; } }
+}
 function updateSaState() {
+  updateVahtaLabels();
   const el = $("saState"); if (!el) return;
   el.innerHTML = SA.err ? '<span style="color:var(--red)">' + esc(SA.err) + "</span>" : (SA.ok ? "Наряд мастера: записей " + fmtN(SA.rows.length) + (SA.at ? ", обновлён " + fmtDT(SA.at + 5 * 3600000) : "") + "." : "Наряд мастера загружается…");
 }
