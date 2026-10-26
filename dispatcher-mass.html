@@ -184,6 +184,7 @@ table.mini td { padding:6px 8px; border-bottom:1px solid var(--border); }
       <div class="tab" data-t="exc" onclick="setTab('exc')">KPI машинистов</div>
       <div class="tab" data-t="eq" onclick="setTab('eq')">По технике</div>
       <div class="tab" data-t="dt" onclick="setTab('dt')">Простои: статусы Hexagon</div>
+      <div class="tab" data-t="ch" onclick="setTab('ch')">Диаграмма смен</div>
       <div class="tab" data-t="ctl" onclick="setTab('ctl')">Контроль данных</div>
     </div>
     <div class="tablewrap" id="tableHost"></div>
@@ -573,6 +574,7 @@ function compute(plan, factShifts, kind, month, cutOrd, opts) {
   const stat = opts && opts.stat, adj = opts && opts.adj;
   const VF = (opts && opts.vahta) || "", SF = (opts && opts.shift) || "";   // фильтры: группа (вахта) плана и смена
   const rowOk = r => (!VF || r[6] === VF) && (!SF || r[1] === SF);
+  const BS = {}; const bs = k => BS[k] || (BS[k] = { fact: 0, plan: 0, trips: 0 });   // по сменам: «дата|смена»
   const tl = opts && opts.tl, matchName = opts && opts.match;
   const planNames = plan.drivers.concat(plan.excavators).map(r => r[3]).filter(isReal);
   // имена из чек-листов тоже участвуют в объединении: в них встречаются опечатки («Майдобек» вместо «Майдабек»),
@@ -596,7 +598,7 @@ function compute(plan, factShifts, kind, month, cutOrd, opts) {
     }
     const sd = statCell(stat, r[0], r[1], r[2]);
     const pe = adj && sd ? r[5] * (sd.tot - sd.e[3]) / sd.tot : r[5];
-    monthAll += pe; planAll += pe; planRawAll += r[5]; getE(r[2]).plan += pe;
+    monthAll += pe; planAll += pe; planRawAll += r[5]; getE(r[2]).plan += pe; bs(r[0] + "|" + r[1]).plan += pe;
     if (hasStat && !sd && r[4] > 0) noStat++;
     if (isReal(r[3])) {
       const w = getW(r[3].trim()); w.plan += pe; w.planRaw += r[5]; w.monthPlan += pe; if (r[4] > 0) w.shifts++;
@@ -617,6 +619,7 @@ function compute(plan, factShifts, kind, month, cutOrd, opts) {
     // fio === null — оператор определяется по плану; иначе — автор последнего чек-листа
     const place = (eq, trips, tons, man, fio) => {
       if (VF) { const l0 = idx[date + "|" + sh + "|" + eq] || []; if (!(l0.length && l0[0].g === VF)) return; }
+      { const b = bs(date + "|" + sh); b.fact += tons; b.trips += trips; }
       factAll += tons; tripsAll += trips; if (man) { manAll += trips; manTAll += tons; }
       const E1 = getE(eq); E1.fact += tons; E1.trips += trips; if (man) { E1.man += trips; E1.manT += tons; }
       const list = idx[date + "|" + sh + "|" + eq] || [];
@@ -660,7 +663,7 @@ function compute(plan, factShifts, kind, month, cutOrd, opts) {
       S.rows.forEach(r => place(kind === "drivers" ? r[0] : r[1], r[3], r[4], r[2], null));
     }
   });
-  return { workers: Object.values(W), equip: Object.values(E), unassigned: Object.values(U), unmatched: NM, merges: CN.merges,
+  return { shiftsData: BS, workers: Object.values(W), equip: Object.values(E), unassigned: Object.values(U), unmatched: NM, merges: CN.merges,
     tot: { plan: planAll, planRaw: planRawAll, cut: planRawAll - planAll, noStat, hasStat, monthAll, fact: factAll, trips: tripsAll, man: manAll, manT: manTAll, unT, unTr, sharedTr, anN, anT, devN, devT, chkTr, chkT, fbTr, fbT, subTr, subT } };
 }
 
@@ -1152,6 +1155,41 @@ function statSummary(month, cut, only) {
   });
   return { eqs, reasons };
 }
+// Диаграмма: сколько вывезла каждая смена (день / ночь) по суткам, с отметкой плана смены
+function renderShiftChart() {
+  const D = RES.drivers.shiftsData || {}; const keys = Object.keys(D);
+  if (!keys.length) return '<div class="empty">Нет данных по сменам.</div>';
+  const dates = Array.from(new Set(keys.map(k => k.split("|")[0]))).sort();
+  const val = (d, sh, f) => (D[d + "|" + sh] ? D[d + "|" + sh][f] : 0);
+  let tD = 0, tN = 0, nD = 0, nN = 0, pD = 0, pN = 0;
+  dates.forEach(d => { const a = D[d + "|" + SH_D], b = D[d + "|" + SH_N]; if (a && a.fact > 0) { tD += a.fact; nD++; } if (b && b.fact > 0) { tN += b.fact; nN++; } pD += a ? a.plan : 0; pN += b ? b.plan : 0; });
+  const max = Math.max.apply(null, keys.map(k => Math.max(D[k].fact, D[k].plan))) || 1;
+  const step = Math.pow(10, Math.floor(Math.log10(max))); let top = Math.ceil(max / step) * step; if (top / step > 5) top = Math.ceil(max / (step * 2)) * step * 2;
+  const W = Math.max(720, dates.length * 44 + 80), H = 340, L = 64, B = 44, T = 16, pw = W - L - 12, ph = H - B - T, gw = pw / dates.length, bw = Math.min(16, gw / 2 - 3);
+  const y = v => T + ph - v / top * ph;
+  let svg = '<svg viewBox="0 0 ' + W + " " + H + '" width="' + W + '" height="' + H + '" style="max-width:100%;height:auto;font-family:inherit">';
+  for (let i = 0; i <= 5; i++) { const v = top / 5 * i, yy = y(v); svg += '<line x1="' + L + '" x2="' + (W - 12) + '" y1="' + yy + '" y2="' + yy + '" stroke="#d6dbe4" stroke-width="1"/><text x="' + (L - 6) + '" y="' + (yy + 4) + '" text-anchor="end" font-size="11" fill="#667085">' + fmtT(v / 1000) + " тыс</text>"; }
+  dates.forEach((d, i) => {
+    const cx = L + gw * i + gw / 2;
+    [[SH_D, -bw - 1, "#F59E0B", "день"], [SH_N, 1, "#1F2A44", "ночь"]].forEach(([sh, dx, col, nm]) => {
+      const f = val(d, sh, "fact"), p = val(d, sh, "plan"), x = cx + dx;
+      if (!D[d + "|" + sh]) return;
+      svg += '<g><title>' + fmtD(d) + ", " + nm + ": факт " + fmtT(f) + " т, план " + fmtT(p) + " т, рейсов " + fmtN(val(d, sh, "trips")) + (p > 0 ? ", " + (f / p * 100).toFixed(0) + " % плана" : "") + '</title><rect x="' + x + '" y="' + y(f) + '" width="' + bw + '" height="' + Math.max(0, T + ph - y(f)) + '" fill="' + col + '" rx="2"/>' +
+        (p > 0 ? '<line x1="' + (x - 2) + '" x2="' + (x + bw + 2) + '" y1="' + y(p) + '" y2="' + y(p) + '" stroke="#DC2626" stroke-width="2"/>' : "") + "</g>";
+    });
+    svg += '<text x="' + cx + '" y="' + (H - B + 16) + '" text-anchor="middle" font-size="10" fill="#475467">' + d.slice(8) + "." + d.slice(5, 7) + "</text>";
+  });
+  svg += '<line x1="' + L + '" x2="' + (W - 12) + '" y1="' + (T + ph) + '" y2="' + (T + ph) + '" stroke="#98A2B3"/></svg>';
+  const card = (l, v, sub) => '<div class="stat-card"><div class="stat-val">' + v + '</div><div class="stat-lbl">' + l + (sub ? '<br><span class="sub">' + sub + "</span>" : "") + "</div></div>";
+  const avg = (t, n) => n ? fmtT(t / n) : "—";
+  let h = '<div style="padding:16px"><div class="stats-grid" style="margin-bottom:12px">' +
+    card("Дневные смены, т", fmtT(tD), "смен " + nD + ", в среднем " + avg(tD, nD) + " т за смену" + (pD ? ", " + (tD / pD * 100).toFixed(0) + " % плана" : "")) +
+    card("Ночные смены, т", fmtT(tN), "смен " + nN + ", в среднем " + avg(tN, nN) + " т за смену" + (pN ? ", " + (tN / pN * 100).toFixed(0) + " % плана" : "")) +
+    card("Доля дня / ночи", (tD + tN ? (tD / (tD + tN) * 100).toFixed(0) : "0") + " / " + (tD + tN ? (tN / (tD + tN) * 100).toFixed(0) : "0") + " %") + "</div>" +
+    '<div style="display:flex;gap:16px;align-items:center;font-size:12px;margin-bottom:6px"><span><i style="display:inline-block;width:12px;height:12px;background:#F59E0B;border-radius:2px;vertical-align:-1px"></i> день (07:00–19:00)</span><span><i style="display:inline-block;width:12px;height:12px;background:#1F2A44;border-radius:2px;vertical-align:-1px"></i> ночь (19:00–07:00)</span><span><i style="display:inline-block;width:14px;height:0;border-top:2px solid #DC2626;vertical-align:3px"></i> план смены</span></div>' +
+    '<div style="overflow-x:auto">' + svg + '</div><div class="sub" style="margin-top:6px">Столбец = масса, вывезенная сменой за сутки; красная черта = плановый тоннаж этой смены. Учитываются фильтры вахты и смены и поправка на ремонт. Ночь суток D начинается в 19:00 дня D−1. Подсказка с точными числами появляется при наведении.</div></div>';
+  return h;
+}
 function renderDowntime() {
   if (!Object.keys(STAT.shifts).length) return '<div class="empty">Статусы техники не загружены. Загрузите книгу выгрузки Hexagon с листом «Статуса».</div>';
   const m = $("fMonth").value, q = $("fSearch").value.trim().toLowerCase();
@@ -1177,6 +1215,7 @@ function renderTable() {
   const host = $("tableHost"); if (!RES) return;
   if (TAB === "haulD" || TAB === "haulE") { host.innerHTML = renderHaul(TAB === "haulD" ? "drivers" : "exc"); return; }
   if (TAB === "dt") { host.innerHTML = renderDowntime(); return; }
+  if (TAB === "ch") { host.innerHTML = renderShiftChart(); return; }
   if (TAB === "drivers" || TAB === "exc") {
     const rows = sortRows(workerRows(TAB), TAB);
     const lab = TAB === "drivers" ? "Самосвалы" : "Экскаваторы";
