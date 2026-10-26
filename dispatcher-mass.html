@@ -147,7 +147,8 @@ table.mini td { padding:6px 8px; border-bottom:1px solid var(--border); }
     <div class="panel" style="margin-bottom:12px">
       <h3>3. Чек-листы техники (кто на какой машине работал)</h3>
       <div class="src-state" id="chkState">Чек-листы не загружены.</div>
-      <button class="btn ghost" id="btnChk" onclick="loadChecklists(true)">Обновить чек-листы</button>
+      <div class="src-state" id="stlState">История статусов техники не загружена.</div>
+      <button class="btn ghost" id="btnChk" onclick="loadChecklists(true); loadStatusLog(true)">Обновить чек-листы и статусы</button>
     </div>
 
     <div class="banner err" id="errBanner"></div>
@@ -389,6 +390,58 @@ function makeCanon(names) {
   return { canon: f => { const k = String(f || "").trim(); return map[k] || k; }, merges };
 }
 
+// ── Статусы техники (Ремонт / Резерв / В работе) из журнала «ИсторияСмен» ──
+// rows: [{t, e, sm, v, es}] -> { eqNorm: [{m, es}] по возрастанию времени }.
+// Событием считается только реальная смена статуса в слоте (техника+смена+вахта): повторные снимки с тем же статусом
+// (правка назначения и т.п.) пропускаются, иначе старый статус соседнего слота «воскресал» бы.
+function buildStatusTimeline(rows) {
+  const arr = (rows || []).map(r => ({ m: chkMinutes(r.t), e: normEq(r.e), es: String(r.es || "").trim(), slot: normEq(r.e) + "|" + r.sm + "|" + r.v }))
+    .filter(x => x.m !== null && x.e && x.es).sort((a, b) => a.m - b.m);
+  const last = {}, tl = {};
+  arr.forEach(x => { if (last[x.slot] === x.es) return; last[x.slot] = x.es; (tl[x.e] || (tl[x.e] = [])).push({ m: x.m, es: x.es }); });
+  return tl;
+}
+function statusAt(stl, eq, m) {
+  const a = stl && stl[normEq(eq)]; if (!a) return null;
+  let r = null; for (let i = 0; i < a.length && a[i].m <= m; i++) r = a[i];
+  return r;
+}
+// Простой по плану: смены, где у техники в плане есть часы, а рейсов в выгрузке нет, и статус техники в эти смены.
+// stl === null — журнал статусов не загружен (причины не определяются).
+function idleAnalysis(plan, factShifts, kind, month, cutOrd, stl, nowMin) {
+  const rowsP = kind === "drivers" ? plan.drivers : plan.excavators;
+  const worked = new Set();
+  Object.keys(factShifts).forEach(sk => factShifts[sk].rows.forEach(r => worked.add(sk + "|" + normEq(kind === "drivers" ? r[0] : r[1]))));
+  const cells = {};
+  rowsP.forEach(r => {
+    if (r[0].slice(0, 7) !== month || !(r[4] > 0) || shiftOrd(r[0], r[1]) > cutOrd) return;
+    const k = r[0] + "|" + r[1] + "|" + normEq(r[2]);
+    const c = cells[k] || (cells[k] = { date: r[0], sh: r[1], eq: String(r[2]).trim(), fios: [] });
+    if (isReal(r[3]) && c.fios.indexOf(String(r[3]).trim()) < 0) c.fios.push(String(r[3]).trim());
+  });
+  const E = {};
+  Object.keys(cells).forEach(k => {
+    const c = cells[k]; const e = E[c.eq] || (E[c.eq] = { eq: c.eq, planShifts: 0, idle: 0, rep: 0, res: 0, work: 0, none: 0, list: [] });
+    e.planShifts++;
+    if (worked.has(c.date + "|" + c.sh + "|" + normEq(c.eq))) return;
+    const start = shiftStartMin(c.date, c.sh);
+    if (start > nowMin) { e.planShifts--; return; }
+    const end = Math.min(start + 720, nowMin);
+    let label = null;
+    if (stl) {
+      const set = [];
+      const a = statusAt(stl, c.eq, start), b = statusAt(stl, c.eq, end); if (a) set.push(a.es); if (b) set.push(b.es);
+      ((stl[normEq(c.eq)]) || []).forEach(x => { if (x.m > start && x.m <= end) set.push(x.es); });
+      label = set.indexOf("Ремонт") >= 0 ? "Ремонт" : set.indexOf("Резерв") >= 0 ? "Резерв" : set.indexOf("В работе") >= 0 ? "В работе" : null;
+    }
+    e.idle++;
+    if (label === "Ремонт") e.rep++; else if (label === "Резерв") e.res++; else if (label === "В работе") e.work++; else e.none++;
+    e.list.push({ date: c.date, sh: c.sh, label, fios: c.fios });
+  });
+  Object.values(E).forEach(e => { const l = stl && statusAt(stl, e.eq, nowMin); e.now = l || null; e.list.sort((x, y) => shiftOrd(x.date, x.sh) - shiftOrd(y.date, y.sh)); });
+  return Object.values(E).filter(e => e.idle > 0).sort((a, b) => b.idle - a.idle || a.eq.localeCompare(b.eq));
+}
+
 function isReal(fio) { const s = (fio || "").trim(); return s !== "" && !/^вакан/i.test(s); }
 
 function buildIndex(planRows) {
@@ -514,9 +567,10 @@ function planFromSheets(drvAoa, excAoa) {
 // ==CALC-END==
 
 const CFG = { PIN: "2508", PLAN_KEY: "dispMass.plans.v1", FACT_KEY: "dispMass.fact.v1", AUTO_PLAN: "kpi-plan-2026-10.json",
-  SHEET_URL: "https://script.google.com/macros/s/AKfycbwhdMV20k8US2BXUz1Xk2XCXE9MEwpHpQaadTF9xEfzbU1--dHL-Zuj06K2qXW-rFtKGw/exec", CHK_KEY: "dispMass.chk.v1", CHK_MAX_DAYS: 100 };
+  SHEET_URL: "https://script.google.com/macros/s/AKfycbwhdMV20k8US2BXUz1Xk2XCXE9MEwpHpQaadTF9xEfzbU1--dHL-Zuj06K2qXW-rFtKGw/exec", CHK_KEY: "dispMass.chk.v1", SL_KEY: "dispMass.stl.v1", CHK_MAX_DAYS: 100 };
 let CHK = { recs: [], ok: false, at: null, err: "" }; // recs: [{id,e,n,d}]
 let TL = null, MATCH = null, NAMES = [];
+let SL = { rows: [], ok: false, at: null, err: "" }, STL = null; // журнал статусов техники
 let PLANS = {};           // { "2026-10": plan }
 let FACT = { shifts: {}, files: [] };
 let TAB = "haulD", SORT = { drivers: ["fio", 1], exc: ["fio", 1], eq: ["eq", 1], ctl: ["tons", -1] };
@@ -555,7 +609,31 @@ async function init() {
     } catch (e) {}
   }
   refreshMonths(); cutToData(true); updateSourceStates(); render();
-  loadChecklists(false);
+  loadChecklists(false); loadStatusLog(false);
+}
+
+
+// ── Журнал статусов техники ──
+function updateStlState() {
+  const el = $("stlState"); if (!el) return;
+  if (SL.err) { el.innerHTML = '<span style="color:var(--red)">' + esc(SL.err) + "</span>"; return; }
+  el.innerHTML = SL.ok ? "Записей о статусах техники (ремонт, резерв, в работе): <b>" + fmtN(SL.rows.length) + "</b>, обновлено " + (SL.at ? fmtDT(SL.at + 5 * 3600000) : "—") + "." : "История статусов техники не загружена: причины простоя не определяются.";
+}
+async function loadStatusLog(force) {
+  const c = load(CFG.SL_KEY);
+  if (c && Array.isArray(c.rows) && !SL.ok) { SL = { rows: c.rows, ok: true, at: c.at || null, err: "" }; rebuildTimeline(); updateStlState(); render(); }
+  if (!force && c && c.at && Date.now() - c.at < 10 * 60000) return;
+  const today = ymd(Date.now() + 5 * 3600000); let first = null;
+  Object.keys(FACT.shifts).forEach(k => { const d = k.split("|")[0]; if (!first || d < first) first = d; });
+  const days = Math.min(200, Math.max(35, first ? dayNum(today) - dayNum(first) + 3 : 35));
+  try {
+    const ctrl = new AbortController(), t = setTimeout(() => ctrl.abort(), 120000);
+    let v; try { const r = await fetch(CFG.SHEET_URL + "?action=getEquipmentStatusLog&days=" + days, { cache: "no-store", signal: ctrl.signal }); v = await r.json(); } finally { clearTimeout(t); }
+    if (!Array.isArray(v)) throw new Error("сервер ещё не отдаёт историю статусов (нужно обновить Код.gs)");
+    SL = { rows: v, ok: true, at: Date.now(), err: "" };
+    store(CFG.SL_KEY, { at: SL.at, rows: SL.rows });
+  } catch (e) { SL.err = (SL.ok ? "Не удалось обновить историю статусов, использованы сохранённые в браузере. " : "История статусов недоступна: ") + (e && e.message || e); }
+  rebuildTimeline(); updateStlState(); render();
 }
 
 // ── Загрузка чек-листов ──
@@ -563,6 +641,7 @@ function chkCompact(r) { return { id: String(r.recordId), e: String(r.equipmentI
 function rebuildTimeline() {
   const pool = []; Object.values(PLANS).forEach(p => { p.drivers.concat(p.excavators).forEach(r => { if (isReal(r[3])) pool.push(r[3].trim()); }); });
   const CN = makeCanon(pool);
+  STL = SL.ok ? buildStatusTimeline(SL.rows) : null;
   NAMES = CHK.ok ? Array.from(new Set(CHK.recs.map(r => String(r.n || "").trim()).filter(Boolean))) : [];
   TL = CHK.ok ? buildTimeline(CHK.recs) : null; MATCH = makeNameMatcher(pool.map(CN.canon));
 }
@@ -683,7 +762,7 @@ async function onFiles(list) {
   if (factTouched && noPlan.length) ok.push("В выгрузке есть данные за " + noPlan.sort().join(", ") + ", плана на этот месяц нет: загрузите книгу KPI.");
   refreshMonths(); if (planMonth) $("fMonth").value = planMonth;
   cutToData(true); updateSourceStates(); rebuildTimeline(); render();
-  if (factTouched) loadChecklists(true);
+  if (factTouched) { loadChecklists(true); loadStatusLog(true); }
   const prevWarn = $("warnBanner").style.display === "block" ? $("warnBanner").textContent : "";
   banner("infoBanner", ok.join(" ")); banner("warnBanner", skipped.concat(prevWarn ? [prevWarn] : []).join(" "));
 }
@@ -705,6 +784,9 @@ function render() {
   const c = cutOrd();
   const o = $("fSrc").value === "chk" && TL ? { tl: TL, match: MATCH, names: NAMES } : null;
   RES = { drivers: compute(plan, FACT.shifts, "drivers", m, c, o), exc: compute(plan, FACT.shifts, "exc", m, c, o) };
+  const nowMin = Math.floor((Date.now() + 5 * 3600000) / 60000);
+  RES.drivers.idle = idleAnalysis(plan, FACT.shifts, "drivers", m, c, STL, nowMin);
+  RES.exc.idle = idleAnalysis(plan, FACT.shifts, "exc", m, c, STL, nowMin);
   const R = RES.drivers.tot, X = RES.exc.tot;
   const p = pct(R.fact, R.plan);
   const ks = Object.keys(FACT.shifts).filter(k => k.slice(0, 7) === m);
@@ -815,8 +897,15 @@ function renderTable() {
     [["drivers", "Самосвалы без работника в плане"], ["exc", "Экскаваторы без работника в плане"]].forEach(([kd, title]) => {
       const rows = sortRows(RES[kd].unassigned.map(u => Object.assign({}, u)), "ctl");
       h += "<h3 style=\"font-size:14px\">" + title + "</h3>";
-      h += rows.length ? '<table class="mini"><thead><tr><th>Техника</th><th>Причина</th><th class="num">Рейсов</th><th class="num">Масса, т</th></tr></thead><tbody>' +
-        rows.map(u => "<tr><td>" + esc(u.eq) + "</td><td>" + esc(u.why) + '</td><td class="num">' + fmtN(u.trips) + '</td><td class="num">' + fmtT(u.tons) + "</td></tr>").join("") + "</tbody></table>" : '<div class="sub" style="margin-bottom:14px">Нет.</div>';
+      h += rows.length ? '<table class="mini"><thead><tr><th>Техника</th><th>Причина</th><th class="num">Рейсов</th><th class="num">Масса, т</th><th>Статус сейчас</th></tr></thead><tbody>' +
+        rows.map(u => "<tr><td>" + esc(u.eq) + "</td><td>" + esc(u.why) + '</td><td class="num">' + fmtN(u.trips) + '</td><td class="num">' + fmtT(u.tons) + "</td><td>" + statusNowHtml(STL && statusAt(STL, u.eq, Math.floor((Date.now() + 5 * 3600000) / 60000))) + "</td></tr>").join("") + "</tbody></table>" : '<div class="sub" style="margin-bottom:14px">Нет.</div>';
+    });
+    [["drivers", "Простой самосвалов: смены по плану без рейсов"], ["exc", "Простой экскаваторов: смены по плану без рейсов"]].forEach(([kd, title]) => {
+      const rows = RES[kd].idle || [];
+      h += '<h3 style="font-size:14px">' + title + "</h3>";
+      h += rows.length ? '<table class="mini"><thead><tr><th>Техника</th><th class="num">Смен в плане</th><th class="num">Без рейсов</th><th class="num">Ремонт</th><th class="num">Резерв</th><th class="num">В работе, рейсов нет</th><th class="num">Статус не отмечен</th><th>Статус сейчас</th></tr></thead><tbody>' +
+        rows.map(e => '<tr class="click" onclick="openIdle(\'' + kd + "','" + esc(e.eq) + '\')"><td><b>' + esc(e.eq) + '</b></td><td class="num">' + e.planShifts + '</td><td class="num">' + e.idle + '</td><td class="num">' + (e.rep || "") + '</td><td class="num">' + (e.res || "") + '</td><td class="num">' + (e.work || "") + '</td><td class="num">' + (e.none || "") + "</td><td>" + statusNowHtml(e.now) + "</td></tr>").join("") + "</tbody></table>" +
+        '<div class="sub" style="margin-bottom:14px">' + (STL ? "Статус в смене определяется по журналу: «Ремонт» или «Резерв» в начале, конце или в течение смены." : "История статусов не загружена: причины простоя неизвестны.") + " Нажмите на строку, чтобы увидеть смены и закреплённых по плану работников.</div>" : '<div class="sub" style="margin-bottom:14px">Нет.</div>';
     });
     [["drivers", "самосвалов"], ["exc", "экскаваторов"]].forEach(([kd, t]) => {
       const nm = Object.keys(RES[kd].unmatched || {}).sort((a, b) => RES[kd].unmatched[b] - RES[kd].unmatched[a]);
@@ -827,6 +916,15 @@ function renderTable() {
     h += '<div class="sub">Рейсы с подозрительной длительностью остаются в факте; показатель выводится для проверки данных диспетчером.</div></div>';
     host.innerHTML = h;
   }
+}
+
+function statusNowHtml(r) { return r ? esc(r.es) + ' <span class="sub">с ' + fmtDT(r.m * 60000) + "</span>" : '<span class="sub">нет данных</span>'; }
+function openIdle(kind, eq) {
+  const e = (RES[kind].idle || []).find(x => x.eq === eq); if (!e) return;
+  let h = '<div class="modal-head"><div><h2>' + esc(eq) + ' — смены без рейсов</h2><div class="sub">Смен в плане ' + e.planShifts + ", без рейсов " + e.idle + '</div></div><button class="btn ghost" onclick="closeModal()">Закрыть</button></div>';
+  h += '<table class="mini"><thead><tr><th>Сутки</th><th>Смена</th><th>Статус техники</th><th>Закреплены по плану</th></tr></thead><tbody>' +
+    e.list.map(x => "<tr><td>" + fmtD(x.date) + "</td><td>" + (x.sh === SH_N ? "Ночь" : "День") + "</td><td>" + (x.label ? esc(x.label) : '<span class="sub">не отмечен</span>') + "</td><td>" + (x.fios.length ? x.fios.map(esc).join(", ") : '<span class="sub">вакансия</span>') + "</td></tr>").join("") + "</tbody></table>";
+  $("modalBox").innerHTML = h; $("modalBg").style.display = "flex";
 }
 function ctlRow(l, a, b) { return "<tr><td>" + l + '</td><td class="num">' + fmtT(a) + '</td><td class="num">' + fmtT(b) + "</td></tr>"; }
 
