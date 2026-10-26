@@ -309,7 +309,8 @@ function chkMinutes(v) {
   return Math.floor((t + TZ_H * 3600000) / 60000);
 }
 function normEq(s) { return String(s == null ? "" : s).toUpperCase().replace(/[^A-Z0-9А-Я]/g, ""); }
-function normName(s) { return String(s || "").toLowerCase().replace(/ё/g, "е").replace(/[.,]/g, " ").replace(/\s+/g, " ").trim(); }
+const KZ_MAP = { "ә": "а", "ғ": "г", "қ": "к", "ң": "н", "ө": "о", "ұ": "у", "ү": "у", "һ": "х", "і": "и" };
+function normName(s) { return String(s || "").toLowerCase().replace(/[әғқңөұүһі]/g, c => KZ_MAP[c]).replace(/ё/g, "е").replace(/[.,]/g, " ").replace(/\s+/g, " ").trim(); }
 // Начало смены в минутах (в той же шкале, что и рейсы): день — 07:00 суток D, ночь — 19:00 дня D-1
 function shiftStartMin(date, sh) {
   const d0 = Date.parse(date + "T00:00:00Z") / 60000;
@@ -399,7 +400,11 @@ function buildIndex(planRows) {
 // kind: "drivers" | "exc"; month "YYYY-MM"; cutOrd — включительно
 function compute(plan, factShifts, kind, month, cutOrd, opts) {
   const tl = opts && opts.tl, matchName = opts && opts.match;
-  const CN = makeCanon(plan.drivers.concat(plan.excavators).map(r => r[3]).filter(isReal));
+  const planNames = plan.drivers.concat(plan.excavators).map(r => r[3]).filter(isReal);
+  // имена из чек-листов тоже участвуют в объединении: в них встречаются опечатки («Майдобек» вместо «Майдабек»),
+  // казахские буквы и записи с отчеством, когда в плане его нет
+  const CN = makeCanon(planNames.concat((opts && opts.names) || []));
+  const planSet = new Set(planNames.map(x => CN.canon(x)));
   const rowsP = (kind === "drivers" ? plan.drivers : plan.excavators).map(r => isReal(r[3]) ? [r[0], r[1], r[2], CN.canon(r[3]), r[4], r[5]] : r);
   const idx = buildIndex(rowsP);
   const W = {}; const E = {}; const U = {}; const NM = {};
@@ -459,7 +464,7 @@ function compute(plan, factShifts, kind, month, cutOrd, opts) {
         const eq = kind === "drivers" ? t[1] : t[2];
         const who = lastInspector(tl, eq, t[0], start, 60);
         let fio = null;
-        if (who) { fio = CN.canon((matchName && matchName(who.n)) || who.n.trim()); if (matchName && !matchName(who.n)) NM[who.n.trim()] = (NM[who.n.trim()] || 0) + 1; }
+        if (who) { fio = CN.canon((matchName && matchName(who.n)) || who.n.trim()); if (!planSet.has(fio)) NM[who.n.trim()] = (NM[who.n.trim()] || 0) + 1; }
         const k = eq + "|" + t[3] + "|" + (fio || ""); const a = agg[k] || (agg[k] = { eq, man: t[3], fio, trips: 0, tons: 0 });
         a.trips++; a.tons += t[4];
       });
@@ -511,7 +516,7 @@ function planFromSheets(drvAoa, excAoa) {
 const CFG = { PIN: "2508", PLAN_KEY: "dispMass.plans.v1", FACT_KEY: "dispMass.fact.v1", AUTO_PLAN: "kpi-plan-2026-10.json",
   SHEET_URL: "https://script.google.com/macros/s/AKfycbwhdMV20k8US2BXUz1Xk2XCXE9MEwpHpQaadTF9xEfzbU1--dHL-Zuj06K2qXW-rFtKGw/exec", CHK_KEY: "dispMass.chk.v1", CHK_MAX_DAYS: 100 };
 let CHK = { recs: [], ok: false, at: null, err: "" }; // recs: [{id,e,n,d}]
-let TL = null, MATCH = null;
+let TL = null, MATCH = null, NAMES = [];
 let PLANS = {};           // { "2026-10": plan }
 let FACT = { shifts: {}, files: [] };
 let TAB = "haulD", SORT = { drivers: ["fio", 1], exc: ["fio", 1], eq: ["eq", 1], ctl: ["tons", -1] };
@@ -558,6 +563,7 @@ function chkCompact(r) { return { id: String(r.recordId), e: String(r.equipmentI
 function rebuildTimeline() {
   const pool = []; Object.values(PLANS).forEach(p => { p.drivers.concat(p.excavators).forEach(r => { if (isReal(r[3])) pool.push(r[3].trim()); }); });
   const CN = makeCanon(pool);
+  NAMES = CHK.ok ? Array.from(new Set(CHK.recs.map(r => String(r.n || "").trim()).filter(Boolean))) : [];
   TL = CHK.ok ? buildTimeline(CHK.recs) : null; MATCH = makeNameMatcher(pool.map(CN.canon));
 }
 function updateChkState() {
@@ -697,7 +703,7 @@ function render() {
   const m = $("fMonth").value, plan = PLANS[m];
   if (!plan) { $("stats").innerHTML = ""; $("tableHost").innerHTML = '<div class="empty">Загрузите план месяца.</div>'; RES = null; return; }
   const c = cutOrd();
-  const o = $("fSrc").value === "chk" && TL ? { tl: TL, match: MATCH } : null;
+  const o = $("fSrc").value === "chk" && TL ? { tl: TL, match: MATCH, names: NAMES } : null;
   RES = { drivers: compute(plan, FACT.shifts, "drivers", m, c, o), exc: compute(plan, FACT.shifts, "exc", m, c, o) };
   const R = RES.drivers.tot, X = RES.exc.tot;
   const p = pct(R.fact, R.plan);
