@@ -139,6 +139,7 @@ table.mini td { padding:6px 8px; border-bottom:1px solid var(--border); }
         <h3>2. Выгрузка Hexagon (рейсы и статусы техники)</h3>
         <div class="src-state" id="factState">Выгрузка не загружена.</div>
         <div class="src-state" id="statState"></div>
+        <div class="src-state" id="saState"></div>
         <label class="btn gold filebtn">Загрузить выгрузку Hexagon
           <input type="file" id="factFile" accept=".xlsx,.xlsm,.xls,.json,.csv,.txt" multiple onchange="onFiles(this.files); this.value=''"></label>
         <button class="btn ghost" onclick="clearFact()">Очистить факт и статусы</button>
@@ -695,7 +696,7 @@ function planFromSheets(drvAoa, excAoa) {
 // ==CALC-END==
 
 const CFG = { PIN: "2508", PLAN_KEY: "dispMass.plans.v1", FACT_KEY: "dispMass.fact.v1", STAT_KEY: "dispMass.stat.v1", AUTO_PLAN: "kpi-plan-2026-10.json",
-  SHEET_URL: "https://script.google.com/macros/s/AKfycbwhdMV20k8US2BXUz1Xk2XCXE9MEwpHpQaadTF9xEfzbU1--dHL-Zuj06K2qXW-rFtKGw/exec", CHK_KEY: "dispMass.chk.v1", SL_KEY: "dispMass.stl.v1", CHK_MAX_DAYS: 100 };
+  SHEET_URL: "https://script.google.com/macros/s/AKfycbwhdMV20k8US2BXUz1Xk2XCXE9MEwpHpQaadTF9xEfzbU1--dHL-Zuj06K2qXW-rFtKGw/exec", CHK_KEY: "dispMass.chk.v1", SA_KEY: "dispMass.sa.v1", SL_KEY: "dispMass.stl.v1", CHK_MAX_DAYS: 100 };
 let CHK = { recs: [], ok: false, at: null, err: "" }; // recs: [{id,e,n,d}]
 let TL = null, MATCH = null, NAMES = [];
 let SL = { rows: [], ok: false, at: null, err: "" }, STL = null; // журнал статусов техники
@@ -739,9 +740,75 @@ async function init() {
     } catch (e) {}
   }
   refreshMonths(); cutToData(true); updateSourceStates(); render();
-  loadChecklists(false); loadStatusLog(false);
+  loadChecklists(false); loadStatusLog(false); loadAssignments(false);
 }
 
+
+// ── Наряд мастера: где работник и почему нет вывозки ──
+// Данные берутся с сервера (действие getShiftAssignments) и активные вахты участков (getActiveVahtas): те же, что в панели мастера.
+let SA = { rows: [], act: {}, ok: false, at: null, err: "" }, SAIDX = null;
+function buildSAIdx() {
+  const byFull = {}, byShort = {};
+  SA.rows.forEach(a => {
+    const n = normName(a.n); if (!n) return; (byFull[n] || (byFull[n] = [])).push(a);
+    const p = n.split(" "); const k = p[0] + " " + (p[1] || ""); (byShort[k] || (byShort[k] = [])).push(a);
+  });
+  SAIDX = { byFull, byShort };
+}
+function saFor(fio) {
+  if (!SAIDX) return [];
+  const n = normName(fio); if (SAIDX.byFull[n]) return SAIDX.byFull[n];
+  const p = n.split(" "); const l = SAIDX.byShort[p[0] + " " + (p[1] || "")] || [];
+  return new Set(l.map(a => a.id)).size === 1 ? l : [];
+}
+const SA_ABSENT = ["Больничный", "Отпуск б/с", "Прогул", "Командировка"];
+// Разбор по данным наряда: { lines: [...], short: "...", tone }
+function noteFor(fio) {
+  if (!SA.ok) return null;
+  const rows = saFor(fio);
+  if (!rows.length) return { lines: ["В наряде мастера не найден (проверьте написание ФИО или закрепление)"], short: "в наряде мастера не найден", tone: "gray" };
+  const site = rows[0].site, vahta = rows[0].v, act = SA.act[site]; const off = !!(act && vahta && act !== vahta);
+  const lines = [], sh = []; let tone = "green";
+  lines.push((vahta || "Вахта не указана") + ": " + (off ? "МЕЖВАХТА (на участке " + site + " работает " + act + ")" : (act ? "на вахте" : "активная вахта не задана")));
+  if (off) { sh.push("межвахта"); tone = "gray"; }
+  rows.forEach(a => {
+    let t = "Закреплён: " + (a.e || "—") + (a.m ? " (" + (a.m === 1 ? "день" : "ночь") + ")" : "");
+    if (a.es) t += ", техника: " + a.es;
+    if (a.ws) t += "; статус работника: " + a.ws;
+    if (a.rn) t += "; заметка мастера: " + a.rn;
+    lines.push(t);
+    if (SA_ABSENT.indexOf(a.ws) >= 0) { sh.push(a.ws); tone = "red"; }
+    else if (a.rn) { sh.push("→ " + a.rn + (a.e ? " (закреплён " + a.e + (a.es === "Ремонт" ? ", в ремонте" : "") + ")" : "")); if (tone === "green") tone = "yellow"; }
+    else if (a.es === "Ремонт") { sh.push("техника " + (a.e || "") + " в ремонте"); if (tone === "green") tone = "yellow"; }
+    else if (a.ws && a.ws !== "Вакансия") sh.push(a.ws);
+  });
+  return { lines, short: sh.length ? sh.join("; ") : (off ? "межвахта" : "на вахте"), tone };
+}
+function noteColor(t) { return t === "red" ? "var(--red)" : t === "yellow" ? "var(--yellow)" : t === "gray" ? "var(--gray)" : "var(--green)"; }
+// Комментарий под ФИО, если вывозки нет или она меньше 10 % плана
+function lowFact(w) { return w.plan > 0 && (w.fact <= 0 || w.fact / w.plan < 0.1); }
+function noteSub(w) { if (!lowFact(w)) return ""; const n = noteFor(w.fio); return n ? '<div class="sub" style="color:' + noteColor(n.tone) + '">' + esc(n.short) + "</div>" : ""; }
+function updateSaState() {
+  const el = $("saState"); if (!el) return;
+  el.innerHTML = SA.err ? '<span style="color:var(--red)">' + esc(SA.err) + "</span>" : (SA.ok ? "Наряд мастера: записей " + fmtN(SA.rows.length) + (SA.at ? ", обновлён " + fmtDT(SA.at + 5 * 3600000) : "") + "." : "Наряд мастера загружается…");
+}
+async function loadAssignments(force) {
+  const c = load(CFG.SA_KEY);
+  if (c && Array.isArray(c.rows) && !SA.ok) { SA = { rows: c.rows, act: c.act || {}, ok: true, at: c.at || null, err: "" }; buildSAIdx(); updateSaState(); if (RES) render(); }
+  if (!force && c && c.at && Date.now() - c.at < 10 * 60000) return;
+  try {
+    const ctrl = new AbortController(), t = setTimeout(() => ctrl.abort(), 90000);
+    let v, act = {}; try {
+      const r = await fetch(CFG.SHEET_URL + "?action=getShiftAssignments", { cache: "no-store", signal: ctrl.signal }); v = await r.json();
+      try { const r2 = await fetch(CFG.SHEET_URL + "?action=getActiveVahtas", { cache: "no-store", signal: ctrl.signal }); const a2 = await r2.json(); if (a2 && typeof a2 === "object" && !Array.isArray(a2)) act = a2; } catch (e) {}
+    } finally { clearTimeout(t); }
+    if (!Array.isArray(v)) throw new Error("сервер не отдал наряд");
+    const rows = v.filter(a => a && a.empName && String(a.empId || "").trim() !== "").map(a => ({ id: String(a.empId), n: String(a.empName), v: String(a.vahta || ""), site: String(a.site || "").trim(), e: String(a.equipmentId || ""), es: String(a.equipmentStatus || ""), ws: String(a.workStatus || ""), rn: String(a.reassignNote || ""), m: +a.smena || 0 }));
+    SA = { rows, act, ok: true, at: Date.now(), err: "" };
+    store(CFG.SA_KEY, { at: SA.at, rows: SA.rows, act: SA.act });
+  } catch (e) { SA.err = (SA.ok ? "Не удалось обновить наряд мастера, использованы сохранённые в браузере. " : "Наряд мастера недоступен: комментарии не показываются. ") + e.message; }
+  buildSAIdx(); updateSaState(); if (RES) render();
+}
 
 // ── Журнал статусов техники ──
 function updateStlState() {
@@ -918,7 +985,7 @@ async function onFiles(list) {
   if (factTouched && noPlan.length) ok.push("В выгрузке есть данные за " + noPlan.sort().join(", ") + ", плана на этот месяц нет: загрузите книгу KPI.");
   refreshMonths(); if (planMonth) $("fMonth").value = planMonth;
   cutToData(true); updateSourceStates(); rebuildTimeline(); render();
-  if (factTouched) { loadChecklists(true); loadStatusLog(true); }
+  if (factTouched) { loadChecklists(true); loadStatusLog(true); loadAssignments(true); }
   const prevWarn = $("warnBanner").style.display === "block" ? $("warnBanner").textContent : "";
   banner("infoBanner", ok.join(" ")); banner("warnBanner", skipped.concat(prevWarn ? [prevWarn] : []).join(" "));
 }
@@ -999,7 +1066,7 @@ function haulRows(kind) {
       e.tons += c.fact; e.trips += c.trips; e.shifts++; e.dn += c.dn; e.sb += c.sb;
     });
     const items = Object.values(m).sort((a, b) => b.tons - a.tons);
-    const rem = w.monthPlan - w.fact; return { fio: w.fio, monthPlan: w.monthPlan, rem, cut: w.planRaw - w.plan, dnH: w.dnH, sbH: w.sbH, shiftsLeft: w.shiftsLeft, need: w.shiftsLeft > 0 ? Math.max(0, rem) / w.shiftsLeft : null, items, tons: items.reduce((x, e) => x + e.tons, 0), trips: items.reduce((x, e) => x + e.trips, 0), shifts: Object.values(w.cells).filter(c => c.fact > 0 || c.trips > 0).length };
+    const rem = w.monthPlan - w.fact; return { fio: w.fio, plan: w.plan, fact: w.fact, monthPlan: w.monthPlan, rem, cut: w.planRaw - w.plan, dnH: w.dnH, sbH: w.sbH, shiftsLeft: w.shiftsLeft, need: w.shiftsLeft > 0 ? Math.max(0, rem) / w.shiftsLeft : null, items, tons: items.reduce((x, e) => x + e.tons, 0), trips: items.reduce((x, e) => x + e.trips, 0), shifts: Object.values(w.cells).filter(c => c.fact > 0 || c.trips > 0).length };
   }).filter(r => r.tons > 0 && (!q || r.fio.toLowerCase().indexOf(q) >= 0 || r.items.some(e => e.eq.toLowerCase().indexOf(q) >= 0)))
     .sort((a, b) => a.fio.localeCompare(b.fio, "ru"));
 }
@@ -1021,7 +1088,7 @@ function renderHaul(kind) {
   rows.forEach(r => {
     st += r.tons; sr += r.trips; sm += r.monthPlan; srem += Math.max(0, r.rem); sdn += r.dnH; ssb += r.sbH; scut += r.cut;
     const multi = r.items.length > 1;
-    h += '<tr class="click" onclick="openWorker(\'' + (kind === "drivers" ? "drivers" : "exc") + "'," + JSON.stringify(r.fio).replace(/"/g, "&quot;") + ')"><td><b>' + esc(r.fio) + "</b></td><td>" + (multi ? '<span class="sub">техники: ' + r.items.length + "</span>" : esc(r.items[0].eq) + curState(r.items[0].eq)) +
+    h += '<tr class="click" onclick="openWorker(\'' + (kind === "drivers" ? "drivers" : "exc") + "'," + JSON.stringify(r.fio).replace(/"/g, "&quot;") + ')"><td><b>' + esc(r.fio) + "</b>" + noteSub({ fio: r.fio, plan: r.plan, fact: r.fact }) + "</td><td>" + (multi ? '<span class="sub">техники: ' + r.items.length + "</span>" : esc(r.items[0].eq) + curState(r.items[0].eq)) +
       '</td><td class="num">' + r.shifts + '</td><td class="num">' + fmtN(r.trips) + '</td><td class="num"><b>' + fmtT(r.tons) + '</b></td><td class="num">' + avg(r.tons, r.trips) + '</td>' +
       (hs ? '<td class="num">' + hrs1(r.dnH) + '</td><td class="num">' + hrs1(r.sbH) + '</td><td class="num">' + (r.cut > 0.5 ? fmtT(r.cut) : "") + "</td>" : "") +
       '<td class="num">' + fmtT(r.monthPlan) + '</td><td class="num">' + (r.rem > 0 ? "<b>" + fmtT(r.rem) + "</b>" : (r.monthPlan > 0 ? '<span class="badge b-green">выполнен +' + fmtT(-r.rem) + "</span>" : "")) + '</td><td class="num">' + (r.shiftsLeft || "") + '</td><td class="num">' + (r.need === null ? "" : fmtT(r.need)) + "</td></tr>";
@@ -1030,7 +1097,19 @@ function renderHaul(kind) {
   h += '</tbody><tfoot><tr><td>Итого по операторам</td><td></td><td></td><td class="num">' + fmtN(sr) + '</td><td class="num">' + fmtT(st) + '</td><td></td>' + (hs ? '<td class="num">' + hrs1(sdn) + '</td><td class="num">' + hrs1(ssb) + '</td><td class="num">' + (scut > 0.5 ? fmtT(scut) : "") + "</td>" : "") + '<td class="num">' + fmtT(sm) + '</td><td class="num">' + fmtT(srem) + "</td><td></td><td></td></tr>" +
     '<tr><td>Не закреплено за оператором</td><td class="sub">вакансии и техника вне плана смены</td><td></td><td class="num">' + fmtN(T.unTr) + '</td><td class="num">' + fmtT(T.unT) + "</td>" + blank(5 + ex) + "</tr>" +
     '<tr><td>Всего по выгрузке за период</td><td></td><td></td><td class="num">' + fmtN(T.trips) + '</td><td class="num">' + fmtT(T.fact) + '</td><td></td>' + blank(ex) + '<td class="num">' + fmtT(T.monthAll) + '</td><td class="num">' + fmtT(Math.max(0, T.monthAll - T.fact)) + "</td><td></td><td></td></tr></tfoot></table>";
+  h += idleWorkersHtml(kind);
   return rows.length ? h : '<div class="empty">Нет данных. Загрузите план и выгрузку Hexagon.</div>';
+}
+// Работники с планом, но без вывозки за период: с комментарием из наряда мастера
+function idleWorkersHtml(kind) {
+  const q = $("fSearch").value.trim().toLowerCase();
+  const list = RES[kind].workers.filter(w => w.plan > 0 && w.fact <= 0 && (!q || w.fio.toLowerCase().indexOf(q) >= 0)).sort((a, b) => b.plan - a.plan);
+  if (!list.length) return "";
+  let h = '<h3 style="font-size:14px;margin:18px 0 6px">Без вывозки за период (план есть, рейсов нет): ' + list.length + "</h3>" +
+    '<table class="kpi"><thead><tr><th>Фамилия, имя, отчество</th><th class="num">План за период, т</th><th class="num">План месяца, т</th><th>Комментарий из наряда мастера</th></tr></thead><tbody>';
+  list.forEach(w => { const n = noteFor(w.fio);
+    h += '<tr class="click" onclick="openWorker(\'' + kind + "'," + JSON.stringify(w.fio).replace(/"/g, "&quot;") + ')"><td><b>' + esc(w.fio) + '</b></td><td class="num">' + fmtT(w.plan) + '</td><td class="num">' + fmtT(w.monthPlan) + "</td><td>" + (n ? '<span style="color:' + noteColor(n.tone) + '">' + esc(n.short) + "</span>" : '<span class="sub">наряд не загружен</span>') + "</td></tr>"; });
+  return h + "</tbody></table>";
 }
 
 // Сводка статусов техники до среза: часы по единицам и причины простоев
@@ -1078,7 +1157,7 @@ function renderTable() {
       th("План месяца, т", "monthPlan", TAB, 1) + th("Осталось до плана, т", "rem", TAB, 1) + th("Смен осталось", "shiftsLeft", TAB, 1) + th("Нужно за смену, т", "need", TAB, 1) + "</tr></thead><tbody>";
     let sp = 0, sf = 0, sm = 0, sr = 0;
     rows.forEach(w => { sp += w.plan; sf += w.fact; sm += w.monthPlan; sr += Math.max(0, w.rem);
-      h += '<tr class="click" onclick="openWorker(\'' + TAB + "'," + JSON.stringify(w.fio).replace(/"/g, "&quot;") + ')"><td><b>' + esc(w.fio) + "</b>" + (w.shared ? '<div class="sub">рейсы частично разделены</div>' : "") + "</td><td>" + esc(w.eqs.slice(0, 4).join(", ")) + (w.eqs.length > 4 ? " +" + (w.eqs.length - 4) : "") +
+      h += '<tr class="click" onclick="openWorker(\'' + TAB + "'," + JSON.stringify(w.fio).replace(/"/g, "&quot;") + ')"><td><b>' + esc(w.fio) + "</b>" + (w.shared ? '<div class="sub">рейсы частично разделены</div>' : "") + noteSub(w) + "</td><td>" + esc(w.eqs.slice(0, 4).join(", ")) + (w.eqs.length > 4 ? " +" + (w.eqs.length - 4) : "") +
         '</td><td class="num">' + w.shifts + '</td><td class="num">' + fmtT(w.plan) + '</td><td class="num">' + fmtT(w.fact) + '</td><td class="num">' + (w.diff >= 0 ? "+" : "") + fmtT(w.diff) +
         '</td><td class="num">' + fmtN(w.trips) + '</td><td class="num">' + (w.manT ? fmtT(w.manT) : "") + "</td><td>" + kpiBadge(w.pct) + "</td>" + (RES[TAB].tot.hasStat ? '<td class="num">' + hrs1(w.dnH) + '</td><td class="num">' + (w.cut > 0.5 ? fmtT(w.cut) : "") + "</td>" : "") + '<td class="num">' + fmtT(w.monthPlan) + '</td><td class="num">' + (w.rem > 0 ? fmtT(w.rem) : (w.monthPlan > 0 ? '<span class="badge b-green">выполнен +' + fmtT(-w.rem) + "</span>" : "")) +
         '</td><td class="num">' + (w.shiftsLeft || "") + '</td><td class="num">' + (w.need === null ? "" : fmtT(w.need) + (w.perShift ? '<div class="sub">план за смену ' + fmtT(w.perShift) + "</div>" : "")) + "</td></tr>"; });
@@ -1141,10 +1220,14 @@ function ctlRow(l, a, b) { return "<tr><td>" + l + '</td><td class="num">' + fmt
 function openWorker(kind, fio) {
   const w = RES[kind].workers.find(x => x.fio === fio); if (!w) return;
   const cells = Object.values(w.cells).sort((a, b) => shiftOrd(a.date, a.sh) - shiftOrd(b.date, b.sh));
-  let h = '<div class="modal-head"><div><h2>' + esc(fio) + '</h2><div class="sub">План ' + fmtT(w.plan) + " т, факт " + fmtT(w.fact) + " т" + (w.plan ? ", " + (w.fact / w.plan * 100).toFixed(1) + " %" : "") + (w.planRaw - w.plan > 0.5 ? "; по книге " + fmtT(w.planRaw) + " т, снято за ремонт техники " + fmtT(w.planRaw - w.plan) + " т (" + hrs1(w.dnH) + " ч)" : "") + '</div><div class="sub">План месяца ' + fmtT(w.monthPlan) + " т, осталось " + fmtT(Math.max(0, w.monthPlan - w.fact)) + " т" + (w.shiftsLeft ? ", смен осталось " + w.shiftsLeft + ", нужно за смену " + fmtT(Math.max(0, w.monthPlan - w.fact) / w.shiftsLeft) + " т" : "") + '</div></div><button class="btn ghost" onclick="closeModal()">Закрыть</button></div>';
+  let h = '<div class="modal-head"><div><h2>' + esc(fio) + '</h2>' + noteFullHtml(fio) + '<div class="sub">План ' + fmtT(w.plan) + " т, факт " + fmtT(w.fact) + " т" + (w.plan ? ", " + (w.fact / w.plan * 100).toFixed(1) + " %" : "") + (w.planRaw - w.plan > 0.5 ? "; по книге " + fmtT(w.planRaw) + " т, снято за ремонт техники " + fmtT(w.planRaw - w.plan) + " т (" + hrs1(w.dnH) + " ч)" : "") + '</div><div class="sub">План месяца ' + fmtT(w.monthPlan) + " т, осталось " + fmtT(Math.max(0, w.monthPlan - w.fact)) + " т" + (w.shiftsLeft ? ", смен осталось " + w.shiftsLeft + ", нужно за смену " + fmtT(Math.max(0, w.monthPlan - w.fact) / w.shiftsLeft) + " т" : "") + '</div></div><button class="btn ghost" onclick="closeModal()">Закрыть</button></div>';
   h += '<table class="mini"><thead><tr><th>Сутки</th><th>Смена</th><th>Техника</th><th class="num">План, т</th><th class="num">Ремонт, ч</th><th class="num">Факт, т</th><th class="num">Рейсов</th><th>Факт / план</th><th>Оператор определён</th></tr></thead><tbody>' +
     cells.map(c => "<tr><td>" + fmtD(c.date) + "</td><td>" + (c.sh === SH_N ? "Ночь" : "День") + "</td><td>" + esc(c.eq) + '</td><td class="num">' + fmtT(c.plan) + (c.planRaw - c.plan > 0.5 ? '<div class="sub">по книге ' + fmtT(c.planRaw) + "</div>" : "") + '</td><td class="num">' + hrs1(c.dn) + '</td><td class="num">' + fmtT(c.fact) + '</td><td class="num">' + (c.trips ? (Math.abs(c.trips - Math.round(c.trips)) < 0.01 ? fmtN(c.trips) : c.trips.toFixed(1)) : "") + "</td><td>" + (c.plan ? (c.fact / c.plan * 100).toFixed(0) + " %" : "") + "</td><td>" + (c.chk && c.pl ? "чек-лист и план" : c.chk ? "по чек-листу" : c.pl ? "по плану" : "") + "</td></tr>").join("") + "</tbody></table>";
   $("modalBox").innerHTML = h; $("modalBg").style.display = "flex";
+}
+function noteFullHtml(fio) {
+  const n = noteFor(fio); if (!n) return "";
+  return '<div style="border-left:4px solid ' + noteColor(n.tone) + ';background:var(--light);border-radius:6px;padding:6px 10px;margin:6px 0;font-size:12px"><b>Где сейчас: ' + esc(n.short) + "</b>" + n.lines.map(l => "<div>" + esc(l) + "</div>").join("") + "</div>";
 }
 function closeModal() { $("modalBg").style.display = "none"; }
 
@@ -1158,8 +1241,8 @@ function exportXlsx() {
   });
   [["Водители", "drivers"], ["Машинисты", "exc"]].forEach(([nm, kd]) => {
     const rows = RES[kd].workers.slice().sort((a, b) => a.fio.localeCompare(b.fio, "ru"));
-    const data = [["ФИО", "Техника", "Смен по плану", "План, т", "Факт, т", "Отклонение, т", "Рейсов", "Вручную, т", "Факт/план, %", "Ремонт техники, ч", "Снято из плана, т", "План месяца, т", "Осталось до плана, т", "Смен осталось", "Нужно за смену, т"]]
-      .concat(rows.map(w => [w.fio, Object.keys(w.eq).join(", "), w.shifts, Math.round(w.plan), Math.round(w.fact), Math.round(w.fact - w.plan), Math.round(w.trips), Math.round(w.manT), w.plan ? +(w.fact / w.plan * 100).toFixed(1) : null, +w.dnH.toFixed(1), Math.round(w.planRaw - w.plan), Math.round(w.monthPlan), Math.round(Math.max(0, w.monthPlan - w.fact)), w.shiftsLeft, w.shiftsLeft ? Math.round(Math.max(0, w.monthPlan - w.fact) / w.shiftsLeft) : null]));
+    const data = [["ФИО", "Техника", "Смен по плану", "План, т", "Факт, т", "Отклонение, т", "Рейсов", "Вручную, т", "Факт/план, %", "Ремонт техники, ч", "Снято из плана, т", "План месяца, т", "Осталось до плана, т", "Смен осталось", "Нужно за смену, т", "Комментарий (наряд мастера)"]]
+      .concat(rows.map(w => [w.fio, Object.keys(w.eq).join(", "), w.shifts, Math.round(w.plan), Math.round(w.fact), Math.round(w.fact - w.plan), Math.round(w.trips), Math.round(w.manT), w.plan ? +(w.fact / w.plan * 100).toFixed(1) : null, +w.dnH.toFixed(1), Math.round(w.planRaw - w.plan), Math.round(w.monthPlan), Math.round(Math.max(0, w.monthPlan - w.fact)), w.shiftsLeft, w.shiftsLeft ? Math.round(Math.max(0, w.monthPlan - w.fact) / w.shiftsLeft) : null, lowFact(w) && noteFor(w.fio) ? noteFor(w.fio).short : ""]));
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(data), nm);
   });
   const eqd = [["Техника", "Тип", "План, т", "Факт, т", "Рейсов", "Вручную, рейсов"]];

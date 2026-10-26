@@ -191,7 +191,7 @@ td { padding:8px; border-bottom:1px solid var(--border); }
     <!-- ══ РАБОТНИКИ ══ -->
     <div id="screenPersonnel" class="screen">
       <div class="panel">
-        <input type="text" id="personnelSearch" placeholder="🔍 Поиск по имени..." oninput="renderPersonnelList()">
+        <input type="text" id="personnelSearch" placeholder="🔍 Поиск по имени и фамилии (по всему участку)..." oninput="renderPersonnelList()">
       </div>
       <div class="panel">
         <div id="personnelList"></div>
@@ -1519,6 +1519,31 @@ function togglePersonnelGroup(tier) {
   renderPersonnelList();
 }
 
+// «Где сейчас» — по наряду (DATA.shiftAssignments) и активной вахте участка (ACTIVE_VAHTAS).
+// Данные загружены по текущему участку, поэтому сотрудники другого участка здесь не находятся.
+function whereNowInfo(e) {
+  const id = String(e.id).trim();
+  const rows = (DATA.shiftAssignments||[]).filter(a => String(a.empId||"").trim() === id);
+  if (!rows.length) return { lines: ["Не закреплён за техникой в наряде"], short: "не в наряде", tone: "gray" };
+  const site = String(rows[0].site || e.site || CURRENT_SITE).trim(), vahta = String(rows[0].vahta||"").trim(), act = ACTIVE_VAHTAS[site];
+  const off = !!(act && vahta && act !== vahta);
+  const lines = [], sh = []; let tone = "green";
+  lines.push(`${vahta || "Вахта не указана"}: ` + (off ? `МЕЖВАХТА (на участке ${site} работает ${act})` : (act ? "на вахте" : "активная вахта участка не задана")));
+  if (off) { sh.push("межвахта"); tone = "gray"; }
+  rows.forEach(a => {
+    let t = "Закреплён: " + (a.equipmentId || a.position || "—") + (SMENA_LABEL && SMENA_LABEL[a.smena] ? " (" + SMENA_LABEL[a.smena] + ")" : "");
+    if (a.equipmentStatus) t += ", техника: " + a.equipmentStatus;
+    if (a.workStatus) t += "; статус работника: " + a.workStatus;
+    if (a.reassignNote) t += "; заметка мастера: " + a.reassignNote;
+    lines.push(t);
+    if (ABSENT_WORK_STATUSES.includes(a.workStatus)) { sh.push(a.workStatus); tone = "red"; }
+    else if (a.reassignNote) { sh.push("→ " + a.reassignNote); if (tone === "green") tone = "yellow"; }
+    else if (a.equipmentStatus === "Ремонт") { sh.push("техника в ремонте"); if (tone === "green") tone = "yellow"; }
+  });
+  return { lines, short: sh.length ? sh.join("; ") : (off ? "межвахта" : "на вахте"), tone };
+}
+function whereNowColor(t) { return t === "red" ? "var(--red)" : t === "yellow" ? "var(--yellow)" : t === "gray" ? "var(--gray)" : "var(--green)"; }
+
 function renderPersonnelList() {
   const el = document.getElementById("personnelList");
   if (!el) return;
@@ -1526,11 +1551,12 @@ function renderPersonnelList() {
 
   const vMap = empVahtaMap();
   let list = (DATA.employees||[]).filter(e => (e.site||"").trim() === CURRENT_SITE);
-  list = list.filter(e => {
+  // С запросом ищем по всему участку (обе вахты и «не в наряде»): иначе человека с другой вахты не найти.
+  if (!q) list = list.filter(e => {
     const v = vMap[String(e.id).trim()];
     return CURRENT_VAHTA === "unassigned" ? !v : v === CURRENT_VAHTA;
   });
-  if (q) list = list.filter(e => e.name.toLowerCase().includes(q));
+  if (q) { const qs = q.split(/\s+/).filter(Boolean); list = list.filter(e => { const n = e.name.toLowerCase(); return qs.every(w => n.includes(w)); }); }
   list.sort((a,b) => a.name.localeCompare(b.name));
 
   if (!DATA.employees.length) {
@@ -1547,6 +1573,7 @@ function renderPersonnelList() {
   list.forEach(e => {
     const pc = profileCompleteness(e);
     e.__completeness = pc;
+    e.__where = whereNowInfo(e);
     groups[pc.tier].push(e);
   });
 
@@ -1560,7 +1587,7 @@ function renderPersonnelList() {
     const meta = PERSONNEL_TIER_META[tier];
     const open = q ? true : PERSONNEL_GROUP_OPEN[tier];
     const headerRow = `<tr onclick="togglePersonnelGroup('${tier}')" style="cursor:pointer;background:var(--light)">
-      <td colspan="3" style="font-weight:700;color:var(--navy);font-size:12px">
+      <td colspan="4" style="font-weight:700;color:var(--navy);font-size:12px">
         ${meta.icon} ${meta.label} (${items.length}) <span style="color:var(--gray);float:right">${open ? "▾" : "▸"}</span>
       </td>
     </tr>`;
@@ -1573,12 +1600,13 @@ function renderPersonnelList() {
         <td><b>${escapeHtml(e.name)}</b></td>
         <td style="color:var(--gray)">${escapeHtml(e.position||"—")}</td>
         <td>${statusBadge(statusOf(e))} <span style="color:var(--gray);font-size:10px">· ${e.__completeness.score}%</span></td>
+        <td style="font-size:12px;color:${whereNowColor(e.__where.tone)}">${escapeHtml(e.__where.short)}</td>
       </tr>`).join("");
     return headerRow + bodyRows;
   }).join("");
 
   el.innerHTML = `<div style="overflow-x:auto"><table>
-    <thead><tr><th>Сотрудник</th><th>Должность</th><th>Допуск</th></tr></thead>
+    <thead><tr><th>Сотрудник</th><th>Должность</th><th>Допуск</th><th>Сейчас</th></tr></thead>
     <tbody>${rowsHtml}</tbody>
   </table></div>` + (list.length>shownCount ? `<div style="text-align:center;color:var(--gray);font-size:12px;padding-top:10px">Показаны первые ${shownCount} из ${list.length} — уточните поиск или разверните нужную группу</div>` : "");
 }
@@ -1612,6 +1640,9 @@ function openEmployeeCard(empId) {
       <span style="font-weight:700;color:var(--navy)">${PERSONNEL_TIER_META[pc.tier].icon} Личное дело заполнено на ${pc.score}%</span>
       ${pc.missing.length ? `<span style="color:var(--gray)">не хватает: ${pc.missing.map(f=>PROFILE_FIELD_LABELS[f]).join(", ")}</span>` : `<span style="color:var(--green)">всё заполнено</span>`}
     </div>
+    ${(() => { const w = whereNowInfo(e); return `<div style="border-left:4px solid ${whereNowColor(w.tone)};background:var(--light);border-radius:8px;padding:8px 10px;margin-bottom:12px;font-size:13px">
+      <div style="font-weight:800;color:var(--navy);margin-bottom:4px">Где сейчас: <span style="color:${whereNowColor(w.tone)}">${escapeHtml(w.short)}</span></div>
+      ${w.lines.map(l => `<div style="color:var(--navy)">${escapeHtml(l)}</div>`).join("")}</div>`; })()}
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:13px;margin-bottom:16px">
       <div><span style="color:var(--gray)">Допуск:</span> ${statusBadge(statusOf(e))}</div>
       <div><span style="color:var(--gray)">До:</span> ${e.validUntil||"—"}</div>
