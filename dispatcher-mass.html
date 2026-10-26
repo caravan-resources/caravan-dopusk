@@ -362,6 +362,7 @@ function lev1(a, b) { // true, если строки отличаются не �
   return la > lb ? a.slice(i + 1) === b.slice(i) : a.slice(i) === b.slice(i + 1);
 }
 function nameParts(f) { const t = normName(f).split(" "); return { sur: t[0] || "", first: t[1] || "", pat: t[2] || "" }; }
+const sameSur = (a, b) => a === b || (a.length > 3 && b.length > 3 && lev1(a, b));
 const sameFirst = (a, b) => a === b || (a.length === 1 && b[0] === a) || (b.length === 1 && a[0] === b) || (a.length > 2 && b.length > 2 && lev1(a, b));
 // Возвращает { canon(fio) -> каноническое ФИО, merges: [[из, в]] }.
 // Объединяются записи с одинаковой фамилией и похожим именем; отчества должны совпадать (или одно пустое).
@@ -371,15 +372,15 @@ function makeCanon(names) {
   const E = uniq.map(f => Object.assign({ fio: f }, nameParts(f)));
   const clusters = []; // { sur, first, pat, list: [fio] }
   E.filter(e => e.pat).forEach(e => {
-    const c = clusters.find(c => c.sur === e.sur && sameFirst(c.first, e.first) && (c.pat === e.pat || (e.pat.length > 3 && lev1(c.pat, e.pat))));
+    const c = clusters.find(c => sameSur(c.sur, e.sur) && sameFirst(c.first, e.first) && (c.pat === e.pat || (e.pat.length > 3 && lev1(c.pat, e.pat))));
     if (c) c.list.push(e.fio); else clusters.push({ sur: e.sur, first: e.first, pat: e.pat, list: [e.fio] });
   });
   const parts = E.filter(e => !e.pat);
   parts.forEach(e => {
-    const cand = clusters.filter(c => c.sur === e.sur && sameFirst(c.first, e.first));
+    const cand = clusters.filter(c => sameSur(c.sur, e.sur) && sameFirst(c.first, e.first));
     if (cand.length === 1) { cand[0].list.push(e.fio); return; }
     if (cand.length > 1) { clusters.push({ sur: e.sur, first: e.first, pat: "", list: [e.fio], solo: true }); return; }
-    const c = clusters.find(c => !c.pat && !c.solo && c.sur === e.sur && sameFirst(c.first, e.first));
+    const c = clusters.find(c => !c.pat && !c.solo && sameSur(c.sur, e.sur) && sameFirst(c.first, e.first));
     if (c) c.list.push(e.fio); else clusters.push({ sur: e.sur, first: e.first, pat: "", list: [e.fio] });
   });
   const map = {}, merges = [];
@@ -440,6 +441,36 @@ function idleAnalysis(plan, factShifts, kind, month, cutOrd, stl, nowMin) {
   });
   Object.values(E).forEach(e => { const l = stl && statusAt(stl, e.eq, nowMin); e.now = l || null; e.list.sort((x, y) => shiftOrd(x.date, x.sh) - shiftOrd(y.date, y.sh)); });
   return Object.values(E).filter(e => e.idle > 0).sort((a, b) => b.idle - a.idle || a.eq.localeCompare(b.eq));
+}
+
+// Расстояние Левенштейна с отсечкой (возвращает max+1, если больше max)
+function editDist(a, b, max) {
+  if (Math.abs(a.length - b.length) > max) return max + 1;
+  let prev = []; for (let j = 0; j <= b.length; j++) prev[j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i]; let rowMin = i;
+    for (let j = 1; j <= b.length; j++) { cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)); if (cur[j] < rowMin) rowMin = cur[j]; }
+    if (rowMin > max) return max + 1; prev = cur;
+  }
+  return prev[b.length];
+}
+// Пары похожих имён, которые автоматически не объединены (фамилия отличается на 1–2 буквы или иное написание имени).
+// names — каноничные ФИО работников. Возвращает [[имя1, имя2]] для ручной проверки.
+function suggestDuplicates(names) {
+  const u = Array.from(new Set(names.filter(Boolean))); const P = u.map(f => Object.assign({ fio: f }, nameParts(f)));
+  const out = [];
+  for (let i = 0; i < P.length; i++) for (let j = i + 1; j < P.length; j++) {
+    const a = P[i], b = P[j];
+    if (a.pat && b.pat && editDist(a.pat, b.pat, 2) > 2) continue;
+    const dS = editDist(a.sur, b.sur, 2); if (dS > 2) continue;
+    const f1 = a.first, f2 = b.first; if (!f1 || !f2) continue;
+    const dF = editDist(f1, f2, 2);
+    if (dS === 0 && dF === 0) continue;                      // одинаковые — это уже одна запись
+    if (f1[0] !== f2[0] && dF > 1) continue;
+    if (dS + dF > 3) continue;
+    out.push([a.fio, b.fio]);
+  }
+  return out;
 }
 
 function isReal(fio) { const s = (fio || "").trim(); return s !== "" && !/^вакан/i.test(s); }
@@ -913,6 +944,9 @@ function renderTable() {
     });
     const mg = RES.drivers.merges.concat(RES.exc.merges.filter(x => !RES.drivers.merges.some(y => y[0] === x[0])));
     if (mg.length) h += '<h3 style="font-size:14px">Объединены записи одного работника в плане</h3><div class="sub" style="margin-bottom:14px">' + mg.map(x => esc(x[0]) + " → " + esc(x[1])).join("; ") + ". Если это разные люди, пришлите ФИО: правило объединения будет уточнено.</div>";
+    const allW = RES.drivers.workers.concat(RES.exc.workers).map(w => w.fio);
+    const sg = suggestDuplicates(allW).slice(0, 60);
+    if (sg.length) h += '<h3 style="font-size:14px">Возможные двойники (не объединены автоматически, проверьте)</h3><div class="sub" style="margin-bottom:14px">' + sg.map(x => esc(x[0]) + " ~ " + esc(x[1])).join("; ") + ". Если это один человек, исправьте написание в плане или в списке сотрудников.</div>";
     h += '<div class="sub">Рейсы с подозрительной длительностью остаются в факте; показатель выводится для проверки данных диспетчером.</div></div>';
     host.innerHTML = h;
   }
