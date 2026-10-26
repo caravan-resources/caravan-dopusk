@@ -162,6 +162,8 @@ table.mini td { padding:6px 8px; border-bottom:1px solid var(--border); }
       <div class="field"><label>Срез: до даты</label><input type="date" id="fCutDate" onchange="render()"></div>
       <div class="field"><label>Срез: смена</label>
         <select id="fCutShift" onchange="render()"><option value="Д">День (до 19:00)</option><option value="Н">Ночь (до 07:00)</option></select></div>
+      <div class="field"><label>Вахта (группа плана)</label><select id="fVahta" onchange="render()"><option value="">Все</option><option value="A">Группа A</option><option value="B">Группа B</option></select></div>
+      <div class="field"><label>Смена</label><select id="fShiftF" onchange="render()"><option value="">Обе</option><option value="Д">День</option><option value="Н">Ночь</option></select></div>
       <div class="field"><label>Ремонт техники (Down)</label><select id="fAdj" onchange="render()"><option value="1">Вычитать из плана</option><option value="0">Не вычитать</option></select></div>
       <div class="field"><label>Зелёный от, %</label><input type="number" id="pGreen" value="100" min="1" max="200" onchange="render()"></div>
       <div class="field"><label>Жёлтый от, %</label><input type="number" id="pYellow" value="90" min="1" max="200" onchange="render()"></div>
@@ -503,7 +505,7 @@ function isReal(fio) { const s = (fio || "").trim(); return s !== "" && !/^ва�
 
 function buildIndex(planRows) {
   const idx = {};
-  planRows.forEach(r => { const k = r[0] + "|" + r[1] + "|" + r[2]; (idx[k] || (idx[k] = [])).push({ fio: (r[3] || "").trim(), h: r[4] || 0, p: r[5] || 0 }); });
+  planRows.forEach(r => { const k = r[0] + "|" + r[1] + "|" + r[2]; (idx[k] || (idx[k] = [])).push({ fio: (r[3] || "").trim(), h: r[4] || 0, p: r[5] || 0, g: r[6] || "" }); });
   return idx;
 }
 
@@ -569,13 +571,15 @@ function shortReason(rs) { return String(rs || "").replace(/^(Down|Standby|Delay
 // stat — часы статусов по сменам (может быть пустым); adj — вычитать из плана смены долю времени ремонта (Down) техники
 function compute(plan, factShifts, kind, month, cutOrd, opts) {
   const stat = opts && opts.stat, adj = opts && opts.adj;
+  const VF = (opts && opts.vahta) || "", SF = (opts && opts.shift) || "";   // фильтры: группа (вахта) плана и смена
+  const rowOk = r => (!VF || r[6] === VF) && (!SF || r[1] === SF);
   const tl = opts && opts.tl, matchName = opts && opts.match;
   const planNames = plan.drivers.concat(plan.excavators).map(r => r[3]).filter(isReal);
   // имена из чек-листов тоже участвуют в объединении: в них встречаются опечатки («Майдобек» вместо «Майдабек»),
   // казахские буквы и записи с отчеством, когда в плане его нет
   const CN = makeCanon(planNames.concat((opts && opts.names) || []));
   const planSet = new Set(planNames.map(x => CN.canon(x)));
-  const rowsP = (kind === "drivers" ? plan.drivers : plan.excavators).map(r => isReal(r[3]) ? [r[0], r[1], r[2], CN.canon(r[3]), r[4], r[5]] : r);
+  const rowsP = (kind === "drivers" ? plan.drivers : plan.excavators).map(r => isReal(r[3]) ? [r[0], r[1], r[2], CN.canon(r[3]), r[4], r[5], r[6]] : r);
   const idx = buildIndex(rowsP);
   const W = {}; const E = {}; const U = {}; const NM = {};
   const hasStat = !!stat && Object.keys(stat).length > 0;
@@ -583,7 +587,7 @@ function compute(plan, factShifts, kind, month, cutOrd, opts) {
   const getE = e => E[e] || (E[e] = { eq: e, plan: 0, fact: 0, trips: 0, man: 0, manT: 0 });
   const cell = (w, date, sh, eq) => { const k = date + "|" + sh + "|" + eq; return w.cells[k] || (w.cells[k] = { date, sh, eq, plan: 0, planRaw: 0, dn: 0, sb: 0, fact: 0, trips: 0, hrs: 0, chk: 0, pl: 0 }); };
   let planAll = 0, planRawAll = 0, monthAll = 0, noStat = 0;
-  rowsP.forEach(r => {
+  rowsP.filter(rowOk).forEach(r => {
     if (r[0].slice(0, 7) !== month) return;
     if (shiftOrd(r[0], r[1]) > cutOrd) {
       monthAll += r[5];
@@ -608,10 +612,11 @@ function compute(plan, factShifts, kind, month, cutOrd, opts) {
   let chkTr = 0, chkT = 0, fbTr = 0, fbT = 0, subTr = 0, subT = 0;
   Object.keys(factShifts).forEach(sk => {
     const [date, sh] = sk.split("|");
-    if (date.slice(0, 7) !== month || shiftOrd(date, sh) > cutOrd) return;
+    if (date.slice(0, 7) !== month || shiftOrd(date, sh) > cutOrd || (SF && sh !== SF)) return;
     const S = factShifts[sk]; anN += S.an[0]; anT += S.an[1]; if (S.dev) { devN += S.dev[0]; devT += S.dev[1]; }
     // fio === null — оператор определяется по плану; иначе — автор последнего чек-листа
     const place = (eq, trips, tons, man, fio) => {
+      if (VF) { const l0 = idx[date + "|" + sh + "|" + eq] || []; if (!(l0.length && l0[0].g === VF)) return; }
       factAll += tons; tripsAll += trips; if (man) { manAll += trips; manTAll += tons; }
       const E1 = getE(eq); E1.fact += tons; E1.trips += trips; if (man) { E1.man += trips; E1.manT += tons; }
       const list = idx[date + "|" + sh + "|" + eq] || [];
@@ -675,7 +680,7 @@ function planFromSheets(drvAoa, excAoa) {
     for (let i = 0; i < Math.min(aoa.length, 10); i++) if (aoa[i] && aoa[i].indexOf("Дата") >= 0 && aoa[i].indexOf(eqName) >= 0) { hi = i; break; }
     if (hi < 0) throw new Error("Не найдена шапка таблицы (колонки «Дата», «" + eqName + "»).");
     const h = aoa[hi]; const c = n => h.indexOf(n);
-    const ci = { d: c("Дата"), s: c("Смена"), e: c(eqName), f: c("ФИО"), h: c("Табельные часы"), p: c(planName) };
+    const ci = { d: c("Дата"), s: c("Смена"), e: c(eqName), f: c("ФИО"), h: c("Табельные часы"), p: c(planName) }; const gi = c("Группа");
     Object.keys(ci).forEach(k => { if (ci[k] < 0) throw new Error("Не найдена колонка для «" + k + "» (" + planName + ")."); });
     const out = [];
     for (let i = hi + 1; i < aoa.length; i++) {
@@ -683,7 +688,7 @@ function planFromSheets(drvAoa, excAoa) {
       const d = serialToYmd(r[ci.d]); if (!d || !r[ci.e]) continue;
       const hrs = typeof r[ci.h] === "number" ? r[ci.h] : 0, pl = typeof r[ci.p] === "number" ? r[ci.p] : 0;
       if (hrs <= 0 && pl <= 0) continue;
-      out.push([d, r[ci.s] === "День" ? SH_D : SH_N, String(r[ci.e]).trim(), String(r[ci.f] || "").trim(), Math.round(hrs * 100) / 100, Math.round(pl * 100) / 100]);
+      out.push([d, r[ci.s] === "День" ? SH_D : SH_N, String(r[ci.e]).trim(), String(r[ci.f] || "").trim(), Math.round(hrs * 100) / 100, Math.round(pl * 100) / 100, gi >= 0 ? String(r[gi] == null ? "" : r[gi]).trim() : ""]);
     }
     return out;
   }
@@ -1007,11 +1012,16 @@ function render() {
   if (!plan) { $("stats").innerHTML = ""; $("tableHost").innerHTML = '<div class="empty">Загрузите план месяца.</div>'; RES = null; return; }
   const c = cutOrd();
   const o = $("fSrc").value === "chk" && TL ? { tl: TL, match: MATCH, names: NAMES } : null;
-  const adj = $("fAdj").value === "1"; const o2 = Object.assign({}, o || {}, { stat: STAT.shifts, adj });
+  const adj = $("fAdj").value === "1";
+  const hasGrp = plan.drivers.some(r => r[6]) || plan.excavators.some(r => r[6]);
+  const vf = hasGrp ? $("fVahta").value : "", sf = $("fShiftF").value;
+  const o2 = Object.assign({}, o || {}, { stat: STAT.shifts, adj, vahta: vf, shift: sf });
+  const fOk = r => (!vf || r[6] === vf) && (!sf || r[1] === sf);
+  const fplan = { drivers: plan.drivers.filter(fOk), excavators: plan.excavators.filter(fOk) };
   RES = { drivers: compute(plan, FACT.shifts, "drivers", m, c, o2), exc: compute(plan, FACT.shifts, "exc", m, c, o2) };
   const nowMin = Math.floor((Date.now() + 5 * 3600000) / 60000);
-  RES.drivers.idle = idleAnalysis(plan, FACT.shifts, "drivers", m, c, STL, nowMin, TL);
-  RES.exc.idle = idleAnalysis(plan, FACT.shifts, "exc", m, c, STL, nowMin, TL);
+  RES.drivers.idle = idleAnalysis(fplan, FACT.shifts, "drivers", m, c, STL, nowMin, TL);
+  RES.exc.idle = idleAnalysis(fplan, FACT.shifts, "exc", m, c, STL, nowMin, TL);
   const R = RES.drivers.tot, X = RES.exc.tot;
   const p = pct(R.fact, R.plan);
   const ks = Object.keys(FACT.shifts).filter(k => k.slice(0, 7) === m);
@@ -1024,7 +1034,9 @@ function render() {
     (R.hasStat ? stat("Снято из плана за ремонт, т", $("fAdj").value === "1" ? fmtT(R.cut) : "не применяется") : "") +
     (R.chkTr + R.fbTr > 0 ? stat("Рейсов по чек-листам", fmtN(R.chkTr) + " (" + (R.chkTr / R.trips * 100).toFixed(0) + " %)") + stat("Рейсов у подменных", fmtN(R.subTr)) : "");
   banner("warnBanner", !ks.length ? "Факт за выбранный месяц не загружен." :
-    [R.unT / (R.fact || 1) > 0.1 ? "Более 10 % массы не закреплено за работниками (вакансии или техника вне плана). Подробности на вкладке «Контроль данных»." : "",
+    [$("fVahta").value && !hasGrp ? "В загруженном плане нет групп (вахт): фильтр по вахте не применён. Загрузите книгу KPI заново." : "",
+      (vf || sf) ? "Фильтр: " + [vf ? "группа (вахта) " + vf : "", sf ? (sf === SH_N ? "ночная смена" : "дневная смена") : ""].filter(Boolean).join(", ") + ". Рейсы техники, которой нет в плане выбранной группы, не показаны." : "",
+      R.unT / (R.fact || 1) > 0.1 ? "Более 10 % массы не закреплено за работниками (вакансии или техника вне плана). Подробности на вкладке «Контроль данных»." : "",
       (R.hasStat && STAT.max !== null && Math.max.apply(null, ks.map(k => FACT.shifts[k].max)) > STAT.max + 36e5 ? "Статусы техники заканчиваются " + fmtDT(STAT.max) + ", а рейсы идут позже: по последним сменам поправка на ремонт не применена. " : "") + (R.hasStat && R.noStat ? "Для " + R.noStat + " строк плана (смена + техника) статусов нет, план по ним не уменьшен. Загрузите выгрузку статусов за весь период." : "")].filter(Boolean).join(" "));
   renderTable();
 }
@@ -1116,7 +1128,7 @@ function idleWorkersHtml(kind) {
 function statSummary(month, cut, only) {
   const eqs = {}, reasons = {};
   Object.keys(STAT.shifts).forEach(sk => {
-    const p = sk.split("|"); if (p[0].slice(0, 7) !== month || shiftOrd(p[0], p[1]) > cut) return;
+    const p = sk.split("|"); if (p[0].slice(0, 7) !== month || shiftOrd(p[0], p[1]) > cut || ($("fShiftF").value && p[1] !== $("fShiftF").value)) return;
     const S = STAT.shifts[sk];
     Object.keys(S.e).forEach(eq => { if (!only[eq]) return; const o = eqs[eq] || (eqs[eq] = [0, 0, 0, 0]); for (let i = 0; i < 4; i++) o[i] += S.e[eq][i]; });
     Object.keys(S.r || {}).forEach(k => { const i = k.indexOf("|"), eq = k.slice(0, i), rs = k.slice(i + 1); if (!only[eq]) return;
@@ -1263,7 +1275,7 @@ function exportXlsx() {
   RES.drivers.unassigned.forEach(u => un.push(["Самосвал", u.eq, u.why, u.trips, Math.round(u.tons)]));
   RES.exc.unassigned.forEach(u => un.push(["Экскаватор", u.eq, u.why, u.trips, Math.round(u.tons)]));
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(un), "Без работника");
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Месяц", m], ["Срез до", $("fCutDate").value + " " + ($("fCutShift").value === SH_N ? "ночь" : "день")], ["Начало месяца", "19:00 последнего дня предыдущего месяца"], ["Ремонт техники (Down)", $("fAdj").value === "1" ? "вычтен из плана смены" : "не вычитался"], ["Оператор рейса", $("fSrc").value === "chk" && TL ? "по чек-листам, запасной вариант — план" : "по плану"]]), "Параметры");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Месяц", m], ["Срез до", $("fCutDate").value + " " + ($("fCutShift").value === SH_N ? "ночь" : "день")], ["Начало месяца", "19:00 последнего дня предыдущего месяца"], ["Фильтр: группа (вахта)", $("fVahta").value || "все"], ["Фильтр: смена", $("fShiftF").value ? ($("fShiftF").value === SH_N ? "ночь" : "день") : "обе"], ["Ремонт техники (Down)", $("fAdj").value === "1" ? "вычтен из плана смены" : "не вычитался"], ["Оператор рейса", $("fSrc").value === "chk" && TL ? "по чек-листам, запасной вариант — план" : "по плану"]]), "Параметры");
   XLSX.writeFile(wb, "KPI_масса_" + m + ".xlsx");
 }
 </script>
