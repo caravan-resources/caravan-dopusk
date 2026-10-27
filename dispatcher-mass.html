@@ -611,7 +611,7 @@ function compute(plan, factShifts, kind, month, cutOrd, opts) {
   const VF = (opts && opts.vahta) || "", SF = (opts && opts.shift) || "";   // фильтры: группа (вахта) плана и смена
   const rowOk = r => (!VF || r[6] === VF) && (!SF || r[1] === SF);
   const BS = {}; const bs = k => BS[k] || (BS[k] = { fact: 0, plan: 0, trips: 0 });   // по сменам: «дата|смена»
-  const tl = opts && opts.tl, matchName = opts && opts.match, rosf = opts && opts.ros;
+  const tl = opts && opts.tl, matchName = opts && opts.match, rosf = opts && opts.ros, rshf = opts && opts.rsh;
   const planNames = plan.drivers.concat(plan.excavators).map(r => r[3]).filter(isReal);
   // имена из чек-листов тоже участвуют в объединении: в них встречаются опечатки («Майдобек» вместо «Майдабек»),
   // казахские буквы и записи с отчеством, когда в плане его нет
@@ -655,6 +655,8 @@ function compute(plan, factShifts, kind, month, cutOrd, opts) {
     const S = factShifts[sk]; anN += S.an[0]; anT += S.an[1]; if (S.dev) { devN += S.dev[0]; devT += S.dev[1]; }
     // fio === null — оператор определяется по плану; иначе — автор последнего чек-листа
     const place = (eq, trips, tons, man, fio) => {
+      // табель — реальное нахождение людей: осмотрел техники, но по табелю в эту смену не работает → факт делится по плану смены
+      if (fio && rshf) { const rs = rshf(fio, date); if (rs !== undefined && rs !== sh) fio = null; }
       const list = idx[date + "|" + sh + "|" + eq] || [];
       const real = list.filter(x => x.h > 0 && isReal(x.fio));
       let realV = real;
@@ -785,6 +787,32 @@ function rosShift(fio, date) {
   if (!ROSIDX) buildRosIdx();
   const I = ROSIDX.s[Number(date.slice(5, 7))]; if (!I) return "";
   const str = I[ROSIDX.ck(fio)]; const ch = str ? str[Number(date.slice(8)) - 1] : "";
+  return ch === "Д" ? SH_D : ch === "Н" ? SH_N : "";
+}
+// Текущая смена человека по табелю на дату среза: последний день с часами не позже среза; "" — в табеле нет данных
+function rosCurShift(fio, date) {
+  if (!ROSIDX) buildRosIdx();
+  const I = ROSIDX.s[Number(date.slice(5, 7))]; if (!I) return "";
+  const str = I[ROSIDX.ck(fio)]; if (!str) return "";
+  for (let d = Math.min(Number(date.slice(8)), str.length); d >= 1; d--) { const ch = str[d - 1]; if (ch === "Д") return SH_D; if (ch === "Н") return SH_N; }
+  return "";
+}
+function personShiftFilter(res, sf, month) {
+  const cut = $("fCutDate").value || (month + "-31");
+  const keep = res.workers.filter(w => { const cs = rosCurShift(w.fio, cut); return cs ? cs === sf : Object.keys(w.cells).some(k => k.split("|")[1] === sf); });
+  const t = Object.assign({}, res.tot);
+  const sum = k => keep.reduce((q, w) => q + w[k], 0);
+  t.plan = sum("plan"); t.planRaw = sum("planRaw"); t.cut = t.planRaw - t.plan; t.fact = sum("fact"); t.trips = sum("trips"); t.monthAll = sum("monthPlan");
+  const E = {};   // техника: по ячейкам оставшихся работников
+  keep.forEach(w => Object.values(w.cells).forEach(c => { const e = E[c.eq] || (E[c.eq] = { eq: c.eq, plan: 0, fact: 0, trips: 0, man: 0, manT: 0 }); e.plan += c.plan; e.fact += c.fact; e.trips += c.trips; }));
+  return Object.assign({}, res, { workers: keep, equip: Object.values(E), tot: t });
+}
+// Для атрибуции факта: undefined — человека нет в табеле / нет данных (не вмешиваемся); "" — выходной/отсутствие; "Д"/"Н" — смена
+function rosShiftOrUndef(fio, date) {
+  if (!ROSIDX) buildRosIdx();
+  const I = ROSIDX.s[Number(date.slice(5, 7))]; if (!I) return undefined;
+  const str = I[ROSIDX.ck(fio)]; if (!str) return undefined;
+  const ch = str[Number(date.slice(8)) - 1];
   return ch === "Д" ? SH_D : ch === "Н" ? SH_N : "";
 }
 // План с перенесёнными по табелю сменами. Экипаж «день + ночь» на технике (одна вахта, одни сутки) меняется местами целиком:
@@ -1143,10 +1171,15 @@ function render() {
   const adj = $("fAdj").value === "1";
   const hasGrp = plan.drivers.some(r => r[6]) || plan.excavators.some(r => r[6]);
   const vf = hasGrp ? $("fVahta").value : "", sf = $("fShiftF").value;
-  const o2 = Object.assign({}, o || {}, { stat: STAT.shifts, adj, vahta: vf, shift: sf, ros: Object.keys(ROS.months).length ? rosCode : null });
+  const o2 = Object.assign({}, o || {}, { stat: STAT.shifts, adj, vahta: vf, shift: sf, ros: Object.keys(ROS.months).length ? rosCode : null, rsh: Object.keys(ROS.months).length ? rosShiftOrUndef : null });
   const fOk = r => (!vf || r[6] === vf) && (!sf || r[1] === sf);
   const fplan = { drivers: plan.drivers.filter(fOk), excavators: plan.excavators.filter(fOk) };
-  RES = { drivers: compute(plan, FACT.shifts, "drivers", m, c, o2), exc: compute(plan, FACT.shifts, "exc", m, c, o2) };
+  // Смена «по людям»: табель показывает, где человек физически работает. Фильтр «День/Ночь» оставляет тех, кто по табелю
+  // на дату среза работает в этой смене, с их итогом за весь месяц (обе смены).
+  const byPerson = !!sf && Object.keys(ROS.months).length && $("fRosSh").value === "1";
+  const o3 = byPerson ? Object.assign({}, o2, { shift: "" }) : o2;
+  RES = { drivers: compute(plan, FACT.shifts, "drivers", m, c, o3), exc: compute(plan, FACT.shifts, "exc", m, c, o3) };
+  if (byPerson) { RES.drivers = personShiftFilter(RES.drivers, sf, m); RES.exc = personShiftFilter(RES.exc, sf, m); }
   const nowMin = Math.floor((Date.now() + 5 * 3600000) / 60000);
   RES.drivers.idle = idleAnalysis(fplan, FACT.shifts, "drivers", m, c, STL, nowMin, TL);
   RES.exc.idle = idleAnalysis(fplan, FACT.shifts, "exc", m, c, STL, nowMin, TL);
