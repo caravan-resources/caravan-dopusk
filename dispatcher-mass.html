@@ -650,12 +650,19 @@ function compute(plan, factShifts, kind, month, cutOrd, opts) {
     const S = factShifts[sk]; anN += S.an[0]; anT += S.an[1]; if (S.dev) { devN += S.dev[0]; devT += S.dev[1]; }
     // fio === null — оператор определяется по плану; иначе — автор последнего чек-листа
     const place = (eq, trips, tons, man, fio) => {
-      if (VF) { const l0 = idx[date + "|" + sh + "|" + eq] || []; if (!(l0.length && l0[0].g === VF)) return; }
+      const list = idx[date + "|" + sh + "|" + eq] || [];
+      const real = list.filter(x => x.h > 0 && isReal(x.fio));
+      let realV = real;
+      if (VF) {   // вахта: в смену пересменки на одной технике две группы; факт делится по плановым часам и достаётся только выбранной
+        if (!list.some(x => x.g === VF)) return;
+        const hs = list.filter(x => x.h > 0), tot = hs.reduce((q, x) => q + x.h, 0), mine = hs.filter(x => x.g === VF).reduce((q, x) => q + x.h, 0);
+        if (fio) { const px = real.find(x => normName(x.fio) === normName(fio)); if (px && px.g !== VF) return; if (!px && tot > 0 && mine <= 0) return; }
+        else if (tot > 0) { if (mine <= 0) return; const k = mine / tot; trips *= k; tons *= k; }
+        realV = real.filter(x => x.g === VF);
+      }
       { const b = bs(date + "|" + sh); b.fact += tons; b.trips += trips; }
       factAll += tons; tripsAll += trips; if (man) { manAll += trips; manTAll += tons; }
       const E1 = getE(eq); E1.fact += tons; E1.trips += trips; if (man) { E1.man += trips; E1.manT += tons; }
-      const list = idx[date + "|" + sh + "|" + eq] || [];
-      const real = list.filter(x => x.h > 0 && isReal(x.fio));
       if (fio) {
         const w = getW(fio); chkTr += trips; chkT += tons;
         if (!real.some(x => normName(x.fio) === normName(fio))) { subTr += trips; subT += tons; }
@@ -665,17 +672,17 @@ function compute(plan, factShifts, kind, month, cutOrd, opts) {
         return;
       }
       if (tl) { fbTr += trips; fbT += tons; }
-      if (!real.length) {
+      if (!realV.length) {
         const why = list.some(x => x.h > 0) ? "Вакансия" : "Техники нет в плане смены";
         const k = eq + "|" + why; const u = U[k] || (U[k] = { eq, why, tons: 0, trips: 0 });
         u.tons += tons; u.trips += trips; unT += tons; unTr += trips; return;
       }
-      const sum = real.reduce((s, x) => s + x.h, 0);
-      if (real.length > 1) sharedTr += trips;
-      real.forEach(x => {
+      const sum = realV.reduce((s, x) => s + x.h, 0);
+      if (realV.length > 1) sharedTr += trips;
+      realV.forEach(x => {
         const share = x.h / sum; const w = getW(x.fio);
         w.fact += tons * share; w.trips += trips * share; if (man) { w.man += trips * share; w.manT += tons * share; }
-        if (real.length > 1) w.shared += trips * share;
+        if (realV.length > 1) w.shared += trips * share;
         w.eq[eq] = (w.eq[eq] || 0) + tons * share;
         const c = cell(w, date, sh, eq); c.fact += tons * share; c.trips += trips * share; c.pl += trips * share;
       });
