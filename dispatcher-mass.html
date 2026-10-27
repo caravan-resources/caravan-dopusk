@@ -1274,7 +1274,7 @@ function sortBy(tab, k) { const s = SORT[tab]; SORT[tab] = [k, s[0] === k ? -s[1
 
 function workerRows(kind) {
   const q = $("fSearch").value.trim().toLowerCase();
-  return RES[kind].workers.map(w => Object.assign({}, w, { pct: pct(w.fact, w.plan), diff: w.fact - w.plan, cut: w.planRaw - w.plan, rem: w.monthPlan - w.fact,
+  return RES[kind].workers.map(w => Object.assign({}, w, { pct: pct(w.fact, w.plan), pctM: w.monthPlan > 0 ? w.fact / w.monthPlan * 100 : null, diff: w.fact - w.plan, cut: w.planRaw - w.plan, rem: w.monthPlan - w.fact,
     need: w.shiftsLeft > 0 ? Math.max(0, w.monthPlan - w.fact) / w.shiftsLeft : null,
     perShift: w.shiftsLeft > 0 ? w.planLeft / w.shiftsLeft : null,
     eqs: Object.keys(w.eq).sort((a, b) => w.eq[b] - w.eq[a]) }))
@@ -1417,14 +1417,14 @@ function renderTable() {
     const lab = TAB === "drivers" ? "Самосвалы" : "Экскаваторы";
     let h = '<table class="kpi"><thead><tr>' + th("ФИО", "fio", TAB) + th(lab, "eqsS", TAB) + th("Смен по плану", "shifts", TAB, 1) + th("План, т", "plan", TAB, 1) +
       th("Факт, т", "fact", TAB, 1) + th("Отклонение, т", "diff", TAB, 1) + th("Рейсов", "trips", TAB, 1) + th("Вручную, т", "manT", TAB, 1) + th("Факт / план", "pct", TAB) + (RES[TAB].tot.hasStat ? th("Ремонт техники, ч", "dnH", TAB, 1) + th("Снято из плана, т", "cut", TAB, 1) : "") +
-      th("План месяца, т", "monthPlan", TAB, 1) + th("Осталось до плана, т", "rem", TAB, 1) + th("Смен осталось", "shiftsLeft", TAB, 1) + th("Нужно за смену, т", "need", TAB, 1) + "</tr></thead><tbody>";
+      th("План месяца, т", "monthPlan", TAB, 1) + th("% месяца", "pctM", TAB, 1) + th("Осталось до плана, т", "rem", TAB, 1) + th("Смен осталось", "shiftsLeft", TAB, 1) + th("Нужно за смену, т", "need", TAB, 1) + "</tr></thead><tbody>";
     let sp = 0, sf = 0, sm = 0, sr = 0;
     rows.forEach(w => { sp += w.plan; sf += w.fact; sm += w.monthPlan; sr += Math.max(0, w.rem);
       h += '<tr class="click" onclick="openWorker(\'' + TAB + "'," + JSON.stringify(w.fio).replace(/"/g, "&quot;") + ')"><td><b>' + esc(w.fio) + "</b>" + (w.shared ? '<div class="sub">рейсы частично разделены</div>' : "") + noteSub(w) + "</td><td>" + esc(w.eqs.slice(0, 4).join(", ")) + (w.eqs.length > 4 ? " +" + (w.eqs.length - 4) : "") +
         '</td><td class="num">' + w.shifts + '</td><td class="num">' + fmtT(w.plan) + '</td><td class="num">' + fmtT(w.fact) + '</td><td class="num">' + (w.diff >= 0 ? "+" : "") + fmtT(w.diff) +
-        '</td><td class="num">' + fmtN(w.trips) + '</td><td class="num">' + (w.manT ? fmtT(w.manT) : "") + "</td><td>" + kpiBadge(w.pct) + "</td>" + (RES[TAB].tot.hasStat ? '<td class="num">' + hrs1(w.dnH) + '</td><td class="num">' + (w.cut > 0.5 ? fmtT(w.cut) : "") + "</td>" : "") + '<td class="num">' + fmtT(w.monthPlan) + '</td><td class="num">' + (w.rem > 0 ? fmtT(w.rem) : (w.monthPlan > 0 ? '<span class="badge b-green">выполнен +' + fmtT(-w.rem) + "</span>" : "")) +
+        '</td><td class="num">' + fmtN(w.trips) + '</td><td class="num">' + (w.manT ? fmtT(w.manT) : "") + "</td><td>" + kpiBadge(w.pct) + "</td>" + (RES[TAB].tot.hasStat ? '<td class="num">' + hrs1(w.dnH) + '</td><td class="num">' + (w.cut > 0.5 ? fmtT(w.cut) : "") + "</td>" : "") + '<td class="num">' + fmtT(w.monthPlan) + '</td><td class="num">' + (w.pctM == null ? "" : w.pctM.toFixed(1) + " %") + '</td><td class="num">' + (w.rem > 0 ? fmtT(w.rem) : (w.monthPlan > 0 ? '<span class="badge b-green">выполнен +' + fmtT(-w.rem) + "</span>" : "")) +
         '</td><td class="num">' + (w.shiftsLeft || "") + '</td><td class="num">' + (w.need === null ? "" : fmtT(w.need) + (w.perShift ? '<div class="sub">план за смену ' + fmtT(w.perShift) + "</div>" : "")) + "</td></tr>"; });
-    h += "</tbody><tfoot><tr><td>Итого по показанным</td><td></td><td></td><td class=\"num\">" + fmtT(sp) + '</td><td class="num">' + fmtT(sf) + '</td><td class="num">' + (sf - sp >= 0 ? "+" : "") + fmtT(sf - sp) + "</td><td></td><td></td><td>" + (sp ? (sf / sp * 100).toFixed(1) + " %" : "") + "</td>" + (RES[TAB].tot.hasStat ? "<td></td><td></td>" : "") + '<td class="num">' + fmtT(sm) + '</td><td class="num">' + fmtT(sr) + "</td><td></td><td></td></tr></tfoot></table>";
+    h += "</tbody><tfoot><tr><td>Итого по показанным</td><td></td><td></td><td class=\"num\">" + fmtT(sp) + '</td><td class="num">' + fmtT(sf) + '</td><td class="num">' + (sf - sp >= 0 ? "+" : "") + fmtT(sf - sp) + "</td><td></td><td></td><td>" + (sp ? (sf / sp * 100).toFixed(1) + " %" : "") + "</td>" + (RES[TAB].tot.hasStat ? "<td></td><td></td>" : "") + '<td class="num">' + fmtT(sm) + '</td><td class="num">' + (sm ? (sf / sm * 100).toFixed(1) + " %" : "") + '</td><td class="num">' + fmtT(sr) + "</td><td></td><td></td></tr></tfoot></table>";
     host.innerHTML = rows.length ? h : '<div class="empty">Нет данных по фильтру.</div>';
   } else if (TAB === "eq") {
     const q = $("fSearch").value.trim().toLowerCase();
