@@ -641,7 +641,7 @@ function compute(plan, factShifts, kind, month, cutOrd, opts) {
     const sd = statCell(stat, r[0], r[1], r[2]);
     const pe = adj && sd ? r[5] * (sd.tot - sd.e[3]) / sd.tot : r[5];
     monthAll += pe; planAll += pe; planRawAll += r[5]; getE(r[2]).plan += pe; bs(r[0] + "|" + r[1]).plan += pe;
-    const pk = r[0] + "|" + r[1] + "|" + r[2]; const P = PL[pk] || (PL[pk] = { pe: 0, raw: 0, rows: [] }); P.pe += pe; P.raw += r[5];
+    const pk = r[0] + "|" + r[2]; const P = PL[pk] || (PL[pk] = { pe: 0, raw: 0, rows: [] }); P.pe += pe; P.raw += r[5];
     if (hasStat && !sd && r[4] > 0) noStat++;
     if (isReal(r[3])) {
       const w = getW(r[3].trim()); w.plan += pe; w.planRaw += r[5]; w.monthPlan += pe; if (r[4] > 0) { w.shifts++; w.bkP += pe; w.bkN++; }
@@ -718,23 +718,24 @@ function compute(plan, factShifts, kind, month, cutOrd, opts) {
       S.rows.forEach(r => place(kind === "drivers" ? r[0] : r[1], r[3], r[4], r[2], null));
     }
   });
-  // План берётся по технике, а оператора подтверждает вывозка: плановый тонаж техники в смене делится между теми, кто на ней вывозил,
-  // пропорционально их массе. Если рейсов на технике в смене не было, план остаётся у назначенных по плану работников.
-  const FT = {}; Object.values(W).forEach(w => Object.values(w.cells).forEach(c => { const k = c.date + "|" + c.sh + "|" + c.eq; FT[k] = (FT[k] || 0) + c.fact; }));
+  // План берётся по технике, а оператора подтверждает вывозка: плановый тоннаж техники за сутки (обе смены) делится между теми,
+  // кто на ней вывозил, пропорционально их массе, в какой бы смене ни стоял плановый экипаж (вакансия, пересадка, перенос по табелю).
+  // Если рейсов на технике в эти сутки не было, план остаётся у назначенных по плану работников.
+  const CF = {}; Object.values(W).forEach(w => Object.values(w.cells).forEach(c => { if (c.fact > 0) (CF[c.date + "|" + c.eq] || (CF[c.date + "|" + c.eq] = [])).push([w, c]); }));
   Object.keys(PL).forEach(k => {
-    const P = PL[k]; if (!(P.pe > 0) || !(FT[k] > 0)) return;
+    const P = PL[k], L = CF[k]; if (!(P.pe > 0) || !L) return;
+    const FTk = L.reduce((q, x) => q + x[1].fact, 0); if (!(FTk > 0)) return;
     P.rows.forEach(x => { x.c.plan -= x.pe; x.c.planRaw -= x.raw; x.w.plan -= x.pe; x.w.planRaw -= x.raw; x.w.monthPlan -= x.pe; });
-    Object.values(W).forEach(w => { const c = w.cells[k]; if (!c || !(c.fact > 0)) return; const sh = c.fact / FT[k];
-      c.plan += P.pe * sh; c.planRaw += P.raw * sh; c.xf = c.hrs > 0 ? 0 : P.pe * sh; w.plan += P.pe * sh; w.planRaw += P.raw * sh; w.monthPlan += P.pe * sh; });
+    L.forEach(([w, c]) => { const sh = c.fact / FTk;
+      c.plan += P.pe * sh; c.planRaw += P.raw * sh; c.xf = (c.xf || 0) + (c.hrs > 0 ? 0 : P.pe * sh); w.plan += P.pe * sh; w.planRaw += P.raw * sh; w.monthPlan += P.pe * sh; });
   });
   // План месяца человека — не по сменам, а объёмом: то, что набрано до среза (план техники, поделённый по вывозке), плюс доля
   // планового тоннажа техники в оставшихся сменах. Доля — по массе, которую человек вывез на этой технике до среза.
-  // Техника без вывозки (ремонт и т.п.) ему не засчитывается; если рейсов на ней не было вообще, остаётся план назначенных.
+  // Техника без вывозки до среза (ремонт и т.п.) ему не засчитывается: план считается по той технике, на которой он отработал.
   const FTE = {}; Object.values(W).forEach(w => Object.keys(w.eq).forEach(e => { FTE[e] = (FTE[e] || 0) + w.eq[e]; }));
   Object.values(W).forEach(w => {
     let m = w.monthPlan - w.planLeft;
     Object.keys(w.eq).forEach(e => { if (FTE[e] > 0 && EQM[e]) m += EQM[e] * w.eq[e] / FTE[e]; });
-    Object.keys(w.pmEq).forEach(e => { if (!(FTE[e] > 0)) m += w.pmEq[e]; });
     w.monthPlan = m;
   });
   // Смены считаются по табелю (физическое присутствие): дни с часами до среза — отработано, после среза — осталось.
