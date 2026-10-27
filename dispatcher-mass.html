@@ -172,6 +172,7 @@ table.mini td { padding:6px 8px; border-bottom:1px solid var(--border); }
         <select id="fCutShift" onchange="render()"><option value="Д">День (до 19:00)</option><option value="Н">Ночь (до 07:00)</option></select></div>
       <div class="field"><label>Вахта (группа плана)</label><select id="fVahta" onchange="VT = true; render()"><option value="">Все</option><option value="B">Вахта 1 (группа B)</option><option value="A">Вахта 2 (группа A)</option></select></div>
       <div class="field"><label>Смена</label><select id="fShiftF" onchange="render()"><option value="">Обе</option><option value="Д">День</option><option value="Н">Ночь</option></select></div>
+      <div class="field"><label>Смена по табелю</label><select id="fRosSh" onchange="render()"><option value="1">Переносить по табелю</option><option value="0">Не переносить</option></select></div>
       <div class="field"><label>Ремонт техники (Down)</label><select id="fAdj" onchange="render()"><option value="1">Вычитать из плана</option><option value="0">Не вычитать</option></select></div>
       <div class="field"><label>Зелёный от, %</label><input type="number" id="pGreen" value="100" min="1" max="200" onchange="render()"></div>
       <div class="field"><label>Жёлтый от, %</label><input type="number" id="pYellow" value="90" min="1" max="200" onchange="render()"></div>
@@ -586,20 +587,24 @@ function parseRosterRows(rows) {
   const h2 = rows[1] || []; const ci = h2.findIndex(x => /^работник$/i.test(String(x || "").trim())); if (ci < 0) throw new Error("не найдена колонка «Работник»");
   const blocks = []; (rows[0] || []).forEach((v, c) => { const m = ROS_MONTHS[String(v || "").trim().toUpperCase()]; if (m) blocks.push({ m, c }); });
   if (!blocks.length) throw new Error("не найдены блоки месяцев");
-  const months = {}; let persons = 0, seen = {};
+  const months = {}, sh = {}; let persons = 0, seen = {};
   for (let r = 2; r < rows.length; r++) {
     const row = rows[r] || []; const nm = row[ci]; if (!nm || typeof nm !== "string") continue;
     const key = normName(nm); if (!key || seen[key]) continue; seen[key] = 1; persons++;
     const row2 = rows[r + 1] || [];
     blocks.forEach(b => {
+      let ss = "";   // смена по дням: Н — есть ночные часы, Д — только дневные, . — нет часов или код отсутствия
       for (let d = 1; d <= 31; d++) {
         const c = b.c + d - 1; if (Number(h2[c]) !== d) break;
         const v = [row[c], row2[c]].find(x => typeof x === "string" && x.trim());
         if (v) { const mm = months[b.m] || (months[b.m] = {}); const pp = mm[key] || (mm[key] = {}); pp[d] = v.trim(); }
+        const pos = x => typeof x === "number" && x > 0;
+        ss += v ? "." : pos(row2[c]) ? "Н" : pos(row[c]) ? "Д" : ".";
       }
+      if (/[ДН]/.test(ss)) { const sm = sh[b.m] || (sh[b.m] = {}); sm[key] = ss; }
     });
   }
-  return { months, persons };
+  return { months, sh, persons };
 }
 function compute(plan, factShifts, kind, month, cutOrd, opts) {
   const stat = opts && opts.stat, adj = opts && opts.adj;
@@ -748,7 +753,7 @@ let CHK = { recs: [], ok: false, at: null, err: "" }; // recs: [{id,e,n,d}]
 let TL = null, MATCH = null, NAMES = [];
 let SL = { rows: [], ok: false, at: null, err: "" }, STL = null; // журнал статусов техники
 let PLANS = {};           // { "2026-10": plan }
-let ROS = { months: {}, files: [] };   // табель: { months: { "10": { "иванов иван": { "3": "БЛ" } } }, files: [...] }
+let ROS = { months: {}, sh: {}, files: [] };   // табель: { months: { "10": { "иванов иван": { "3": "БЛ" } } }, files: [...] }
 let ROSIDX = null;
 function buildRosIdx() {
   // Те же правила объединения двойников ФИО, что и для чек-листов: ё/е, опечатка в одной букве, запись без отчества.
@@ -756,11 +761,16 @@ function buildRosIdx() {
   const rn = new Set(); Object.keys(ROS.months).forEach(m => Object.keys(ROS.months[m]).forEach(k => rn.add(k)));
   const CN = makeCanon(pool.concat(Array.from(rn)));
   const ck = f => normName(CN.canon(f));
-  ROSIDX = { ck, m: {} };
+  ROSIDX = { ck, m: {}, s: {} };
   Object.keys(ROS.months).forEach(m => {
     const src = ROS.months[m], by = {};
     Object.keys(src).forEach(k => { const c = ck(k); by[c] = Object.assign(by[c] || {}, src[k]); });
     ROSIDX.m[m] = by;
+  });
+  Object.keys(ROS.sh || {}).forEach(m => {
+    const src = ROS.sh[m], by = {};
+    Object.keys(src).forEach(k => { const c = ck(k); const a = by[c] || ""; const b = src[k]; let o = ""; for (let i = 0; i < Math.max(a.length, b.length); i++) o += (a[i] && a[i] !== ".") ? a[i] : (b[i] || "."); by[c] = o; });
+    ROSIDX.s[m] = by;
   });
 }
 // Код отсутствия по табелю для работника на дату "YYYY-MM-DD" или ""
@@ -769,6 +779,27 @@ function rosCode(fio, date) {
   const I = ROSIDX.m[Number(date.slice(5, 7))]; if (!I) return "";
   const rec = I[ROSIDX.ck(fio)];
   return (rec && rec[Number(date.slice(8))]) || "";
+}
+// Смена работника по табелю на дату: "Д", "Н" или "" (нет данных / отсутствие)
+function rosShift(fio, date) {
+  if (!ROSIDX) buildRosIdx();
+  const I = ROSIDX.s[Number(date.slice(5, 7))]; if (!I) return "";
+  const str = I[ROSIDX.ck(fio)]; const ch = str ? str[Number(date.slice(8)) - 1] : "";
+  return ch === "Д" ? SH_D : ch === "Н" ? SH_N : "";
+}
+// План с перенесёнными по табелю сменами. Экипаж «день + ночь» на технике (одна вахта, одни сутки) меняется местами целиком:
+// если большинство людей с известной сменой работали в другую смену, у всех строк этого экипажа (и вакансий тоже) день и ночь меняются.
+function fixPlanByRoster(plan, month) {
+  const mm = Number(String(month).slice(5, 7)); const none = { plan, moved: 0, tons: 0 };
+  if (!ROS.sh || !ROS.sh[mm]) return none;
+  const vote = {};   // ключ экипажа -> { diff, same }
+  const key = r => r[0] + "|" + r[2] + "|" + (r[6] || "");
+  const scan = r => { if (!(r[4] > 0) || !isReal(r[3])) return; const sh = rosShift(r[3], r[0]); if (!sh) return; const v = vote[key(r)] || (vote[key(r)] = { diff: 0, same: 0 }); if (sh === r[1]) v.same++; else v.diff++; };
+  plan.drivers.forEach(scan); plan.excavators.forEach(scan);
+  let moved = 0, tons = 0;
+  const fx = r => { const v = vote[key(r)]; if (!v || v.diff <= v.same) return r; const c = r.slice(); c[1] = r[1] === SH_D ? SH_N : SH_D; if (r[4] > 0) { moved++; tons += r[5]; } return c; };
+  const p = { month: plan.month, drivers: plan.drivers.map(fx), excavators: plan.excavators.map(fx) };
+  return moved ? { plan: p, moved, tons } : none;
 }
 function rosHas(month) { return !!ROS.months[Number(String(month).slice(5, 7))]; }
 let FACT = { shifts: {}, files: [] };
@@ -1010,7 +1041,7 @@ function ingestStatus(r, label) {
 
 // Единая загрузка: тип файла определяется по содержимому (книга Excel / JSON плана / CSV Hexagon), а не по кнопке и расширению.
 function ingestRoster(r, label) {
-  Object.keys(r.months).forEach(m => { ROS.months[m] = r.months[m]; });
+  Object.keys(r.months).forEach(m => { ROS.months[m] = r.months[m]; }); ROS.sh = ROS.sh || {}; Object.keys(r.sh || {}).forEach(m => { ROS.sh[m] = r.sh[m]; });
   ROS.files = (ROS.files || []).filter(x => x.name !== label).concat([{ name: label, persons: r.persons, at: Date.now() }]); ROSIDX = null;
   const ms = Object.keys(r.months).sort((a, b) => a - b).map(m => { const d = r.months[m]; let n = 0; Object.keys(d).forEach(k => { n += Object.keys(d[k]).length; }); return m + " (" + n + " дн. отсутствия)"; });
   return { kind: "ros", msg: "Табель «" + label + "»: людей " + r.persons + (ms.length ? ", месяцы с отсутствиями: " + ms.join(", ") : ", отсутствий не найдено") + ". Год в файле не указан: отсутствия применяются к месяцу плана с тем же номером." };
@@ -1089,7 +1120,7 @@ document.addEventListener("dragover", e => { e.preventDefault(); });
 document.addEventListener("drop", e => { e.preventDefault(); if ($("app").style.display === "block" && e.dataTransfer && e.dataTransfer.files.length) onFiles(e.dataTransfer.files); });
 function clearRoster() {
   if (!confirm("Удалить загруженный табель из браузера?")) return;
-  ROS = { months: {}, files: [] }; ROSIDX = null; try { localStorage.removeItem(CFG.ROS_KEY); } catch (e) {}
+  ROS = { months: {}, sh: {}, files: [] }; ROSIDX = null; try { localStorage.removeItem(CFG.ROS_KEY); } catch (e) {}
   updateSourceStates(); render();
 }
 function clearFact() {
@@ -1104,8 +1135,9 @@ function setTab(t) { TAB = t; document.querySelectorAll(".tab").forEach(e => e.c
 function cutOrd() { const d = $("fCutDate").value; return d ? shiftOrd(d, $("fCutShift").value) : -1; }
 
 function render() {
-  const m = $("fMonth").value, plan = PLANS[m];
-  if (!plan) { $("stats").innerHTML = ""; $("tableHost").innerHTML = '<div class="empty">Загрузите план месяца.</div>'; RES = null; return; }
+  const m = $("fMonth").value, plan0 = PLANS[m];
+  if (!plan0) { $("stats").innerHTML = ""; $("tableHost").innerHTML = '<div class="empty">Загрузите план месяца.</div>'; RES = null; return; }
+  const rf = $("fRosSh").value === "1" ? fixPlanByRoster(plan0, m) : { plan: plan0, moved: 0, tons: 0 }, plan = rf.plan;
   const c = cutOrd();
   const o = $("fSrc").value === "chk" && TL ? { tl: TL, match: MATCH, names: NAMES } : null;
   const adj = $("fAdj").value === "1";
@@ -1134,6 +1166,7 @@ function render() {
     stat("Факт / план", p === null ? "—" : p.toFixed(1) + " %") + monthCards + stat("Рейсов", fmtN(R.trips)) +
     stat("Из них добавлено вручную", R.trips ? fmtN(R.man) + " (" + (R.man / R.trips * 100).toFixed(0) + " %)" : "—") +
     stat("Без работника, т", fmtT(R.unT) + " (" + (R.fact ? (R.unT / R.fact * 100).toFixed(1) : "0") + " %)") +
+    (rf.moved ? stat("Строк плана перенесено в другую смену по табелю", fmtN(rf.moved) + " (" + fmtT(rf.tons) + " т)") : "") +
     (R.hasStat ? stat("Снято из плана за ремонт, т", $("fAdj").value === "1" ? fmtT(R.cut) : "не применяется") : "") +
     (R.chkTr + R.fbTr > 0 ? stat("Рейсов по чек-листам", fmtN(R.chkTr) + " (" + (R.chkTr / R.trips * 100).toFixed(0) + " %)") + stat("Рейсов у подменных", fmtN(R.subTr)) : "");
   banner("warnBanner", !ks.length ? "Факт за выбранный месяц не загружен." :
