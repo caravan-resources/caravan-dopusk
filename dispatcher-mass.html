@@ -201,7 +201,7 @@ table.mini td { padding:6px 8px; border-bottom:1px solid var(--border); }
     <div class="foot" id="foot">
       Вкладки «Вывозка»: сколько массы вывез каждый оператор на каждой технике за период до среза (смена засчитывается, если по ней есть рейсы). Порядок расчёта. Производственные сутки и месяц отсчитываются от 19:00: ночная смена 19:00–07:00, начатая в 19:00 дня D, относится к суткам D+1. Октябрь начинается в 19:00 30.09.2026 и заканчивается в 19:00 31.10.2026.
       Рейс относится к смене по времени погрузки (Time Full). Масса рейса — Computed Tonnage без изменений. Для контроля сравнивается с ожидаемой: Тонли (HT201–HT210) — 70 т, остальные самосвалы (Санни) — 65 т, HT152 (кузов меньшей кубатуры) — 57 т; материал Mud (глина) — 53, 48 и 43 т соответственно. Рейсы, добавленные диспетчером вручную (колонка Extra Load), входят в факт.
-      В выгрузке нет водителей и машинистов. Рейс закрепляется за автором последнего чек-листа на этой технике: осмотр не позже момента погрузки и не раньше чем за час до начала смены (чек-лист заполняется при каждой смене оператора, в том числе в обед). Если чек-листа нет, оператор берётся из плана («дата + смена + самосвал» или «дата + смена + экскаватор»). Если на технике в смене два работника с табельными часами (день заезда или выезда группы), масса делится пропорционально табельным часам.
+      В выгрузке нет водителей и машинистов. Рейс закрепляется за автором последнего чек-листа на этой технике: осмотр не позже момента погрузки и не раньше чем за час до начала смены (чек-лист заполняется при каждой смене оператора, в том числе в обед). Если чек-листа нет, оператор берётся из плана («дата + смена + самосвал» или «дата + смена + экскаватор»). План берётся по технике: плановый тоннаж техники в смене делится между теми, кто на ней вывозил, пропорционально массе (у кого плановых часов не было, в строке смены стоит «план техники»). Если рейсов на технике в смене нет, план остаётся у назначенных по плану. Если на технике в смене два работника с табельными часами (день заезда или выезда группы), масса делится пропорционально табельным часам.
       План на срез — сумма плана по заданию за смены до выбранного среза включительно. «Осталось до плана» — план месяца минус факт на срез. «Нужно за смену» — остаток, делённый на число оставшихся смен работника по плану; для сравнения под ним указан плановый тоннаж за смену. Пороги цвета заданы условно, это не нормативы.
       Статусы техники (лист «Статуса» выгрузки Hexagon): интервал статуса делится по границам смен 07:00 и 19:00. Если включено «Вычитать из плана», плановый тоннаж смены уменьшается пропорционально доле времени, которое техника была в статусе Down (ремонт): например, 6 часов ремонта из 12 снимают половину плана смены. Ожидание (Standby) и задержки (Delay: обед, заправка, пересменка) из плана не вычитаются, они показаны справочно. Если статусов на смену нет, план не меняется. Часы ремонта и ожидания делятся между работниками смены так же, как масса, по табельным часам.
     </div>
@@ -619,7 +619,7 @@ function compute(plan, factShifts, kind, month, cutOrd, opts) {
   const planSet = new Set(planNames.map(x => CN.canon(x)));
   const rowsP = (kind === "drivers" ? plan.drivers : plan.excavators).map(r => isReal(r[3]) ? [r[0], r[1], r[2], CN.canon(r[3]), r[4], r[5], r[6]] : r);
   const idx = buildIndex(rowsP);
-  const W = {}; const E = {}; const U = {}; const NM = {};
+  const W = {}; const E = {}; const U = {}; const NM = {}; const PL = {};   // PL: плановый тоннаж по «дата|смена|техника» и из каких строк плана он состоит
   const hasStat = !!stat && Object.keys(stat).length > 0;
   const getW = f => W[f] || (W[f] = { fio: f, plan: 0, planRaw: 0, dnH: 0, sbH: 0, rdH: 0, dlH: 0, shifts: 0, fact: 0, trips: 0, man: 0, manT: 0, shared: 0, monthPlan: 0, planLeft: 0, shiftsLeft: 0, eq: {}, cells: {}, abs: {} });
   const getE = e => E[e] || (E[e] = { eq: e, plan: 0, fact: 0, trips: 0, man: 0, manT: 0 });
@@ -635,10 +635,11 @@ function compute(plan, factShifts, kind, month, cutOrd, opts) {
     const sd = statCell(stat, r[0], r[1], r[2]);
     const pe = adj && sd ? r[5] * (sd.tot - sd.e[3]) / sd.tot : r[5];
     monthAll += pe; planAll += pe; planRawAll += r[5]; getE(r[2]).plan += pe; bs(r[0] + "|" + r[1]).plan += pe;
+    const pk = r[0] + "|" + r[1] + "|" + r[2]; const P = PL[pk] || (PL[pk] = { pe: 0, raw: 0, rows: [] }); P.pe += pe; P.raw += r[5];
     if (hasStat && !sd && r[4] > 0) noStat++;
     if (isReal(r[3])) {
       const w = getW(r[3].trim()); w.plan += pe; w.planRaw += r[5]; w.monthPlan += pe; if (r[4] > 0) w.shifts++;
-      const c = cell(w, r[0], r[1], r[2]); c.plan += pe; c.planRaw += r[5]; c.hrs += r[4];
+      const c = cell(w, r[0], r[1], r[2]); c.plan += pe; c.planRaw += r[5]; c.hrs += r[4]; P.rows.push({ w, c, pe, raw: r[5] });
       if (rosf && r[4] > 0) { const cd = rosf(r[3], r[0]); if (cd) { const a = w.abs[cd] || (w.abs[cd] = { days: 0, tons: 0, dates: [] }); a.days++; a.tons += pe; a.dates.push(r[0].slice(8)); } }
       if (sd && r[4] > 0) {
         const lst = (idx[r[0] + "|" + r[1] + "|" + r[2]] || []).filter(x => x.h > 0 && isReal(x.fio)); const sum = lst.reduce((q, x) => q + x.h, 0);
@@ -708,6 +709,15 @@ function compute(plan, factShifts, kind, month, cutOrd, opts) {
     } else {
       S.rows.forEach(r => place(kind === "drivers" ? r[0] : r[1], r[3], r[4], r[2], null));
     }
+  });
+  // План берётся по технике, а оператора подтверждает вывозка: плановый тонаж техники в смене делится между теми, кто на ней вывозил,
+  // пропорционально их массе. Если рейсов на технике в смене не было, план остаётся у назначенных по плану работников.
+  const FT = {}; Object.values(W).forEach(w => Object.values(w.cells).forEach(c => { const k = c.date + "|" + c.sh + "|" + c.eq; FT[k] = (FT[k] || 0) + c.fact; }));
+  Object.keys(PL).forEach(k => {
+    const P = PL[k]; if (!(P.pe > 0) || !(FT[k] > 0)) return;
+    P.rows.forEach(x => { x.c.plan -= x.pe; x.c.planRaw -= x.raw; x.w.plan -= x.pe; x.w.planRaw -= x.raw; x.w.monthPlan -= x.pe; });
+    Object.values(W).forEach(w => { const c = w.cells[k]; if (!c || !(c.fact > 0)) return; const sh = c.fact / FT[k];
+      c.plan += P.pe * sh; c.planRaw += P.raw * sh; c.xf = c.hrs > 0 ? 0 : P.pe * sh; w.plan += P.pe * sh; w.planRaw += P.raw * sh; w.monthPlan += P.pe * sh; });
   });
   return { shiftsData: BS, workers: Object.values(W), equip: Object.values(E), unassigned: Object.values(U), unmatched: NM, merges: CN.merges,
     tot: { plan: planAll, planRaw: planRawAll, cut: planRawAll - planAll, noStat, hasStat, monthAll, fact: factAll, trips: tripsAll, man: manAll, manT: manTAll, unT, unTr, sharedTr, anN, anT, devN, devT, chkTr, chkT, fbTr, fbT, subTr, subT } };
@@ -1439,7 +1449,7 @@ function openWorker(kind, fio) {
   const cells = Object.values(w.cells).sort((a, b) => shiftOrd(a.date, a.sh) - shiftOrd(b.date, b.sh));
   let h = '<div class="modal-head"><div><h2>' + esc(fio) + '</h2>' + noteFullHtml(fio) + (absText(w) ? '<div style="border-left:4px solid var(--red);background:var(--light);border-radius:6px;padding:6px 10px;margin:6px 0;font-size:12px"><b>По табелю: ' + esc(absText(w)) + '</b>' + (absTons(w) > 0.5 ? '<div>План на эти смены ' + fmtT(absTons(w)) + ' т остаётся в плане работника: табель план не снимает.</div>' : '') + '</div>' : '') + '<div class="sub">План ' + fmtT(w.plan) + " т, факт " + fmtT(w.fact) + " т" + (w.plan ? ", " + (w.fact / w.plan * 100).toFixed(1) + " %" : "") + (w.planRaw - w.plan > 0.5 ? "; по книге " + fmtT(w.planRaw) + " т, снято за ремонт техники " + fmtT(w.planRaw - w.plan) + " т (" + hrs1(w.dnH) + " ч)" : "") + '</div><div class="sub">План месяца ' + fmtT(w.monthPlan) + " т, осталось " + fmtT(Math.max(0, w.monthPlan - w.fact)) + " т" + (w.shiftsLeft ? ", смен осталось " + w.shiftsLeft + ", нужно за смену " + fmtT(Math.max(0, w.monthPlan - w.fact) / w.shiftsLeft) + " т" : "") + '</div></div><button class="btn ghost" onclick="closeModal()">Закрыть</button></div>';
   h += '<table class="mini"><thead><tr><th>Сутки</th><th>Смена</th><th>Техника</th><th class="num">План, т</th><th class="num">Ремонт, ч</th><th class="num">Факт, т</th><th class="num">Рейсов</th><th>Факт / план</th><th>Оператор определён</th></tr></thead><tbody>' +
-    cells.map(c => "<tr><td>" + fmtD(c.date) + "</td><td>" + (c.sh === SH_N ? "Ночь" : "День") + "</td><td>" + esc(c.eq) + '</td><td class="num">' + fmtT(c.plan) + (c.planRaw - c.plan > 0.5 ? '<div class="sub">по книге ' + fmtT(c.planRaw) + "</div>" : "") + '</td><td class="num">' + hrs1(c.dn) + '</td><td class="num">' + fmtT(c.fact) + '</td><td class="num">' + (c.trips ? (Math.abs(c.trips - Math.round(c.trips)) < 0.01 ? fmtN(c.trips) : c.trips.toFixed(1)) : "") + "</td><td>" + (c.plan ? (c.fact / c.plan * 100).toFixed(0) + " %" : "") + "</td><td>" + (c.chk && c.pl ? "чек-лист и план" : c.chk ? "по чек-листу" : c.pl ? "по плану" : "") + "</td></tr>").join("") + "</tbody></table>";
+    cells.map(c => "<tr><td>" + fmtD(c.date) + "</td><td>" + (c.sh === SH_N ? "Ночь" : "День") + "</td><td>" + esc(c.eq) + '</td><td class="num">' + fmtT(c.plan) + (c.xf > 0.5 ? '<div class="sub">план техники</div>' : "") + (c.planRaw - c.plan > 0.5 ? '<div class="sub">по книге ' + fmtT(c.planRaw) + "</div>" : "") + '</td><td class="num">' + hrs1(c.dn) + '</td><td class="num">' + fmtT(c.fact) + '</td><td class="num">' + (c.trips ? (Math.abs(c.trips - Math.round(c.trips)) < 0.01 ? fmtN(c.trips) : c.trips.toFixed(1)) : "") + "</td><td>" + (c.plan ? (c.fact / c.plan * 100).toFixed(0) + " %" : "") + "</td><td>" + (c.chk && c.pl ? "чек-лист и план" : c.chk ? "по чек-листу" : c.pl ? "по плану" : "") + "</td></tr>").join("") + "</tbody></table>";
   $("modalBox").innerHTML = h; $("modalBg").style.display = "flex";
 }
 function noteFullHtml(fio) {
