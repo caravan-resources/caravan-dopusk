@@ -626,7 +626,7 @@ function compute(plan, factShifts, kind, month, cutOrd, opts) {
   const PG = {}; rowsP.forEach(r => { if (isReal(r[3]) && r[6] && !PG[r[3]]) PG[r[3]] = r[6]; });   // вахта человека по строкам плана (совпадает с графиком табеля)
   const W = {}; const E = {}; const U = {}; const NM = {}; const PL = {};   // PL: плановый тоннаж по «дата|смена|техника» и из каких строк плана он состоит
   const hasStat = !!stat && Object.keys(stat).length > 0;
-  const getW = f => W[f] || (W[f] = { fio: f, plan: 0, planRaw: 0, dnH: 0, sbH: 0, rdH: 0, dlH: 0, shifts: 0, fact: 0, trips: 0, man: 0, manT: 0, shared: 0, monthPlan: 0, planLeft: 0, shiftsLeft: 0, eq: {}, cells: {}, abs: {} });
+  const getW = f => W[f] || (W[f] = { fio: f, plan: 0, planRaw: 0, dnH: 0, sbH: 0, rdH: 0, dlH: 0, shifts: 0, fact: 0, trips: 0, man: 0, manT: 0, shared: 0, monthPlan: 0, planLeft: 0, shiftsLeft: 0, bkP: 0, bkN: 0, eq: {}, cells: {}, abs: {} });
   const getE = e => E[e] || (E[e] = { eq: e, plan: 0, fact: 0, trips: 0, man: 0, manT: 0 });
   const cell = (w, date, sh, eq) => { const k = date + "|" + sh + "|" + eq; return w.cells[k] || (w.cells[k] = { date, sh, eq, plan: 0, planRaw: 0, dn: 0, sb: 0, fact: 0, trips: 0, hrs: 0, chk: 0, pl: 0 }); };
   let planAll = 0, planRawAll = 0, monthAll = 0, noStat = 0;
@@ -634,7 +634,7 @@ function compute(plan, factShifts, kind, month, cutOrd, opts) {
     if (r[0].slice(0, 7) !== month) return;
     if (shiftOrd(r[0], r[1]) > cutOrd) {
       monthAll += r[5];
-      if (isReal(r[3])) { const w = getW(r[3].trim()); w.monthPlan += r[5]; w.planLeft += r[5]; if (r[4] > 0) w.shiftsLeft++; }
+      if (isReal(r[3])) { const w = getW(r[3].trim()); w.monthPlan += r[5]; w.planLeft += r[5]; if (r[4] > 0) { w.shiftsLeft++; w.bkP += r[5]; w.bkN++; } }
       return;
     }
     const sd = statCell(stat, r[0], r[1], r[2]);
@@ -643,7 +643,7 @@ function compute(plan, factShifts, kind, month, cutOrd, opts) {
     const pk = r[0] + "|" + r[1] + "|" + r[2]; const P = PL[pk] || (PL[pk] = { pe: 0, raw: 0, rows: [] }); P.pe += pe; P.raw += r[5];
     if (hasStat && !sd && r[4] > 0) noStat++;
     if (isReal(r[3])) {
-      const w = getW(r[3].trim()); w.plan += pe; w.planRaw += r[5]; w.monthPlan += pe; if (r[4] > 0) w.shifts++;
+      const w = getW(r[3].trim()); w.plan += pe; w.planRaw += r[5]; w.monthPlan += pe; if (r[4] > 0) { w.shifts++; w.bkP += pe; w.bkN++; }
       const c = cell(w, r[0], r[1], r[2]); c.plan += pe; c.planRaw += r[5]; c.hrs += r[4]; P.rows.push({ w, c, pe, raw: r[5] });
       if (rosf && r[4] > 0) { const cd = rosf(r[3], r[0]); if (cd) { const a = w.abs[cd] || (w.abs[cd] = { days: 0, tons: 0, dates: [] }); a.days++; a.tons += pe; a.dates.push(r[0].slice(8)); } }
       if (sd && r[4] > 0) {
@@ -734,8 +734,15 @@ function compute(plan, factShifts, kind, month, cutOrd, opts) {
       if (rshf(w.fio, month + "-01") === undefined) return;
       let done = 0, left = 0;
       for (let d = 1; d <= nd; d++) { const dt = month + "-" + pad2(d), sh = rshf(w.fio, dt); if (sh !== SH_D && sh !== SH_N) continue; if (shiftOrd(dt, sh) <= cutOrd) done++; else left++; }
-      w.shifts = done; w.shiftsLeft = left;
+      w.shifts = done; w.shiftsLeft = left; w.rosOk = true;
     });
+    // План на весь месяц: норма смен — самое частое число смен среди людей той же группы плана (график 19/4 или 4/19).
+    // У кого по табелю смен меньше нормы (больничный, БС, отпуск), план месяца приводится к полному, процент считается от него.
+    const cnt = {};
+    Object.values(W).forEach(w => { const g = PG[w.fio]; if (!g || !w.rosOk) return; const t = w.shifts + w.shiftsLeft; if (!(t > 0)) return; const c = cnt[g] || (cnt[g] = {}); c[t] = (c[t] || 0) + 1; });
+    const norm = {}; Object.keys(cnt).forEach(g => { norm[g] = +Object.keys(cnt[g]).sort((a, b) => cnt[g][b] - cnt[g][a] || b - a)[0]; });
+    Object.values(W).forEach(w => { const g = PG[w.fio]; if (!g || !w.rosOk || !norm[g]) return; const t = w.shifts + w.shiftsLeft; w.norm = norm[g]; w.shTot = t;
+      if (t > 0 && t < norm[g]) { w.monthFull = w.monthPlan + (norm[g] - t) * (w.bkN > 0 ? w.bkP / w.bkN : 0); w.abs2 = rosAbsAll(w.fio, month); } });   // недостающие смены — по среднему плану смены из его строк книги
   }
   return { shiftsData: BS, workers: Object.values(W), equip: Object.values(E), unassigned: Object.values(U), unmatched: NM, merges: CN.merges,
     tot: { plan: planAll, planRaw: planRawAll, cut: planRawAll - planAll, noStat, hasStat, monthAll, fact: factAll, trips: tripsAll, man: manAll, manT: manTAll, unT, unTr, sharedTr, anN, anT, devN, devT, chkTr, chkT, fbTr, fbT, subTr, subT } };
@@ -810,6 +817,22 @@ function rosCode(fio, date) {
   const I = ROSIDX.m[Number(date.slice(5, 7))]; if (!I) return "";
   const rec = I[ROSIDX.ck(fio)];
   return (rec && rec[Number(date.slice(8))]) || "";
+}
+// Все коды отсутствия человека за месяц: { код: [числа] }
+function rosAbsAll(fio, month) {
+  if (!ROSIDX) buildRosIdx();
+  const I = ROSIDX.m[Number(month.slice(5, 7))]; const rec = I && I[ROSIDX.ck(fio)]; const o = {};
+  if (rec) Object.keys(rec).map(Number).sort((a, b) => a - b).forEach(d => { const c = rec[d]; if (c) (o[c] || (o[c] = [])).push(pad2(d)); });
+  return o;
+}
+function codeName(c) { return c === "БЛ" ? "больничный (БЛ)" : c === "БС" ? "отпуск без содержания (БС)" : c; }
+// Комментарий тем, у кого по табелю смен меньше, чем по графику
+function shortNote(w) {
+  if (!(w.norm && w.shTot > 0 && w.shTot < w.norm)) return "";
+  const miss = w.norm - w.shTot, ab = w.abs2 || {}, ks = Object.keys(ab);
+  const expl = ks.reduce((q, k) => q + ab[k].length, 0), other = Math.max(0, miss - expl);
+  const parts = ks.map(k => codeName(k) + " " + ab[k].length + " дн. (" + ab[k].slice(0, 6).join(", ") + (ab[k].length > 6 ? "…" : "") + ")");
+  return "план не выполнен: смен " + w.shTot + " из " + w.norm + (parts.length ? " — " + parts.join("; ") : "") + (other ? (parts.length ? "; " : " — ") + "по другой причине " + other + " см." : "");
 }
 // Смена работника по табелю на дату: "Д", "Н" или "" (нет данных / отсутствие)
 function rosShift(fio, date) {
@@ -960,7 +983,7 @@ function lowFact(w) { return w.plan > 0 && (w.fact <= 0 || w.fact / w.plan < 0.1
 function absText(w) { const ks = Object.keys(w.abs || {}); return ks.map(k => k + " " + w.abs[k].days + " дн. (" + w.abs[k].dates.slice(0, 6).join(", ") + (w.abs[k].dates.length > 6 ? "…" : "") + ")").join("; "); }
 function absTons(w) { return Object.keys(w.abs || {}).reduce((s, k) => s + w.abs[k].tons, 0); }
 function noteSub(w) {
-  const ab = absText(w); const abH = ab ? '<div class="sub" style="color:var(--red)">по табелю: ' + esc(ab) + (absTons(w) > 0.5 ? ", план " + fmtT(absTons(w)) + " т" : "") + "</div>" : "";
+  const sn = shortNote(w), ab = sn ? "" : absText(w); const abH = (sn ? '<div class="sub" style="color:var(--red)">' + esc(sn) + "</div>" : "") + (ab ? '<div class="sub" style="color:var(--red)">по табелю: ' + esc(ab) + (absTons(w) > 0.5 ? ", план " + fmtT(absTons(w)) + " т" : "") + "</div>" : "");
   if (!lowFact(w)) return abH; const n = noteFor(w.fio); return abH + (n ? '<div class="sub" style="color:' + noteColor(n.tone) + '">' + esc(n.short) + "</div>" : ""); }
 // Соответствие вахт группам плана определено по наряду мастера: группа B = Вахта-1, группа A = Вахта-2 (совпало у 128 из 129 работников).
 let VT = false, VAUTO = false;   // VT: фильтр вахты менял пользователь; VAUTO: автовыбор работающей вахты уже выполнен
@@ -1284,10 +1307,10 @@ function sortBy(tab, k) { const s = SORT[tab]; SORT[tab] = [k, s[0] === k ? -s[1
 
 function workerRows(kind) {
   const q = $("fSearch").value.trim().toLowerCase();
-  return RES[kind].workers.map(w => Object.assign({}, w, { pct: pct(w.fact, w.plan), pctM: w.monthPlan > 0 ? w.fact / w.monthPlan * 100 : null, diff: w.fact - w.plan, cut: w.planRaw - w.plan, rem: w.monthPlan - w.fact,
-    need: w.shiftsLeft > 0 ? Math.max(0, w.monthPlan - w.fact) / w.shiftsLeft : null,
+  return RES[kind].workers.map(w => { const mp = w.monthFull != null ? w.monthFull : w.monthPlan; return Object.assign({}, w, { monthPlan: mp, pct: pct(w.fact, w.plan), pctM: mp > 0 ? w.fact / mp * 100 : null, diff: w.fact - w.plan, cut: w.planRaw - w.plan, rem: mp - w.fact,
+    need: w.shiftsLeft > 0 ? Math.max(0, mp - w.fact) / w.shiftsLeft : null,
     perShift: w.shiftsLeft > 0 ? w.planLeft / w.shiftsLeft : null,
-    eqs: Object.keys(w.eq).sort((a, b) => w.eq[b] - w.eq[a]) }))
+    eqs: Object.keys(w.eq).sort((a, b) => w.eq[b] - w.eq[a]) }); })
     .map(w => Object.assign(w, { eqsS: w.eqs.join(" ") }))
     .filter(w => !q || w.fio.toLowerCase().indexOf(q) >= 0 || w.eqs.join(" ").toLowerCase().indexOf(q) >= 0);
 }
