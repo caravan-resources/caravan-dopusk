@@ -717,8 +717,19 @@ function compute(plan, factShifts, kind, month, cutOrd, opts) {
     const P = PL[k]; if (!(P.pe > 0) || !(FT[k] > 0)) return;
     P.rows.forEach(x => { x.c.plan -= x.pe; x.c.planRaw -= x.raw; x.w.plan -= x.pe; x.w.planRaw -= x.raw; x.w.monthPlan -= x.pe; });
     Object.values(W).forEach(w => { const c = w.cells[k]; if (!c || !(c.fact > 0)) return; const sh = c.fact / FT[k];
-      c.plan += P.pe * sh; c.planRaw += P.raw * sh; c.xf = c.hrs > 0 ? 0 : P.pe * sh; if (!(c.hrs > 0)) w.shifts++; w.plan += P.pe * sh; w.planRaw += P.raw * sh; w.monthPlan += P.pe * sh; });
+      c.plan += P.pe * sh; c.planRaw += P.raw * sh; c.xf = c.hrs > 0 ? 0 : P.pe * sh; w.plan += P.pe * sh; w.planRaw += P.raw * sh; w.monthPlan += P.pe * sh; });
   });
+  // Смены считаются по табелю (физическое присутствие): дни с часами до среза — отработано, после среза — осталось.
+  // Если человека нет в табеле, остаются смены по плану.
+  if (rshf) {
+    const y = +month.slice(0, 4), mo = +month.slice(5), nd = new Date(Date.UTC(y, mo, 0)).getUTCDate();
+    Object.values(W).forEach(w => {
+      if (rshf(w.fio, month + "-01") === undefined) return;
+      let done = 0, left = 0;
+      for (let d = 1; d <= nd; d++) { const dt = month + "-" + pad2(d), sh = rshf(w.fio, dt); if (sh !== SH_D && sh !== SH_N) continue; if (shiftOrd(dt, sh) <= cutOrd) done++; else left++; }
+      w.shifts = done; w.shiftsLeft = left;
+    });
+  }
   return { shiftsData: BS, workers: Object.values(W), equip: Object.values(E), unassigned: Object.values(U), unmatched: NM, merges: CN.merges,
     tot: { plan: planAll, planRaw: planRawAll, cut: planRawAll - planAll, noStat, hasStat, monthAll, fact: factAll, trips: tripsAll, man: manAll, manT: manTAll, unT, unTr, sharedTr, anN, anT, devN, devT, chkTr, chkT, fbTr, fbT, subTr, subT } };
 }
