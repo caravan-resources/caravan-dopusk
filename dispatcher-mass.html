@@ -944,15 +944,13 @@ async function init() {
   const f = load(CFG.FACT_KEY); if (f && f.shifts) FACT = f;
   const sx = load(CFG.STAT_KEY); if (sx && sx.shifts) STAT = Object.assign(STAT, sx);
   const rx = load(CFG.ROS_KEY); if (rx && rx.months) { ROS = rx; ROSIDX = null; }
-  // План из репозитория подтягивается автоматически: если плана на месяц нет, либо он тоже пришёл из репозитория, но устарел (другая версия rev).
-  // Вручную загруженную книгу (src = manual) автозагрузка не трогает; план, сохранённый прежней версией без метки, обновляется один раз.
-  try {
-    const r = await fetch(CFG.AUTO_PLAN, { cache: "no-cache" });
-    if (r.ok) {
-      const p = planFromJson(await r.json()), cur = PLANS[p.month];
-      if (!cur || (cur.src !== "manual" && cur.rev !== p.rev)) { PLANS[p.month] = p; store(CFG.PLAN_KEY, PLANS); banner("infoBanner", "План на " + p.month + " обновлён автоматически из репозитория (версия " + (p.rev || "—") + ")."); }
-    }
-  } catch (e) {}
+  // План из репозитория подтягивается только на пустой панели; загруженную вручную книгу автозагрузка не заменяет.
+  if (!Object.keys(PLANS).length) {
+    try {
+      const r = await fetch(CFG.AUTO_PLAN, { cache: "no-cache" });
+      if (r.ok) { const p = planFromJson(await r.json()); PLANS[p.month] = p; store(CFG.PLAN_KEY, PLANS); banner("infoBanner", "План на " + p.month + " подгружен автоматически из файла " + CFG.AUTO_PLAN + "."); }
+    } catch (e) {}
+  }
   refreshMonths(); cutToData(true); updateSourceStates(); render();
   loadChecklists(false); loadStatusLog(false); loadAssignments(false);
 }
