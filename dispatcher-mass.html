@@ -785,6 +785,7 @@ function buildRosIdx() {
   // Те же правила объединения двойников ФИО, что и для чек-листов: ё/е, опечатка в одной букве, запись без отчества.
   const pool = []; Object.values(PLANS).forEach(p => p.drivers.concat(p.excavators).forEach(r => { if (isReal(r[3])) pool.push(r[3].trim()); }));
   const rn = new Set(); Object.keys(ROS.months).forEach(m => Object.keys(ROS.months[m]).forEach(k => rn.add(k)));
+  Object.keys(ROS.sh || {}).forEach(m => Object.keys(ROS.sh[m]).forEach(k => rn.add(k)));   // люди без кодов отсутствия есть только в ROS.sh
   const CN = makeCanon(pool.concat(Array.from(rn)));
   const ck = f => normName(CN.canon(f));
   ROSIDX = { ck, m: {}, s: {} };
