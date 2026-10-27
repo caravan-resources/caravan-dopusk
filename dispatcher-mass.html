@@ -755,7 +755,12 @@ function compute(plan, factShifts, kind, month, cutOrd, opts) {
     Object.values(W).forEach(w => { const g = PG[w.fio]; if (!g || !w.rosOk) return; const t = w.shifts + w.shiftsLeft; if (!(t > 0)) return; const c = cnt[g] || (cnt[g] = {}); c[t] = (c[t] || 0) + 1; });
     const norm = {}; Object.keys(cnt).forEach(g => { norm[g] = +Object.keys(cnt[g]).sort((a, b) => cnt[g][b] - cnt[g][a] || b - a)[0]; });
     Object.values(W).forEach(w => { const g = PG[w.fio]; if (!g || !w.rosOk || !norm[g]) return; const t = w.shifts + w.shiftsLeft; w.norm = norm[g]; w.shTot = t;
-      if (t > 0 && t < norm[g]) w.abs2 = rosAbsAll(w.fio, month); });   // только для подсказки «план не выполнен»
+      if (t > 0 && t < norm[g]) {
+        w.abs2 = rosAbsAll(w.fio, month);   // подсказка «план не выполнен»
+        // План месяца — полный, как у того, кто отработал все смены графика: недостающие смены добавляются по среднему плану его смены.
+        // Только при разумной разнице (не более 1,6 раза): у подменных с одной-двумя сменами масштаб нереальный.
+        if (norm[g] / t <= 1.6) { w.mpAdd = w.monthPlan * (norm[g] / t - 1); w.monthPlan += w.mpAdd; }
+      } });
   }
   return { shiftsData: BS, workers: Object.values(W), equip: Object.values(E), unassigned: Object.values(U), unmatched: NM, merges: CN.merges,
     tot: { plan: planAll, planRaw: planRawAll, cut: planRawAll - planAll, noStat, hasStat, monthAll, fact: factAll, trips: tripsAll, man: manAll, manT: manTAll, unT, unTr, sharedTr, anN, anT, devN, devT, chkTr, chkT, fbTr, fbT, subTr, subT } };
