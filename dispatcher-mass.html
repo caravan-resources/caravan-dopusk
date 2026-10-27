@@ -769,7 +769,7 @@ function compute(plan, factShifts, kind, month, cutOrd, opts) {
 // Разбор плана из JSON (kpi-plan-*.json)
 function planFromJson(o) {
   if (!o || !Array.isArray(o.drivers) || !Array.isArray(o.excavators) || !o.month) throw new Error("Файл плана имеет неверную структуру.");
-  return { month: o.month, drivers: o.drivers, excavators: o.excavators };
+  return { month: o.month, drivers: o.drivers, excavators: o.excavators, rev: o.rev || "", src: "auto" };
 }
 function serialToYmd(v) {
   if (typeof v === "number") return ymd(Math.round((v - 25569) * 86400) * 1000);
@@ -944,12 +944,15 @@ async function init() {
   const f = load(CFG.FACT_KEY); if (f && f.shifts) FACT = f;
   const sx = load(CFG.STAT_KEY); if (sx && sx.shifts) STAT = Object.assign(STAT, sx);
   const rx = load(CFG.ROS_KEY); if (rx && rx.months) { ROS = rx; ROSIDX = null; }
-  if (!Object.keys(PLANS).length) {
-    try {
-      const r = await fetch(CFG.AUTO_PLAN, { cache: "no-cache" });
-      if (r.ok) { const p = planFromJson(await r.json()); PLANS[p.month] = p; store(CFG.PLAN_KEY, PLANS); banner("infoBanner", "План на " + p.month + " подгружен автоматически из файла " + CFG.AUTO_PLAN + "."); }
-    } catch (e) {}
-  }
+  // План из репозитория подтягивается автоматически: если плана на месяц нет, либо он тоже пришёл из репозитория, но устарел (другая версия rev).
+  // Вручную загруженную книгу (src = manual) автозагрузка не трогает; план, сохранённый прежней версией без метки, обновляется один раз.
+  try {
+    const r = await fetch(CFG.AUTO_PLAN, { cache: "no-cache" });
+    if (r.ok) {
+      const p = planFromJson(await r.json()), cur = PLANS[p.month];
+      if (!cur || (cur.src !== "manual" && cur.rev !== p.rev)) { PLANS[p.month] = p; store(CFG.PLAN_KEY, PLANS); banner("infoBanner", "План на " + p.month + " обновлён автоматически из репозитория (версия " + (p.rev || "—") + ")."); }
+    }
+  } catch (e) {}
   refreshMonths(); cutToData(true); updateSourceStates(); render();
   loadChecklists(false); loadStatusLog(false); loadAssignments(false);
 }
@@ -1176,7 +1179,7 @@ async function ingestFile(f) {
     const res = [];
     if (wb.Sheets["План водителей"] && wb.Sheets["План экскаваторщиков"]) {
       const plan = planFromSheets(aoa("План водителей"), aoa("План экскаваторщиков"));
-      PLANS[plan.month] = plan;
+      plan.src = "manual"; PLANS[plan.month] = plan;
       res.push({ kind: "plan", month: plan.month, msg: "План на " + plan.month + " загружен из «" + f.name + "»." });
     }
     if (wb.Sheets["ROSTER"]) {
