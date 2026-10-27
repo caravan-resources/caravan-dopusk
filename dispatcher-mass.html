@@ -88,6 +88,10 @@ table.kpi tfoot td { font-weight:800; background:var(--light); }
 .b-blue { background:var(--bluebg); color:var(--blue); }
 .b-gray { background:var(--light); color:var(--gray); }
 .kpi-cell { min-width:96px; }
+.mon-cell { min-width:104px; background:#EEF3FB; border-left:3px solid var(--navy2); padding:4px 8px; border-radius:6px; }
+.mon-cell b { font-size:16px; color:var(--navy); }
+.mon-cell.done b { color:var(--green); }
+.mon-cell .bar { height:7px; background:#D6E0F2; }
 .bar { height:6px; background:var(--light); border-radius:4px; margin-top:4px; overflow:hidden; }
 .bar > i { display:block; height:100%; }
 .empty { text-align:center; padding:28px; color:var(--gray); font-size:13px; }
@@ -1264,6 +1268,12 @@ function kpiBadge(p) {
   return '<div class="kpi-cell"><span class="badge ' + cls + '">' + p.toFixed(1) + ' %</span><div class="bar"><i style="width:' + Math.min(100, p) + "%;background:" + col + '"></i></div></div>';
 }
 
+// Процент месяца — главный показатель: крупно, с полосой; зелёный только когда месяц выполнен, красным не красим (до конца месяца процент естественно ниже 100)
+function monthBadge(p) {
+  if (p === null || p === undefined) return "";
+  const d = p >= 100;
+  return '<div class="mon-cell' + (d ? " done" : "") + '"><b>' + p.toFixed(1) + ' %</b><div class="bar"><i style="width:' + Math.min(100, p) + "%;background:" + (d ? "var(--green)" : "var(--navy2)") + '"></i></div></div>';
+}
 function sortRows(rows, key) {
   const [k, dir] = SORT[key]; const f = r => (typeof r[k] === "function" ? r[k]() : r[k]);
   return rows.slice().sort((a, b) => { const x = f(a), y = f(b); if (x == null && y == null) return 0; if (x == null) return 1; if (y == null) return -1;
@@ -1422,9 +1432,9 @@ function renderTable() {
     rows.forEach(w => { sp += w.plan; sf += w.fact; sm += w.monthPlan; sr += Math.max(0, w.rem);
       h += '<tr class="click" onclick="openWorker(\'' + TAB + "'," + JSON.stringify(w.fio).replace(/"/g, "&quot;") + ')"><td><b>' + esc(w.fio) + "</b>" + (w.shared ? '<div class="sub">рейсы частично разделены</div>' : "") + noteSub(w) + "</td><td>" + esc(w.eqs.slice(0, 4).join(", ")) + (w.eqs.length > 4 ? " +" + (w.eqs.length - 4) : "") +
         '</td><td class="num">' + w.shifts + '</td><td class="num">' + fmtT(w.plan) + '</td><td class="num">' + fmtT(w.fact) + '</td><td class="num">' + (w.diff >= 0 ? "+" : "") + fmtT(w.diff) +
-        '</td><td class="num">' + fmtN(w.trips) + '</td><td class="num">' + (w.manT ? fmtT(w.manT) : "") + "</td><td>" + kpiBadge(w.pct) + "</td>" + (RES[TAB].tot.hasStat ? '<td class="num">' + hrs1(w.dnH) + '</td><td class="num">' + (w.cut > 0.5 ? fmtT(w.cut) : "") + "</td>" : "") + '<td class="num">' + fmtT(w.monthPlan) + '</td><td class="num">' + (w.pctM == null ? "" : w.pctM.toFixed(1) + " %") + '</td><td class="num">' + (w.rem > 0 ? fmtT(w.rem) : (w.monthPlan > 0 ? '<span class="badge b-green">выполнен +' + fmtT(-w.rem) + "</span>" : "")) +
+        '</td><td class="num">' + fmtN(w.trips) + '</td><td class="num">' + (w.manT ? fmtT(w.manT) : "") + "</td><td>" + kpiBadge(w.pct) + "</td>" + (RES[TAB].tot.hasStat ? '<td class="num">' + hrs1(w.dnH) + '</td><td class="num">' + (w.cut > 0.5 ? fmtT(w.cut) : "") + "</td>" : "") + '<td class="num">' + fmtT(w.monthPlan) + '</td><td>' + monthBadge(w.pctM) + '</td><td class="num">' + (w.rem > 0 ? fmtT(w.rem) : (w.monthPlan > 0 ? '<span class="badge b-green">выполнен +' + fmtT(-w.rem) + "</span>" : "")) +
         '</td><td class="num">' + (w.shiftsLeft || "") + '</td><td class="num">' + (w.need === null ? "" : fmtT(w.need) + (w.perShift ? '<div class="sub">план за смену ' + fmtT(w.perShift) + "</div>" : "")) + "</td></tr>"; });
-    h += "</tbody><tfoot><tr><td>Итого по показанным</td><td></td><td></td><td class=\"num\">" + fmtT(sp) + '</td><td class="num">' + fmtT(sf) + '</td><td class="num">' + (sf - sp >= 0 ? "+" : "") + fmtT(sf - sp) + "</td><td></td><td></td><td>" + (sp ? (sf / sp * 100).toFixed(1) + " %" : "") + "</td>" + (RES[TAB].tot.hasStat ? "<td></td><td></td>" : "") + '<td class="num">' + fmtT(sm) + '</td><td class="num">' + (sm ? (sf / sm * 100).toFixed(1) + " %" : "") + '</td><td class="num">' + fmtT(sr) + "</td><td></td><td></td></tr></tfoot></table>";
+    h += "</tbody><tfoot><tr><td>Итого по показанным</td><td></td><td></td><td class=\"num\">" + fmtT(sp) + '</td><td class="num">' + fmtT(sf) + '</td><td class="num">' + (sf - sp >= 0 ? "+" : "") + fmtT(sf - sp) + "</td><td></td><td></td><td>" + (sp ? (sf / sp * 100).toFixed(1) + " %" : "") + "</td>" + (RES[TAB].tot.hasStat ? "<td></td><td></td>" : "") + '<td class="num">' + fmtT(sm) + '</td><td>' + monthBadge(sm ? sf / sm * 100 : null) + '</td><td class="num">' + fmtT(sr) + "</td><td></td><td></td></tr></tfoot></table>";
     host.innerHTML = rows.length ? h : '<div class="empty">Нет данных по фильтру.</div>';
   } else if (TAB === "eq") {
     const q = $("fSearch").value.trim().toLowerCase();
