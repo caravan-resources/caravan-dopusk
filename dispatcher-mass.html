@@ -959,11 +959,20 @@ function noteSub(w) {
   if (!lowFact(w)) return abH; const n = noteFor(w.fio); return abH + (n ? '<div class="sub" style="color:' + noteColor(n.tone) + '">' + esc(n.short) + "</div>" : ""); }
 // Соответствие вахт группам плана определено по наряду мастера: группа B = Вахта-1, группа A = Вахта-2 (совпало у 128 из 129 работников).
 let VT = false, VAUTO = false;   // VT: фильтр вахты менял пользователь; VAUTO: автовыбор работающей вахты уже выполнен
+// Работающая вахта по табелю: у какой группы плана больше людей со сменой сегодня (наряд на сервере может отставать)
+function rosActiveGroup() {
+  if (!Object.keys(ROS.months || {}).length) return "";
+  const today = ymd(Date.now() + 5 * 3600000), pl = PLANS[today.slice(0, 7)]; if (!pl) return "";
+  const seen = {}, cnt = { A: 0, B: 0 };
+  pl.drivers.concat(pl.excavators).forEach(r => { if (!isReal(r[3]) || !r[6] || seen[r[3]]) return; seen[r[3]] = 1; const sh = rosShiftOrUndef(r[3], today); if (sh === SH_D || sh === SH_N) cnt[r[6]] = (cnt[r[6]] || 0) + 1; });
+  return cnt.A + cnt.B >= 5 ? (cnt.A > cnt.B ? "A" : cnt.B > cnt.A ? "B" : "") : "";
+}
 function updateVahtaLabels() {
   const act = (SA.act && SA.act["Алмалы"]) || ""; const o = $("fVahta"); if (!o) return;
-  [["B", "Вахта 1 (группа B)", "Вахта-1"], ["A", "Вахта 2 (группа A)", "Вахта-2"]].forEach(([g, lab, v]) => { const op = o.querySelector('option[value="' + g + '"]'); if (op) op.textContent = lab + (act === v ? " — сейчас работает" : ""); });
-  // При первой загрузке наряда фильтр сам переключается на работающую вахту, если пользователь его ещё не менял
-  if (!VT && !VAUTO && act) { const g = act === "Вахта-1" ? "B" : act === "Вахта-2" ? "A" : ""; if (g) { o.value = g; VAUTO = true; } }
+  const ra = rosActiveGroup(), ag = ra || (act === "Вахта-1" ? "B" : act === "Вахта-2" ? "A" : "");
+  [["B", "Вахта 1 (группа B)"], ["A", "Вахта 2 (группа A)"]].forEach(([g, lab]) => { const op = o.querySelector('option[value="' + g + '"]'); if (op) op.textContent = lab + (ag === g ? " — сейчас работает" : ""); });
+  // Пока пользователь не менял фильтр, он стоит на работающей вахте; табель точнее наряда сервера
+  if (!VT && ag && (!VAUTO || (ra && o.value !== ra))) { o.value = ag; VAUTO = true; }
 }
 function updateSaState() {
   updateVahtaLabels();
@@ -1198,6 +1207,7 @@ function setTab(t) { TAB = t; document.querySelectorAll(".tab").forEach(e => e.c
 function cutOrd() { const d = $("fCutDate").value; return d ? shiftOrd(d, $("fCutShift").value) : -1; }
 
 function render() {
+  updateVahtaLabels();
   const m = $("fMonth").value, plan0 = PLANS[m];
   if (!plan0) { $("stats").innerHTML = ""; $("tableHost").innerHTML = '<div class="empty">Загрузите план месяца.</div>'; RES = null; return; }
   const rf = $("fRosSh").value === "1" ? fixPlanByRoster(plan0, m) : { plan: plan0, moved: 0, tons: 0 }, plan = rf.plan;
