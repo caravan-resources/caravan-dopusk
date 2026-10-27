@@ -818,9 +818,20 @@ function rosCurShift(fio, date) {
   for (let d = Math.min(Number(date.slice(8)), str.length); d >= 1; d--) { const ch = str[d - 1]; if (ch === "Д") return SH_D; if (ch === "Н") return SH_N; }
   return "";
 }
+function rosWorksFrom(fio, date) {
+  if (!ROSIDX) buildRosIdx();
+  const I = ROSIDX.s[Number(date.slice(5, 7))]; if (!I) return true;
+  const str = I[ROSIDX.ck(fio)]; if (!str) return true;
+  for (let d = Number(date.slice(8)); d <= str.length; d++) { const ch = str[d - 1]; if (ch === "Д" || ch === "Н") return true; }
+  return false;
+}
 function personShiftFilter(res, sf, month) {
   const cut = $("fCutDate").value || (month + "-31");
-  const keep = res.workers.filter(w => { const cs = rosCurShift(w.fio, cut); return cs ? cs === sf : Object.keys(w.cells).some(k => k.split("|")[1] === sf); });
+  const hasCut = !!$("fCutDate").value;
+  const keep = res.workers.filter(w => { const cs = rosCurShift(w.fio, cut); if (!cs) return Object.keys(w.cells).some(k => k.split("|")[1] === sf);
+    // межвахта: после даты среза у человека нет ни одной смены по табелю, значит он дома и в смене не числится
+    if (hasCut && !rosWorksFrom(w.fio, cut)) return false;
+    return cs === sf; });
   const t = Object.assign({}, res.tot);
   const sum = k => keep.reduce((q, w) => q + w[k], 0);
   t.plan = sum("plan"); t.planRaw = sum("planRaw"); t.cut = t.planRaw - t.plan; t.fact = sum("fact"); t.trips = sum("trips"); t.monthAll = sum("monthPlan");
