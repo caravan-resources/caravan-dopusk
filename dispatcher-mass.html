@@ -641,7 +641,7 @@ function compute(plan, factShifts, kind, month, cutOrd, opts) {
     const sd = statCell(stat, r[0], r[1], r[2]);
     const pe = adj && sd ? r[5] * (sd.tot - sd.e[3]) / sd.tot : r[5];
     monthAll += pe; planAll += pe; planRawAll += r[5]; getE(r[2]).plan += pe; bs(r[0] + "|" + r[1]).plan += pe;
-    const pk = r[0] + "|" + r[2]; const P = PL[pk] || (PL[pk] = { pe: 0, raw: 0, rows: [] }); P.pe += pe; P.raw += r[5];
+    const pk = r[0] + "|" + r[1] + "|" + r[2]; const P = PL[pk] || (PL[pk] = { pe: 0, raw: 0, rows: [] }); P.pe += pe; P.raw += r[5];
     if (hasStat && !sd && r[4] > 0) noStat++;
     if (isReal(r[3])) {
       const w = getW(r[3].trim()); w.plan += pe; w.planRaw += r[5]; w.monthPlan += pe; if (r[4] > 0) { w.shifts++; w.bkP += pe; w.bkN++; }
@@ -718,14 +718,16 @@ function compute(plan, factShifts, kind, month, cutOrd, opts) {
       S.rows.forEach(r => place(kind === "drivers" ? r[0] : r[1], r[3], r[4], r[2], null));
     }
   });
-  // План берётся по технике, а оператора подтверждает вывозка: плановый тоннаж техники за сутки (обе смены) делится между теми,
-  // кто на ней вывозил, пропорционально их массе, в какой бы смене ни стоял плановый экипаж (вакансия, пересадка, перенос по табелю).
-  // Если рейсов на технике в эти сутки не было, план остаётся у назначенных по плану работников.
-  const CF = {}; Object.values(W).forEach(w => Object.values(w.cells).forEach(c => { if (c.fact > 0) (CF[c.date + "|" + c.eq] || (CF[c.date + "|" + c.eq] = [])).push([w, c]); }));
-  Object.keys(PL).forEach(k => {
-    const P = PL[k], L = CF[k]; if (!(P.pe > 0) || !L) return;
-    const FTk = L.reduce((q, x) => q + x[1].fact, 0); if (!(FTk > 0)) return;
-    P.rows.forEach(x => { x.c.plan -= x.pe; x.c.planRaw -= x.raw; x.w.plan -= x.pe; x.w.planRaw -= x.raw; x.w.monthPlan -= x.pe; });
+  // План берётся по технике, а оператора подтверждает вывозка: плановый тоннаж техники в смене делится между теми, кто на ней
+  // вывозил, пропорционально их массе. Если рейсов на технике в смене не было, план остаётся у назначенных по плану.
+  // Если в смене плана у техники нет (в книге вакансия, пересадка не внесена), а вывозили, берётся план этой же техники в другой смене
+  // тех же суток: смена работала, значит, норма та же.
+  const CF = {}; Object.values(W).forEach(w => Object.values(w.cells).forEach(c => { if (c.fact > 0) (CF[c.date + "|" + c.sh + "|" + c.eq] || (CF[c.date + "|" + c.sh + "|" + c.eq] = [])).push([w, c]); }));
+  Object.keys(CF).forEach(k => {
+    const L = CF[k], FTk = L.reduce((q, x) => q + x[1].fact, 0); if (!(FTk > 0)) return;
+    let P = PL[k];
+    if (P && P.pe > 0) P.rows.forEach(x => { x.c.plan -= x.pe; x.c.planRaw -= x.raw; x.w.plan -= x.pe; x.w.planRaw -= x.raw; x.w.monthPlan -= x.pe; });
+    else { const [d, sh, eq] = k.split("|"); const N = PL[d + "|" + (sh === SH_D ? SH_N : SH_D) + "|" + eq]; if (!(N && N.pe > 0)) return; P = N; }
     L.forEach(([w, c]) => { const sh = c.fact / FTk;
       c.plan += P.pe * sh; c.planRaw += P.raw * sh; c.xf = (c.xf || 0) + (c.hrs > 0 ? 0 : P.pe * sh); w.plan += P.pe * sh; w.planRaw += P.raw * sh; w.monthPlan += P.pe * sh; });
   });
