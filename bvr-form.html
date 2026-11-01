@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Журнал бурения — Caravan Resources</title>
+<style>
+:root {
+  --navy:#0B1A35; --navy2:#1B3B6F; --gold:#F4A52A;
+  --red:#DC2626; --redbg:#FEF2F2; --green:#16A34A; --greenbg:#F0FDF4;
+  --amber:#B45309; --amberbg:#FFFBEB;
+  --gray:#64748B; --light:#F1F5F9; --border:#E2E8F0;
+}
+* { box-sizing:border-box; margin:0; padding:0; }
+body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif; background:var(--light); color:var(--navy); min-height:100vh; }
+.wrap { max-width:560px; margin:0 auto; padding:20px 14px 150px; }
+.header { background:var(--navy); color:#fff; padding:18px 16px; margin:-20px -14px 16px; text-align:center; }
+.header h1 { font-size:17px; font-weight:800; }
+.header p { font-size:12px; color:rgba(255,255,255,.65); margin-top:4px; }
+.card { background:#fff; border-radius:14px; padding:16px; margin-bottom:12px; box-shadow:0 2px 10px rgba(0,0,0,.06); }
+.card-title { font-size:15px; font-weight:800; margin-bottom:12px; display:flex; justify-content:space-between; align-items:center; }
+.card-title small { font-size:12px; font-weight:700; color:var(--gray); }
+label.lb { display:block; font-size:12px; font-weight:700; color:var(--gray); margin:0 0 5px; }
+input, select, textarea { width:100%; padding:12px 12px; border:1.5px solid var(--border); border-radius:10px; font-size:16px; font-family:inherit; outline:none; background:#fff; color:var(--navy); min-height:46px; }
+input:focus, select:focus, textarea:focus { border-color:var(--gold); }
+textarea { min-height:70px; resize:vertical; }
+.row { display:flex; gap:8px; } .row > * { flex:1; min-width:0; }
+.mb { margin-bottom:10px; }
+.seg { display:flex; gap:8px; }
+.seg button { flex:1; padding:12px 6px; border:1.5px solid var(--border); background:#fff; border-radius:10px; font-size:15px; font-weight:800; font-family:inherit; color:var(--navy); cursor:pointer; min-height:46px; }
+.seg button.on { background:var(--navy); color:#fff; border-color:var(--navy); }
+.btn { width:100%; padding:14px; border:none; border-radius:10px; font-size:15px; font-weight:800; cursor:pointer; font-family:inherit; min-height:48px; }
+.btn-gold { background:var(--gold); color:var(--navy); } .btn-ghost { background:var(--light); color:var(--navy); }
+.btn-dark { background:var(--navy); color:#fff; }
+.btn:disabled { opacity:.5; cursor:not-allowed; }
+.toggle { display:flex; align-items:center; gap:8px; padding:10px 12px; border:1.5px solid var(--border); border-radius:10px; background:#fff; font-size:14px; font-weight:700; cursor:pointer; min-height:46px; user-select:none; }
+.toggle.on { background:var(--amberbg); border-color:var(--amber); color:var(--amber); }
+.toggle .box { width:18px; height:18px; border:2px solid var(--gray); border-radius:5px; flex-shrink:0; }
+.toggle.on .box { background:var(--amber); border-color:var(--amber); }
+.list { margin-top:12px; }
+.item { display:flex; align-items:center; gap:10px; padding:10px 8px; border-bottom:1px solid var(--border); font-size:14px; }
+.item:last-child { border-bottom:none; }
+.item .n { font-weight:800; min-width:44px; }
+.item .main { flex:1; min-width:0; } .item .sub { font-size:12px; color:var(--gray); margin-top:2px; overflow-wrap:anywhere; }
+.item .x { border:none; background:var(--redbg); color:var(--red); border-radius:8px; width:36px; height:36px; font-size:18px; font-weight:800; cursor:pointer; flex-shrink:0; }
+.item.edit { background:var(--amberbg); }
+.tag { display:inline-block; font-size:11px; font-weight:800; padding:2px 7px; border-radius:6px; background:var(--amberbg); color:var(--amber); margin-left:6px; }
+.empty { font-size:13px; color:var(--gray); padding:6px 2px; }
+.warn { font-size:12px; color:var(--amber); margin:-4px 0 8px; } .err { font-size:13px; color:var(--red); font-weight:700; margin:8px 0; }
+.emp-item { display:flex; align-items:center; gap:10px; width:100%; padding:10px; border:1.5px solid var(--border); border-radius:10px; background:#fff; cursor:pointer; margin-bottom:6px; text-align:left; font-family:inherit; font-size:14px; min-height:46px; }
+.avatar { width:34px; height:34px; border-radius:50%; background:var(--navy2); color:#fff; display:flex; align-items:center; justify-content:center; font-weight:800; font-size:12px; flex-shrink:0; }
+.chosen { display:flex; align-items:center; gap:10px; padding:10px; background:var(--greenbg); border:1.5px solid var(--green); border-radius:10px; font-weight:800; font-size:14px; }
+.chosen a { margin-left:auto; font-size:12px; font-weight:700; color:var(--gray); }
+.bar { position:fixed; left:0; right:0; bottom:0; background:var(--navy); color:#fff; padding:10px 14px calc(10px + env(safe-area-inset-bottom)); box-shadow:0 -4px 16px rgba(0,0,0,.25); z-index:10; }
+.bar .in { max-width:560px; margin:0 auto; }
+.tot { display:flex; justify-content:space-between; gap:6px; font-size:12px; margin-bottom:8px; text-align:center; }
+.tot div { flex:1; } .tot b { display:block; font-size:16px; color:var(--gold); }
+.screen { display:none; } .screen.active { display:block; }
+.ok-box { text-align:center; padding:26px 16px; } .ok-t { font-size:20px; font-weight:800; color:var(--green); margin-bottom:8px; } .ok-s { font-size:14px; color:var(--gray); margin-bottom:14px; line-height:1.5; }
+.net { font-size:12px; text-align:center; padding:8px; border-radius:8px; margin-bottom:10px; background:var(--amberbg); color:var(--amber); font-weight:700; display:none; }
+a.back { font-size:13px; color:var(--gray); text-decoration:none; display:inline-block; margin-bottom:10px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="header"><h1>Журнал бурения</h1><p id="hdrSub">Caravan Resources</p></div>
+  <div class="net" id="netBox"></div>
+
+  <div id="scMain" class="screen active">
+    <a class="back" id="backLink" href="#">&larr; К технике</a>
+
+    <div class="card">
+      <div class="card-title">Смена <small id="eqTitle"></small></div>
+      <div class="row mb">
+        <div><label class="lb">Дата начала смены</label><input type="date" id="fDate"></div>
+        <div><label class="lb">Диаметр, мм</label>
+          <select id="fDiam"><option>130</option><option>165</option><option selected>171</option><option>203</option></select></div>
+      </div>
+      <label class="lb">Смена</label>
+      <div class="seg mb" id="segSmena"><button data-v="1">Ночь (1)</button><button data-v="2">День (2)</button></div>
+      <label class="lb">Оператор</label>
+      <div id="empBox" class="mb"></div>
+      <div class="row">
+        <div><label class="lb">Блок №</label><input id="fBlock1" inputmode="numeric" placeholder="1760637" autocomplete="off"></div>
+        <div><label class="lb">Второй блок (если был)</label><input id="fBlock2" inputmode="numeric" placeholder="необязательно" autocomplete="off"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Скважины <small id="holesCnt"></small></div>
+      <div class="row mb">
+        <div><label class="lb">№ скважины</label><input id="hN" inputmode="numeric" autocomplete="off"></div>
+        <div><label class="lb">Метраж, м</label><input id="hD" inputmode="decimal" placeholder="10,26" autocomplete="off"></div>
+        <div><label class="lb">Время, мин</label><input id="hM" inputmode="numeric" autocomplete="off"></div>
+      </div>
+      <div id="hWarn" class="warn" style="display:none"></div>
+      <div class="mb"><div class="toggle" id="hRe"><span class="box"></span><span>Перебур (прежняя скважина разрушилась)</span></div></div>
+      <div id="hReBox" style="display:none" class="mb"><label class="lb">Вместо скважины №</label><input id="hReN" inputmode="numeric" autocomplete="off"></div>
+      <div id="hBlockBox" style="display:none" class="mb"><label class="lb">Блок</label><select id="hBlock"></select></div>
+      <div class="mb"><label class="lb">Примечание к скважине</label><input id="hNote" placeholder="необязательно" autocomplete="off"></div>
+      <button class="btn btn-dark" id="hAdd">Добавить скважину</button>
+      <button class="btn btn-ghost" id="hCancel" style="display:none;margin-top:8px">Отменить правку</button>
+      <div class="list" id="holesList"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Простой <small id="dtCnt"></small></div>
+      <div class="mb"><label class="lb">Причина</label>
+        <select id="dReason"></select></div>
+      <div class="row mb">
+        <div><label class="lb">С</label><input type="time" id="dFrom"></div>
+        <div><label class="lb">До</label><input type="time" id="dTo"></div>
+        <div><label class="lb">Минут</label><input id="dMin" inputmode="numeric" autocomplete="off"></div>
+      </div>
+      <div class="mb"><label class="lb">Комментарий</label><input id="dNote" placeholder="что случилось" autocomplete="off"></div>
+      <button class="btn btn-dark" id="dAdd">Добавить простой</button>
+      <div class="list" id="dtList"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Замена инструмента <small id="rpCnt"></small></div>
+      <div class="mb"><label class="lb">Что заменили</label><select id="rTool"></select></div>
+      <div class="mb"><label class="lb">Модель / номер нового</label><input id="rModel" placeholder="например 5697007254" autocomplete="off"></div>
+      <div class="mb"><label class="lb">На какой скважине заменили</label><select id="rAt"></select></div>
+      <button class="btn btn-dark" id="rAdd">Добавить замену</button>
+      <div class="list" id="rpList"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Примечание к смене</div>
+      <textarea id="fNote" placeholder="необязательно"></textarea>
+    </div>
+  </div>
+
+  <div id="scDone" class="screen">
+    <div class="card ok-box">
+      <div class="ok-t" id="okT">Смена сдана</div>
+      <div class="ok-s" id="okS"></div>
+      <button class="btn btn-gold" id="okNew" style="margin-bottom:8px">Новая смена</button>
+      <button class="btn btn-ghost" id="okBack">К технике</button>
+    </div>
+  </div>
+
+  <div id="scErr" class="screen">
+    <div class="card ok-box"><div class="ok-t" style="color:var(--red)" id="errT">Ошибка</div><div class="ok-s" id="errS"></div></div>
+  </div>
+</div>
+
+<div class="bar" id="bar">
+  <div class="in">
+    <div class="tot">
+      <div><b id="tH">0</b>скважин</div><div><b id="tM">0</b>метров</div>
+      <div><b id="tR">0</b>перебур</div><div><b id="tT">0</b>бурение</div><div><b id="tP">0</b>м/час</div>
+    </div>
+    <div id="subErr" class="err" style="display:none;color:#FCA5A5"></div>
+    <button class="btn btn-gold" id="submitBtn">Сдать смену</button>
+  </div>
+</div>
+
+<script>
+const CFG = {
+  SHEET_URL: "https://script.google.com/macros/s/AKfycbwhdMV20k8US2BXUz1Xk2XCXE9MEwpHpQaadTF9xEfzbU1--dHL-Zuj06K2qXW-rFtKGw/exec",
+  TZ: "Asia/Almaty",
+};
+const REASONS = ["Тех. уход","Заправка водой","Заправка ДТ","Обед","Перегон","Замер скважин","Ремонт","Ожидание (нет фронта, блока)","Другое"];
+const TOOLS = { bit:"Коронка", hammer:"Пневмоударник", top_adapter:"Верхний адаптер", float_adapter:"Плавающий адаптер", rod:"Штанга" };
+
+const params = new URLSearchParams(location.search);
+const EQ_ID = params.get("eq") || "";
+const EDIT_ID = params.get("shift") || "";           // режим правки сданной смены (из панели мастера)
+const K_DRAFT = "bvr.draft." + EQ_ID, K_QUEUE = "bvr.queue", K_EMP = "bvr.lastEmp", K_DIAM = "bvr.diam." + EQ_ID;
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+
+let equipment = null, EMPLOYEES = [], editIdx = -1, shiftMeta = null;
+let S = freshState();
+
+function uid() { return "c" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
+function num(v) { const n = Number(String(v == null ? "" : v).replace(",", ".").trim()); return isFinite(n) ? n : 0; }
+function fmt(n, d) { return (Math.round(n * Math.pow(10, d)) / Math.pow(10, d)).toLocaleString("ru-RU", { maximumFractionDigits: d }); }
+
+// Дата и смена по времени Алматы. Ночь (19:00–07:00) = смена 1, день (07:00–19:00) = смена 2.
+// Дата смены — дата её НАЧАЛА: ночь, начавшаяся 31.10 в 19:00, записывается как 31.10 даже после полуночи.
+function shiftNow() {
+  const f = new Intl.DateTimeFormat("en-CA", { timeZone: CFG.TZ, year:"numeric", month:"2-digit", day:"2-digit", hour:"2-digit", hourCycle:"h23" });
+  const p = {}; f.formatToParts(new Date()).forEach(x => { p[x.type] = x.value; });
+  const h = Number(p.hour);
+  let date = p.year + "-" + p.month + "-" + p.day, smena = 2;
+  if (h >= 19) smena = 1;
+  else if (h < 7) { smena = 1; const d = new Date(Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day))); d.setUTCDate(d.getUTCDate() - 1); date = d.toISOString().slice(0, 10); }
+  return { date: date, smena: smena };
+}
+
+function freshState() {
+  const n = shiftNow();
+  return { clientId: uid(), date: n.date, smena: n.smena, emp: null, diameter: 171, block1: "", block2: "", holes: [], downtimes: [], replacements: [], note: "" };
+}
+
+// ── расчёт итогов (та же логика, что computeDrillTotals на сервере) ──
+function calc(s) {
+  let h = 0, r = 0, m = 0, mr = 0, min = 0, dt = 0;
+  s.holes.forEach(x => { min += num(x.minutes); if (x.redrill) { r++; mr += num(x.depth); } else { h++; m += num(x.depth); } });
+  s.downtimes.forEach(x => { dt += num(x.minutes); });
+  const total = m + mr;
+  return { holes: h, redrill: r, meters: m, metersRedrill: mr, minutes: min, downtime: dt, mph: min > 0 ? total * 60 / min : 0 };
+}
+function hm(min) { min = Math.round(min); return Math.floor(min / 60) + " ч " + (min % 60) + " мин"; }
+
+// ── черновик и очередь на телефоне ──
+let saveT = null;
+function saveDraft() {
+  if (EDIT_ID) return;
+  clearTimeout(saveT);
+  saveT = setTimeout(() => { try { localStorage.setItem(K_DRAFT, JSON.stringify(S)); } catch (e) {} }, 250);
+}
+function loadDraft() {
+  try { const d = JSON.parse(localStorage.getItem(K_DRAFT) || "null"); if (d && Array.isArray(d.holes) && d.clientId) return d; } catch (e) {}
+  return null;
+}
+function getQueue() { try { return JSON.parse(localStorage.getItem(K_QUEUE) || "[]"); } catch (e) { return []; } }
+function setQueue(q) { try { localStorage.setItem(K_QUEUE, JSON.stringify(q)); } catch (e) {} }
+
+function payloadOf(s) {
+  const blocks = [s.block1, s.block2].map(x => String(x || "").trim()).filter(Boolean);
+  return {
+    clientId: s.clientId, equipmentId: EQ_ID, date: s.date, smena: s.smena,
+    empId: s.emp ? s.emp.id : "", empName: s.emp ? s.emp.name : "",
+    diameter: s.diameter, blocks: blocks,
+    holes: s.holes.map(x => ({ n: x.n, depth: num(x.depth), minutes: num(x.minutes), redrill: !!x.redrill, replacesHole: x.replacesHole || "", block: x.block || "", note: x.note || "" })),
+    downtimes: s.downtimes.map(x => ({ reason: x.reason, minutes: num(x.minutes), from: x.from || "", to: x.to || "", note: x.note || "" })),
+    replacements: s.replacements.map(x => ({ tool: x.tool, model: x.model || "", atHole: x.atHole || "", note: x.note || "" })),
+    note: s.note || "",
+  };
+}
+
+async function post(body) {
+  const res = await fetch(CFG.SHEET_URL, { method: "POST", body: JSON.stringify(body) });
+  return res.json();
+}
+
+async function flushQueue() {
+  let q = getQueue(); if (!q.length) { showNet(""); return; }
+  const rest = [];
+  for (const item of q) {
+    try {
+      const r = await post(Object.assign({ action: "submitDrillShift" }, item));
+      if (!r.ok) rest.push(item);          // сервер отклонил — оставляем, чтобы не потерять
+    } catch (e) { rest.push(item); }
+  }
+  setQueue(rest);
+  showNet(rest.length ? "Не отправлено смен: " + rest.length + ". Отправятся автоматически, когда появится связь." : "");
+}
+function showNet(t) { const b = $("netBox"); b.textContent = t; b.style.display = t ? "block" : "none"; }
+
+// ── оператор ──
+function renderEmp() {
+  const box = $("empBox");
+  if (S.emp) {
+    box.innerHTML = '<div class="chosen"><span class="avatar">' + esc(initials(S.emp.name)) + '</span><span>' + esc(S.emp.name) + '</span>' +
+      (EDIT_ID ? "" : '<a href="#" id="empChange">сменить</a>') + '</div>';
+    const a = $("empChange"); if (a) a.onclick = e => { e.preventDefault(); S.emp = null; renderEmp(); saveDraft(); };
+    return;
+  }
+  box.innerHTML = '<input id="empQ" placeholder="Начните вводить фамилию" autocomplete="off"><div id="empRes" style="margin-top:8px"></div>';
+  $("empQ").oninput = function () {
+    const q = this.value.trim().toLowerCase(); const res = $("empRes");
+    if (q.length < 2) { res.innerHTML = ""; return; }
+    const found = EMPLOYEES.filter(e => e.name.toLowerCase().includes(q)).slice(0, 8);
+    res.innerHTML = found.length ? found.map((e, i) => '<button class="emp-item" data-i="' + i + '"><span class="avatar">' + esc(initials(e.name)) + '</span><span>' + esc(e.name) + '<br><small style="color:#64748B">' + esc(e.position) + '</small></span></button>').join("") : '<div class="empty">Не найдено. Проверьте написание.</div>';
+    res.querySelectorAll(".emp-item").forEach(b => b.onclick = () => {
+      const e = found[Number(b.dataset.i)]; S.emp = { id: e.id, name: e.name };
+      try { localStorage.setItem(K_EMP, JSON.stringify(S.emp)); } catch (x) {}
+      renderEmp(); saveDraft();
+    });
+  };
+}
+function initials(n) { return String(n || "").trim().split(/\s+/).slice(0, 2).map(w => w[0] || "").join("").toUpperCase(); }
+
+// ── отрисовка ──
+function blocksList() { return [S.block1, S.block2].map(x => String(x || "").trim()).filter(Boolean); }
+
+function renderAll() {
+  $("fDate").value = S.date; $("fDiam").value = String(S.diameter);
+  document.querySelectorAll("#segSmena button").forEach(b => b.classList.toggle("on", Number(b.dataset.v) === S.smena));
+  $("fBlock1").value = S.block1; $("fBlock2").value = S.block2; $("fNote").value = S.note;
+  renderEmp(); renderHoles(); renderDowntimes(); renderRepl(); renderTotals(); renderHoleBlock();
+}
+
+function renderHoleBlock() {
+  const bl = blocksList(), box = $("hBlockBox"), sel = $("hBlock"), cur = sel.value;
+  box.style.display = bl.length > 1 ? "block" : "none";
+  sel.innerHTML = bl.map(b => '<option>' + esc(b) + '</option>').join("");
+  if (bl.indexOf(cur) >= 0) sel.value = cur;
+}
+
+function holeNums() { return S.holes.map(h => String(h.n)).filter(Boolean); }
+
+function renderHoles() {
+  $("holesCnt").textContent = S.holes.length ? S.holes.length + " шт" : "";
+  const l = $("holesList");
+  if (!S.holes.length) { l.innerHTML = '<div class="empty">Скважин пока нет</div>'; }
+  else l.innerHTML = S.holes.map((h, i) =>
+    '<div class="item' + (i === editIdx ? " edit" : "") + '" data-i="' + i + '"><span class="n">' + esc(h.n || "—") + '</span>' +
+    '<span class="main"><b>' + fmt(num(h.depth), 2) + ' м</b>, ' + fmt(num(h.minutes), 0) + ' мин' +
+    (h.redrill ? '<span class="tag">перебур' + (h.replacesHole ? ' вместо №' + esc(h.replacesHole) : "") + '</span>' : "") +
+    '<div class="sub">' + (h.block && blocksList().length > 1 ? "блок " + esc(h.block) + (h.note ? " · " : "") : "") + esc(h.note || "") + '</div></span>' +
+    '<button class="x" data-del="' + i + '" aria-label="Удалить">×</button></div>').join("");
+  l.querySelectorAll(".item").forEach(el => el.onclick = e => {
+    if (e.target.dataset.del !== undefined) return;
+    startEditHole(Number(el.dataset.i));
+  });
+  l.querySelectorAll("[data-del]").forEach(b => b.onclick = e => { e.stopPropagation(); S.holes.splice(Number(b.dataset.del), 1); if (editIdx >= 0) cancelEditHole(); renderHoles(); renderRepl(); renderTotals(); saveDraft(); });
+}
+
+function renderDowntimes() {
+  $("dtCnt").textContent = S.downtimes.length ? S.downtimes.length + " шт" : "";
+  const l = $("dtList");
+  if (!S.downtimes.length) { l.innerHTML = '<div class="empty">Простоев нет</div>'; return; }
+  l.innerHTML = S.downtimes.map((d, i) =>
+    '<div class="item"><span class="main"><b>' + esc(d.reason) + '</b> — ' + fmt(num(d.minutes), 0) + ' мин' +
+    '<div class="sub">' + (d.from && d.to ? esc(d.from) + " – " + esc(d.to) + (d.note ? " · " : "") : "") + esc(d.note || "") + '</div></span>' +
+    '<button class="x" data-del="' + i + '" aria-label="Удалить">×</button></div>').join("");
+  l.querySelectorAll("[data-del]").forEach(b => b.onclick = () => { S.downtimes.splice(Number(b.dataset.del), 1); renderDowntimes(); renderTotals(); saveDraft(); });
+}
+
+function renderRepl() {
+  $("rpCnt").textContent = S.replacements.length ? S.replacements.length + " шт" : "";
+  const cur = $("rAt").value, nums = holeNums();
+  $("rAt").innerHTML = '<option value="">Начало смены / не помню</option>' + nums.map(n => '<option>' + esc(n) + '</option>').join("");
+  if (nums.indexOf(cur) >= 0) $("rAt").value = cur;
+  const l = $("rpList");
+  if (!S.replacements.length) { l.innerHTML = '<div class="empty">Замен не было</div>'; return; }
+  l.innerHTML = S.replacements.map((r, i) =>
+    '<div class="item"><span class="main"><b>' + esc(TOOLS[r.tool] || r.tool) + '</b>' + (r.model ? ": " + esc(r.model) : "") +
+    '<div class="sub">' + (r.atHole ? "на скважине №" + esc(r.atHole) : "в начале смены") + '</div></span>' +
+    '<button class="x" data-del="' + i + '" aria-label="Удалить">×</button></div>').join("");
+  l.querySelectorAll("[data-del]").forEach(b => b.onclick = () => { S.replacements.splice(Number(b.dataset.del), 1); renderRepl(); saveDraft(); });
+}
+
+function renderTotals() {
+  const c = calc(S);
+  $("tH").textContent = c.holes; $("tM").textContent = fmt(c.meters, 1);
+  $("tR").textContent = c.redrill ? c.redrill + " / " + fmt(c.metersRedrill, 1) : "0";
+  $("tT").textContent = hm(c.minutes); $("tP").textContent = c.minutes > 0 ? fmt(c.mph, 1) : "—";
+}
+
+// ── ввод скважин ──
+let reOn = false;
+function setRe(on) { reOn = on; $("hRe").classList.toggle("on", on); $("hReBox").style.display = on ? "block" : "none"; }
+$("hRe").onclick = () => setRe(!reOn);
+
+function holeWarn() {
+  const d = num($("hD").value), n = $("hN").value.trim(), m = num($("hM").value), w = [];
+  if ($("hD").value && (d <= 0 || d > 60)) w.push("Метраж " + fmt(d, 2) + " м выглядит неверно");
+  else if (d > 30) w.push("Метраж больше 30 м — проверьте");
+  if (m > 240) w.push("Время бурения больше 4 часов — проверьте");
+  if (n && S.holes.some((h, i) => i !== editIdx && String(h.n) === n)) w.push("Скважина №" + n + " уже есть в этой смене");
+  const el = $("hWarn"); el.textContent = w.join(". "); el.style.display = w.length ? "block" : "none";
+}
+["hN", "hD", "hM"].forEach(id => $(id).addEventListener("input", holeWarn));
+
+function clearHoleForm(keepMin) {
+  $("hN").value = ""; $("hD").value = ""; if (!keepMin) $("hM").value = ""; $("hNote").value = ""; $("hReN").value = "";
+  setRe(false); holeWarn();
+}
+function startEditHole(i) {
+  const h = S.holes[i]; editIdx = i;
+  $("hN").value = h.n; $("hD").value = String(h.depth).replace(".", ","); $("hM").value = h.minutes; $("hNote").value = h.note || "";
+  $("hReN").value = h.replacesHole || ""; setRe(!!h.redrill);
+  if (h.block) $("hBlock").value = h.block;
+  $("hAdd").textContent = "Сохранить правку"; $("hCancel").style.display = "block"; renderHoles(); holeWarn();
+  $("hN").scrollIntoView({ block: "center", behavior: "smooth" });
+}
+function cancelEditHole() { editIdx = -1; $("hAdd").textContent = "Добавить скважину"; $("hCancel").style.display = "none"; clearHoleForm(true); renderHoles(); }
+$("hCancel").onclick = cancelEditHole;
+
+$("hAdd").onclick = () => {
+  const n = $("hN").value.trim(), d = num($("hD").value), m = num($("hM").value);
+  if (!n) { $("hWarn").textContent = "Укажите номер скважины"; $("hWarn").style.display = "block"; $("hN").focus(); return; }
+  if (!(d > 0 && d <= 100)) { $("hWarn").textContent = "Укажите метраж скважины (больше 0)"; $("hWarn").style.display = "block"; $("hD").focus(); return; }
+  if (!(m > 0)) { $("hWarn").textContent = "Укажите время бурения в минутах"; $("hWarn").style.display = "block"; $("hM").focus(); return; }
+  const bl = blocksList();
+  const h = { n: n, depth: d, minutes: m, redrill: reOn, replacesHole: reOn ? $("hReN").value.trim() : "", note: $("hNote").value.trim(), block: bl.length > 1 ? $("hBlock").value : (bl[0] || "") };
+  if (editIdx >= 0) { S.holes[editIdx] = h; editIdx = -1; $("hAdd").textContent = "Добавить скважину"; $("hCancel").style.display = "none"; }
+  else S.holes.push(h);
+  clearHoleForm(true);   // время бурения оставляем: обычно скважины одинаковые по времени
+  renderHoles(); renderRepl(); renderTotals(); saveDraft(); $("hN").focus();
+};
+
+// ── простой ──
+function minutesBetween(a, b) {
+  if (!a || !b) return 0;
+  const p = t => { const x = t.split(":"); return Number(x[0]) * 60 + Number(x[1]); };
+  let d = p(b) - p(a); if (d < 0) d += 1440; return d;
+}
+["dFrom", "dTo"].forEach(id => $(id).addEventListener("input", () => { const m = minutesBetween($("dFrom").value, $("dTo").value); if (m) $("dMin").value = m; }));
+$("dAdd").onclick = () => {
+  const min = num($("dMin").value);
+  if (!(min > 0)) { $("subErr").style.display = "none"; $("dMin").focus(); $("dMin").style.borderColor = "#DC2626"; return; }
+  $("dMin").style.borderColor = "";
+  S.downtimes.push({ reason: $("dReason").value, minutes: min, from: $("dFrom").value, to: $("dTo").value, note: $("dNote").value.trim() });
+  $("dFrom").value = ""; $("dTo").value = ""; $("dMin").value = ""; $("dNote").value = "";
+  renderDowntimes(); renderTotals(); saveDraft();
+};
+
+// ── замена инструмента ──
+$("rAdd").onclick = () => {
+  S.replacements.push({ tool: $("rTool").value, model: $("rModel").value.trim(), atHole: $("rAt").value, note: "" });
+  $("rModel").value = ""; renderRepl(); saveDraft();
+};
+
+// ── поля шапки ──
+$("fDate").onchange = () => { S.date = $("fDate").value; saveDraft(); };
+$("fDiam").onchange = () => { S.diameter = Number($("fDiam").value); try { localStorage.setItem(K_DIAM, String(S.diameter)); } catch (e) {} saveDraft(); };
+$("fBlock1").oninput = () => { S.block1 = $("fBlock1").value; renderHoleBlock(); saveDraft(); };
+$("fBlock2").oninput = () => { S.block2 = $("fBlock2").value; renderHoleBlock(); saveDraft(); };
+$("fNote").oninput = () => { S.note = $("fNote").value; saveDraft(); };
+document.querySelectorAll("#segSmena button").forEach(b => b.onclick = () => { S.smena = Number(b.dataset.v); renderAll(); saveDraft(); });
+
+// ── проверка и отправка ──
+function validate() {
+  const e = [];
+  if (!S.emp) e.push("Выберите оператора");
+  if (!S.date) e.push("Укажите дату");
+  if (S.holes.length && !blocksList().length) e.push("Укажите номер блока");
+  if (!S.holes.length && !S.downtimes.length) e.push("Добавьте хотя бы одну скважину или простой");
+  if (editIdx >= 0) e.push("Сохраните или отмените правку скважины");
+  return e;
+}
+
+$("submitBtn").onclick = async () => {
+  const errs = validate(), eb = $("subErr");
+  if (errs.length) { eb.textContent = errs.join(". "); eb.style.display = "block"; return; }
+  eb.style.display = "none";
+  const btn = $("submitBtn"); btn.disabled = true; btn.textContent = "Отправка...";
+  const pl = payloadOf(S), c = calc(S);
+  const summary = c.holes + " скв., " + fmt(c.meters, 1) + " м" + (c.redrill ? ", перебур " + c.redrill + " (" + fmt(c.metersRedrill, 1) + " м)" : "") + ", бурение " + hm(c.minutes);
+  try {
+    const r = EDIT_ID ? await post(Object.assign({ action: "updateDrillShift", shiftId: EDIT_ID }, pl)) : await post(Object.assign({ action: "submitDrillShift" }, pl));
+    if (!r.ok) { eb.textContent = "Ошибка: " + (r.error || "неизвестная"); eb.style.display = "block"; btn.disabled = false; btn.textContent = EDIT_ID ? "Сохранить правку" : "Сдать смену"; return; }
+    if (!EDIT_ID) { try { localStorage.removeItem(K_DRAFT); } catch (e) {} }
+    finish(EDIT_ID ? "Правка сохранена" : "Смена сдана", summary);
+  } catch (err) {
+    if (EDIT_ID) { eb.textContent = "Нет связи. Правка не сохранена, повторите."; eb.style.display = "block"; btn.disabled = false; btn.textContent = "Сохранить правку"; return; }
+    const q = getQueue(); q.push(pl); setQueue(q);
+    try { localStorage.removeItem(K_DRAFT); } catch (e) {}
+    finish("Смена сохранена на телефоне", summary + ". Связи нет — смена отправится сама, когда она появится. Не закрывайте и не очищайте браузер.");
+    showNet("Не отправлено смен: " + q.length);
+  }
+};
+
+function finish(title, sub) {
+  $("okT").textContent = title; $("okS").textContent = sub;
+  $("scMain").classList.remove("active"); $("scDone").classList.add("active"); $("bar").style.display = "none";
+  window.scrollTo(0, 0);
+}
+$("okNew").onclick = () => {
+  if (EDIT_ID) { location.href = "bvr-panel.html"; return; }
+  S = freshState(); applyDefaults(); editIdx = -1; clearHoleForm(false);
+  $("scDone").classList.remove("active"); $("scMain").classList.add("active"); $("bar").style.display = "block";
+  $("submitBtn").disabled = false; $("submitBtn").textContent = "Сдать смену"; renderAll(); window.scrollTo(0, 0);
+};
+$("okBack").onclick = () => { location.href = EDIT_ID ? "bvr-panel.html" : ("checklist.html?eq=" + encodeURIComponent(EQ_ID)); };
+
+function applyDefaults() {
+  let d = null; try { d = JSON.parse(localStorage.getItem(K_EMP) || "null"); } catch (e) {}
+  if (d && d.id && d.name) S.emp = d;
+  const saved = Number(localStorage.getItem(K_DIAM) || 0);
+  if (saved) S.diameter = saved;
+  else if (equipment && /JK\s*590/i.test(equipment.model || "")) S.diameter = 130;
+}
+
+function fail(t, s) { $("errT").textContent = t; $("errS").textContent = s; $("scMain").classList.remove("active"); $("scErr").classList.add("active"); $("bar").style.display = "none"; }
+
+async function init() {
+  $("dReason").innerHTML = REASONS.map(r => '<option>' + esc(r) + '</option>').join("");
+  $("rTool").innerHTML = Object.keys(TOOLS).map(k => '<option value="' + k + '">' + esc(TOOLS[k]) + '</option>').join("");
+  if (!EQ_ID) { fail("Не указана техника", "Откройте журнал через QR-код на станке: в карточке станка нажмите «Журнал бурения»."); return; }
+  $("backLink").href = EDIT_ID ? "bvr-panel.html" : "checklist.html?eq=" + encodeURIComponent(EQ_ID);
+  if (EDIT_ID) { $("submitBtn").textContent = "Сохранить правку"; $("hdrSub").textContent = "Правка сданной смены"; $("bar").style.display = "block"; }
+  window.addEventListener("online", flushQueue);
+  try {
+    const reqs = [fetch(CFG.SHEET_URL + "?action=getEquipment").then(r => r.json())];
+    if (EDIT_ID) reqs.push(fetch(CFG.SHEET_URL + "?action=getDrillShifts&shiftId=" + encodeURIComponent(EDIT_ID)).then(r => r.json()));
+    const res = await Promise.all(reqs);
+    equipment = (res[0] || []).find(e => String(e.equipmentId) === EQ_ID);
+    if (!equipment) { fail("Станок не найден", "«" + EQ_ID + "» не зарегистрирован в системе. Обратитесь к инструктору."); return; }
+    $("eqTitle").textContent = equipment.equipmentId + " · " + equipment.model;
+    $("hdrSub").textContent = (EDIT_ID ? "Правка смены · " : "") + equipment.equipmentId + " · " + equipment.model;
+    if (EDIT_ID) {
+      const sh = (res[1] || [])[0];
+      if (!sh) { fail("Смена не найдена", "Возможно, её уже удалили. Вернитесь в панель и обновите список."); return; }
+      shiftMeta = sh;
+      S = { clientId: sh.clientId || uid(), date: sh.date, smena: Number(sh.smena), emp: { id: sh.empId, name: sh.empName }, diameter: Number(sh.diameter) || 171,
+        block1: (sh.blockList || [])[0] || "", block2: (sh.blockList || [])[1] || "",
+        holes: (sh.holes || []).map(h => ({ n: h.n, depth: h.depth, minutes: h.minutes, redrill: !!h.redrill, replacesHole: h.replacesHole || "", note: h.note || "", block: h.block || "" })),
+        downtimes: sh.downtimes || [], replacements: sh.replacements || [], note: sh.note || "" };
+    } else {
+      const dr = loadDraft();
+      if (dr) S = dr; else applyDefaults();
+    }
+    renderAll();
+    fetch(CFG.SHEET_URL + "?action=list&site=" + encodeURIComponent(equipment.site || "")).then(r => r.json())
+      .then(emp => { EMPLOYEES = (emp || []).map(e => ({ id: e.id, name: e.name, position: e.position })); }).catch(() => {});
+    flushQueue();
+  } catch (e) {
+    fail("Ошибка соединения", "Не удалось загрузить данные станка. Проверьте связь и обновите страницу. Если вы уже начали смену, введённое сохранено на телефоне.");
+  }
+}
+init();
+</script>
+</body>
+</html>

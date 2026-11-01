@@ -145,6 +145,7 @@ input:focus, select:focus, textarea:focus { border-color:var(--gold); }
       <button class="btn btn-gold" style="margin-bottom:10px" onclick="startFlow('inspection')">📋 Осмотр в начале смены</button>
       <button class="btn btn-hot" style="margin-bottom:6px" onclick="startFlow('handover')">🔄 Горячая пересменка</button>
       <div style="font-size:11px;color:var(--gray);margin-bottom:12px">Горячая пересменка: принимаю работающую технику, сажусь вместо другого водителя или возвращаюсь с обеда.</div>
+      <button class="btn" id="bvrBtn" style="display:none;margin-bottom:10px;background:var(--navy);color:#fff" onclick="openBvr()">Журнал бурения (БВР)</button>
       <button class="btn btn-ghost" style="margin-bottom:10px" onclick="startFlow('fuel')">⛽ Записать заправку</button>
       <button class="btn btn-reserve" style="margin-bottom:10px" onclick="markReserve(this)">⏸ Поставить в резерв</button>
       <button class="btn btn-red" onclick="markRepair(this)">🔧 Отправить в ремонт</button>
@@ -244,6 +245,7 @@ input:focus, select:focus, textarea:focus { border-color:var(--gold); }
       <div class="success-icon">✅</div>
       <div class="success-title" id="successTitle">Готово</div>
       <div class="success-sub" id="successSub">Спасибо! Данные зафиксированы.</div>
+      <button class="btn" id="bvrBtnDone" style="display:none;margin-top:14px;background:var(--navy);color:#fff" onclick="openBvr()">Перейти к журналу бурения</button>
     </div>
   </div>
 </div>
@@ -270,6 +272,10 @@ function showError(title, sub) {
   document.getElementById("errorTitle").textContent = title;
   document.getElementById("errorSub").textContent = sub;
   showScreen("Error");
+}
+
+function openBvr() {
+  location.href = "bvr-form.html?eq=" + encodeURIComponent(equipment.equipmentId);
 }
 
 function initials(name) {
@@ -309,6 +315,12 @@ async function init() {
     document.getElementById("pageTitle").textContent = equipment.model || "Осмотр техники";
     document.getElementById("pageSubtitle").textContent = "Caravan Resources · " + equipment.equipmentId;
     document.getElementById("hubEquipmentTitle").textContent = `${equipment.equipmentId} — ${equipment.model}`;
+
+    // Буровые станки: журнал бурения (bvr-form.html) — кнопка в карточке станка
+    // и после осмотра. Остальная техника этих кнопок не видит.
+    const isDrillRig = /Буров/i.test(equipment.type || "");
+    document.getElementById("bvrBtn").style.display = isDrillRig ? "block" : "none";
+    document.getElementById("bvrBtnDone").style.display = isDrillRig ? "block" : "none";
 
     gpsResumeIfActive();
     showScreen("Hub");
@@ -646,6 +658,8 @@ async function submitChecklist() {
       document.getElementById("successTitle").textContent = isHandover ? "Горячая пересменка зафиксирована" : "Чек-лист отправлен";
       document.getElementById("successSub").textContent = isHandover ? "Спасибо! Рейсы с этого момента будут засчитаны вам." : "Спасибо! Осмотр зафиксирован.";
       showScreen("Success");
+      // Журнал бурения подставит этого оператора сам (bvr-form.html читает bvr.lastEmp)
+      if (/Буров/i.test(equipment.type || "")) { try { localStorage.setItem("bvr.lastEmp", JSON.stringify({ id: selected.id, name: selected.name })); } catch(e) {} }
       // GPS-трекер смены — только после осмотра (не после заправки), запускаем
       // независимо от статуса техники ниже, best-effort, ничего не блокирует.
       startShiftGpsTracker(equipment.equipmentId);

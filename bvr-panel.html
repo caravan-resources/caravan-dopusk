@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Панель БВР — Caravan Resources</title>
+<style>
+:root { --navy:#0B1A35; --navy2:#1B3B6F; --gold:#F4A52A; --red:#DC2626; --redbg:#FEF2F2; --green:#16A34A; --greenbg:#F0FDF4; --amber:#B45309; --amberbg:#FFFBEB; --gray:#64748B; --light:#F1F5F9; --border:#E2E8F0; }
+* { box-sizing:border-box; margin:0; padding:0; }
+body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif; background:var(--light); color:var(--navy); font-size:14px; }
+.top { background:var(--navy); color:#fff; padding:14px 20px; display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
+.top h1 { font-size:18px; font-weight:800; } .top .sub { font-size:12px; color:rgba(255,255,255,.6); }
+.wrap { max-width:1280px; margin:0 auto; padding:16px 20px 60px; }
+.filters { display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; background:#fff; padding:12px 14px; border-radius:12px; box-shadow:0 1px 6px rgba(0,0,0,.06); margin-bottom:14px; }
+.filters label { display:block; font-size:11px; font-weight:700; color:var(--gray); margin-bottom:3px; }
+input, select { padding:8px 10px; border:1.5px solid var(--border); border-radius:8px; font-size:14px; font-family:inherit; background:#fff; color:var(--navy); }
+input:focus, select:focus { outline:none; border-color:var(--gold); }
+.btn { padding:8px 14px; border:none; border-radius:8px; font-weight:800; font-size:13px; cursor:pointer; font-family:inherit; background:var(--light); color:var(--navy); }
+.btn-gold { background:var(--gold); color:var(--navy); } .btn-dark { background:var(--navy); color:#fff; } .btn-red { background:var(--redbg); color:var(--red); border:1.5px solid var(--red); }
+.btn:disabled { opacity:.5; cursor:default; }
+.tabs { display:flex; gap:6px; margin-bottom:14px; flex-wrap:wrap; }
+.tab { padding:9px 16px; border-radius:8px; background:#fff; border:1.5px solid var(--border); font-weight:800; cursor:pointer; font-size:13px; }
+.tab.on { background:var(--navy); color:#fff; border-color:var(--navy); }
+.card { background:#fff; border-radius:12px; padding:16px; margin-bottom:14px; box-shadow:0 1px 6px rgba(0,0,0,.06); }
+.card h3 { font-size:14px; font-weight:800; margin-bottom:10px; }
+.kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin-bottom:14px; }
+.kpi { background:#fff; border-radius:12px; padding:12px 14px; box-shadow:0 1px 6px rgba(0,0,0,.06); }
+.kpi b { display:block; font-size:22px; color:var(--navy); margin-top:2px; } .kpi span { font-size:11px; font-weight:700; color:var(--gray); } .kpi small { font-size:11px; color:var(--gray); }
+table { border-collapse:collapse; width:100%; font-size:13px; }
+th { text-align:left; font-size:11px; color:var(--gray); font-weight:800; padding:6px 8px; border-bottom:2px solid var(--border); white-space:nowrap; background:#fff; position:sticky; top:0; }
+td { padding:7px 8px; border-bottom:1px solid var(--border); vertical-align:top; }
+td.r, th.r { text-align:right; font-variant-numeric:tabular-nums; }
+.scroll { overflow:auto; max-height:70vh; }
+tr.click { cursor:pointer; } tr.click:hover td { background:#F8FAFC; }
+tr.miss td { background:var(--redbg); }
+.tag { display:inline-block; font-size:11px; font-weight:800; padding:2px 7px; border-radius:6px; background:var(--amberbg); color:var(--amber); }
+.tag.g { background:var(--greenbg); color:var(--green); } .tag.r { background:var(--redbg); color:var(--red); }
+.bars .b { display:flex; align-items:center; gap:8px; margin-bottom:6px; font-size:13px; } .bars .b > span:first-child { width:200px; flex-shrink:0; }
+.bars .fill { height:14px; background:var(--gold); border-radius:4px; } .bars .v { font-weight:800; min-width:70px; }
+.grid { display:grid; gap:2px; font-size:10px; overflow:auto; }
+.gc { height:20px; display:flex; align-items:center; justify-content:center; border-radius:3px; background:#E2E8F0; color:var(--gray); min-width:30px; }
+.gc.ok { background:#BBF7D0; color:#14532D; font-weight:800; } .gc.h { background:transparent; color:var(--gray); font-weight:800; }
+.gc.rl { justify-content:flex-start; padding-left:4px; font-weight:800; color:var(--navy); background:transparent; min-width:60px; }
+.warnbox { background:var(--amberbg); border:1.5px solid var(--amber); color:var(--amber); padding:9px 12px; border-radius:8px; margin-bottom:10px; font-size:13px; font-weight:700; }
+.note { font-size:12px; color:var(--gray); margin:6px 0; line-height:1.5; }
+.detail td { background:#F8FAFC; } .detail .cols { display:flex; gap:24px; flex-wrap:wrap; }
+.seed { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:8px; margin:8px 0; } .seed input { width:100%; }
+.chips { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px; } .chip { padding:6px 12px; border:1.5px solid var(--border); border-radius:16px; font-weight:800; font-size:12px; cursor:pointer; background:#fff; } .chip.on { background:var(--navy); color:#fff; border-color:var(--navy); }
+.pv td, .pv th { white-space:nowrap; font-size:12px; padding:5px 7px; }
+#login { max-width:340px; margin:14vh auto; background:#fff; padding:28px; border-radius:14px; text-align:center; box-shadow:0 4px 20px rgba(0,0,0,.1); }
+#login input { width:100%; margin:14px 0 10px; padding:12px; }
+.hidden { display:none !important; }
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body>
+<div id="login">
+  <h2 style="font-size:18px">Панель БВР</h2>
+  <input type="password" id="pinInput" placeholder="PIN-код" onkeydown="if(event.key==='Enter')checkPin()">
+  <button class="btn btn-gold" style="width:100%;padding:12px" onclick="checkPin()">Войти</button>
+  <div id="loginErr" style="color:#DC2626;font-size:13px;margin-top:10px;display:none">Неверный PIN-код</div>
+</div>
+
+<div id="app" class="hidden">
+  <div class="top"><div><h1>Панель БВР</h1><div class="sub">Журнал бурения по сменам</div></div><div style="margin-left:auto" class="sub" id="loadInfo"></div></div>
+  <div class="wrap">
+    <div class="filters">
+      <div><label>С даты</label><input type="date" id="fFrom"></div>
+      <div><label>По дату</label><input type="date" id="fTo"></div>
+      <div><label>Станок</label><select id="fRig"></select></div>
+      <div><label>Смена</label><select id="fSmena"><option value="">Обе</option><option value="1">Ночь (1)</option><option value="2">День (2)</option></select></div>
+      <button class="btn" data-q="7">7 дней</button><button class="btn" data-q="14">14 дней</button><button class="btn" data-q="m">Месяц</button>
+      <button class="btn btn-gold" id="btnLoad">Обновить</button>
+    </div>
+    <div class="tabs" id="tabs">
+      <div class="tab on" data-t="sum">Сводка</div><div class="tab" data-t="shifts">Смены</div><div class="tab" data-t="tools">Инструмент</div><div class="tab" data-t="journal">Журнал (выгрузка)</div>
+    </div>
+    <div id="msg"></div>
+    <div id="v-sum"></div><div id="v-shifts" class="hidden"></div><div id="v-tools" class="hidden"></div><div id="v-journal" class="hidden"></div>
+  </div>
+</div>
+
+<script>
+const CFG = { PIN: "2508", SHEET_URL: "https://script.google.com/macros/s/AKfycbwhdMV20k8US2BXUz1Xk2XCXE9MEwpHpQaadTF9xEfzbU1--dHL-Zuj06K2qXW-rFtKGw/exec", SEED_KEY: "bvr.seed.v1", TZ: "Asia/Almaty" };
+const TOOLS = { bit:"Коронка", hammer:"Пневмоударник", top_adapter:"Верхний адаптер", float_adapter:"Плавающий адаптер", rod:"Штанга" };
+const TOOL_KEYS = ["bit","hammer","top_adapter","float_adapter","rod"];
+// Колонки журнала: [название, индекс колонки модели, индекс колонки проходки] для каждого инструмента
+const TOOL_COLS = { bit:[11,12], hammer:[13,14], top_adapter:[15,16], float_adapter:[17,18], rod:[19,20] };
+const JOURNAL_HEAD = ["дата (дд.мм.гг)","Смена","Оператор","Блок","Диаметр скв","Пробурено скв, шт","Перебурено скв, шт","Обурено п/м","Перебур, п/м","Время бурения,мин","Производительность м/час","Замена коронки модель","Проходка по коронке.","Поставшик пневмоударника ","Проходка по пневмоударнику.","Замена верхнего адаптера ","Проходка адаптера","Замена Плавающего адаптера","Проходка плавающего адаптера","Замена штанги","Проходка штанги"];
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+const num = v => { const n = Number(String(v == null ? "" : v).replace(",", ".")); return isFinite(n) ? n : 0; };
+const r1 = x => Math.round(x * 10) / 10, r2 = x => Math.round(x * 100) / 100;
+const fmt = (n, d) => (Math.round(n * Math.pow(10, d || 0)) / Math.pow(10, d || 0)).toLocaleString("ru-RU", { maximumFractionDigits: d || 0 });
+const hm = min => Math.floor(Math.round(min) / 60) + " ч " + (Math.round(min) % 60) + " мин";
+const ddmmyyyy = iso => iso.slice(8, 10) + "." + iso.slice(5, 7) + "." + iso.slice(0, 4);
+const ddmm = iso => iso.slice(8, 10) + "." + iso.slice(5, 7);
+// Дата как целый серийный номер Excel: Date-объекты SheetJS получают дробную часть (время) из-за часового пояса
+const xlDate = iso => Math.round((Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10)) - Date.UTC(1899, 11, 30)) / 86400000);
+
+// ═════════ чистая логика (без DOM) — проверяется отдельно ═════════
+function addDays(iso, n) { const d = new Date(iso + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
+function daysBetween(from, to) { const out = []; for (let d = from; d <= to && out.length < 400; d = addDays(d, 1)) out.push(d); return out; }
+function todayIso() { return new Intl.DateTimeFormat("en-CA", { timeZone: CFG.TZ }).format(new Date()); }
+
+// «Козырев Андрей Петрович» -> «Козырев А» (так в журнале у большинства записей)
+function shortName(n) {
+  const p = String(n || "").trim().split(/\s+/).filter(Boolean);
+  if (!p.length) return "";
+  if (p.length === 1) return p[0];
+  return p[0] + " " + p[1].replace(/\./g, "").charAt(0).toUpperCase();
+}
+const rigNo = id => String(id || "").replace(/^\D+/, "");   // DR702 -> 702 (имя листа журнала)
+
+// Все сданные записи по одному станку на (дата, смена) сливаются в одну строку журнала.
+function mergeShifts(list) {
+  const m = {};
+  list.forEach(s => { const k = s.date + "|" + s.smena; (m[k] = m[k] || []).push(s); });
+  return m;
+}
+
+function sumDepth(holes, a, b) { let t = 0; for (let i = Math.max(a, 0); i <= b && i < holes.length; i++) t += num(holes[i].depth); return t; }
+
+// Строки журнала по одному станку за период. seed = {bit,hammer,top_adapter,float_adapter,rod}.
+// Замена: скважины ДО указанной (включительно) бурил старый инструмент, дальше — новый.
+// Если скважина не указана — замена считается в начале смены. В колонке «Проходка» —
+// наработка инструмента, стоящего на конец смены. Наработка снятого инструмента уходит в removals.
+function buildJournal(rig, shifts, from, to, seed) {
+  const byKey = mergeShifts(shifts.filter(s => s.equipmentId === rig));
+  const st = {}; TOOL_KEYS.forEach(k => { st[k] = num(seed && seed[k]); });
+  const rows = [], removals = [];
+  daysBetween(from, to).forEach(date => {
+    [1, 2].forEach(smena => {
+      const grp = byKey[date + "|" + smena] || [];
+      const cells = new Array(21).fill("");
+      const row = { date: date, smena: smena, hasData: grp.length > 0, cells: cells, shifts: grp };
+      cells[1] = smena;
+      if (grp.length) {
+        const holes = [], repl = [];
+        grp.forEach(s => { (s.holes || []).forEach(h => holes.push(h)); (s.replacements || []).forEach(r => repl.push(Object.assign({}, r, { _s: s }))); });
+        let hc = 0, rc = 0, mH = 0, mI = 0, min = 0;
+        holes.forEach(h => { min += num(h.minutes); if (h.redrill) { rc++; mI += num(h.depth); } else { hc++; mH += num(h.depth); } });
+        const diam = grp[0].diameter;
+        const blocks = []; grp.forEach(s => (s.blockList || []).forEach(b => { if (blocks.indexOf(b) < 0) blocks.push(b); }));
+        const ops = []; grp.forEach(s => { const n = shortName(s.empName); if (n && ops.indexOf(n) < 0) ops.push(n); });
+        cells[2] = ops.join("/"); cells[3] = blocks.join("/"); cells[4] = diam || "";
+        cells[5] = hc || ""; cells[6] = rc || ""; cells[7] = mH ? r2(mH) : ""; cells[8] = mI ? r2(mI) : ""; cells[9] = min ? Math.round(min) : "";
+        cells[10] = min > 0 ? r1((mH + mI) * 60 / min) : "";
+        TOOL_KEYS.forEach(tool => {
+          const ev = repl.filter(r => r.tool === tool).map(r => {
+            // позиция скважины замены в порядке ввода; не найдена — начало смены
+            const p = r.atHole ? holes.findIndex(h => String(h.n) === String(r.atHole)) : -1;
+            return { p: p, model: r.model || "" };
+          }).sort((a, b) => a.p - b.p);
+          let cur = st[tool], start = 0, lastModel = "";
+          ev.forEach(e => {
+            const seg = sumDepth(holes, start, e.p);
+            removals.push({ rig: rig, tool: tool, date: date, smena: smena, life: r2(cur + seg), newModel: e.model, diameter: diam || "" });
+            cur = 0; start = e.p + 1; lastModel = e.model || lastModel || "замена";
+          });
+          cur += sumDepth(holes, start, holes.length - 1);
+          st[tool] = cur;
+          if (ev.length) cells[TOOL_COLS[tool][0]] = lastModel;
+        });
+      }
+      TOOL_KEYS.forEach(tool => { cells[TOOL_COLS[tool][1]] = r2(st[tool]); });
+      rows.push(row);
+    });
+  });
+  return { rows: rows, removals: removals, end: st };
+}
+
+function rowsToTsv(rows, c0) {
+  return rows.map(r => r.cells.map((v, i) => {
+    if (i === 0) return ddmmyyyy(r.date);
+    return typeof v === "number" ? String(v).replace(".", ",") : String(v == null ? "" : v);
+  }).slice(c0 || 0).join("\t")).join("\n");
+}
+
+// ═════════ состояние ═════════
+let SHIFTS = [], EQUIP = [], RIGS = [], SEEDS = {}, curRig = "", curTab = "sum";
+try { SEEDS = JSON.parse(localStorage.getItem(CFG.SEED_KEY) || "{}"); } catch (e) { SEEDS = {}; }
+function saveSeeds() { try { localStorage.setItem(CFG.SEED_KEY, JSON.stringify(SEEDS)); } catch (e) {} }
+
+function checkPin() {
+  if ($("pinInput").value === CFG.PIN) { try { sessionStorage.setItem("bvr.pin", "1"); } catch (e) {} enter(); }
+  else { $("loginErr").style.display = "block"; }
+}
+function enter() { $("login").classList.add("hidden"); $("app").classList.remove("hidden"); init(); }
+try { if (sessionStorage.getItem("bvr.pin") === "1") enter(); } catch (e) {}
+
+function setPeriod(q) {
+  const t = todayIso();
+  if (q === "m") { $("fFrom").value = t.slice(0, 8) + "01"; } else { $("fFrom").value = addDays(t, -(Number(q) - 1)); }
+  $("fTo").value = t;
+}
+function msg(t, kind) { $("msg").innerHTML = t ? '<div class="warnbox"' + (kind === "err" ? ' style="background:#FEF2F2;border-color:#DC2626;color:#DC2626"' : "") + ">" + esc(t) + "</div>" : ""; }
+
+async function init() {
+  setPeriod("14");
+  document.querySelectorAll("[data-q]").forEach(b => b.onclick = () => { setPeriod(b.dataset.q); load(); });
+  $("btnLoad").onclick = load;
+  ["fRig", "fSmena"].forEach(id => $(id).onchange = render);
+  document.querySelectorAll("#tabs .tab").forEach(t => t.onclick = () => {
+    curTab = t.dataset.t; document.querySelectorAll("#tabs .tab").forEach(x => x.classList.toggle("on", x === t));
+    ["sum", "shifts", "tools", "journal"].forEach(k => $("v-" + k).classList.toggle("hidden", k !== curTab)); render();
+  });
+  try { EQUIP = await fetch(CFG.SHEET_URL + "?action=getEquipment").then(r => r.json()); } catch (e) { EQUIP = []; }
+  await load();
+}
+
+async function load() {
+  const from = $("fFrom").value, to = $("fTo").value;
+  if (!from || !to || from > to) { msg("Проверьте даты периода", "err"); return; }
+  $("btnLoad").disabled = true; $("btnLoad").textContent = "Загрузка...";
+  try {
+    const url = CFG.SHEET_URL + "?action=getDrillShifts&from=" + from + "&to=" + to;
+    const data = await fetch(url).then(r => r.json());
+    if (!Array.isArray(data)) throw new Error(data && data.error ? data.error : "ответ сервера не распознан");
+    SHIFTS = data.map(s => Object.assign({}, s, { smena: Number(s.smena) }));
+    msg("");
+    $("loadInfo").textContent = "Обновлено " + new Date().toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit", timeZone: CFG.TZ }) + " · смен: " + SHIFTS.length;
+  } catch (e) {
+    msg("Не удалось загрузить смены: " + e.message + ". Если это первый запуск — проверьте, что патч бэкенда (bvr_backend_patch.gs) внесён и развёрнут новой версией.", "err");
+    SHIFTS = [];
+  }
+  $("btnLoad").disabled = false; $("btnLoad").textContent = "Обновить";
+  const rigsEquip = (EQUIP || []).filter(e => /Буров/i.test(e.type || "")).map(e => e.equipmentId);
+  const rigsData = SHIFTS.map(s => s.equipmentId);
+  RIGS = Array.from(new Set(rigsEquip.concat(rigsData))).sort((a, b) => rigNo(a).localeCompare(rigNo(b)));
+  const cur = $("fRig").value;
+  $("fRig").innerHTML = '<option value="">Все станки</option>' + RIGS.map(r => "<option>" + esc(r) + "</option>").join("");
+  if (RIGS.indexOf(cur) >= 0) $("fRig").value = cur;
+  render();
+}
+
+function filtered() {
+  const rig = $("fRig").value, sm = $("fSmena").value;
+  return SHIFTS.filter(s => (!rig || s.equipmentId === rig) && (!sm || String(s.smena) === sm));
+}
+
+// итоги по списку смен
+function totals(list) {
+  const t = { shifts: list.length, holes: 0, redrill: 0, mH: 0, mI: 0, min: 0, dt: 0 };
+  list.forEach(s => { t.holes += num(s.holesCount); t.redrill += num(s.redrillCount); t.mH += num(s.metersDrilled); t.mI += num(s.metersRedrill); t.min += num(s.drillMinutes); t.dt += num(s.downtimeMinutes); });
+  t.m = t.mH + t.mI; t.mph = t.min > 0 ? t.m * 60 / t.min : 0; t.pctRe = t.m > 0 ? t.mI / t.m * 100 : 0;
+  return t;
+}
+
+function render() {
+  if (curTab === "sum") renderSum(); else if (curTab === "shifts") renderShifts(); else if (curTab === "tools") renderTools(); else renderJournal();
+}
+
+// ═════════ Сводка ═════════
+function renderSum() {
+  const list = filtered(), t = totals(list);
+  let h = '<div class="kpis">' +
+    '<div class="kpi"><span>Смен сдано</span><b>' + t.shifts + '</b></div>' +
+    '<div class="kpi"><span>Обурено, п/м</span><b>' + fmt(t.mH, 1) + '</b><small>' + fmt(t.holes) + ' скв.</small></div>' +
+    '<div class="kpi"><span>Перебур, п/м</span><b>' + fmt(t.mI, 1) + '</b><small>' + fmt(t.redrill) + ' скв. · ' + fmt(t.pctRe, 1) + ' % метров</small></div>' +
+    '<div class="kpi"><span>Время бурения</span><b>' + hm(t.min) + '</b></div>' +
+    '<div class="kpi"><span>Производительность</span><b>' + (t.min ? fmt(t.mph, 1) : "—") + '</b><small>м/час</small></div>' +
+    '<div class="kpi"><span>Простои</span><b>' + hm(t.dt) + '</b></div></div>';
+
+  // по станкам
+  const byRig = {}; list.forEach(s => { (byRig[s.equipmentId] = byRig[s.equipmentId] || []).push(s); });
+  const rigs = Object.keys(byRig).sort((a, b) => rigNo(a).localeCompare(rigNo(b)));
+  h += '<div class="card"><h3>По станкам</h3><div class="scroll"><table><tr><th>Станок</th><th class="r">Смен</th><th class="r">Скв.</th><th class="r">Обурено, м</th><th class="r">Перебур, скв.</th><th class="r">Перебур, м</th><th class="r">Бурение</th><th class="r">м/час</th><th class="r">Простой</th></tr>';
+  h += rigs.length ? rigs.map(r => { const x = totals(byRig[r]); return "<tr><td><b>" + esc(r) + "</b></td><td class='r'>" + x.shifts + "</td><td class='r'>" + fmt(x.holes) + "</td><td class='r'>" + fmt(x.mH, 1) + "</td><td class='r'>" + fmt(x.redrill) + "</td><td class='r'>" + fmt(x.mI, 1) + "</td><td class='r'>" + hm(x.min) + "</td><td class='r'>" + (x.min ? fmt(x.mph, 1) : "—") + "</td><td class='r'>" + hm(x.dt) + "</td></tr>"; }).join("") : '<tr><td colspan="9" style="color:#64748B">За период смен нет</td></tr>';
+  h += "</table></div></div>";
+
+  // простои по причинам
+  const byReason = {}; let dtAll = 0;
+  list.forEach(s => (s.downtimes || []).forEach(d => { byReason[d.reason || "Без причины"] = (byReason[d.reason || "Без причины"] || 0) + num(d.minutes); dtAll += num(d.minutes); }));
+  const rs = Object.keys(byReason).sort((a, b) => byReason[b] - byReason[a]);
+  h += '<div class="card"><h3>Простои по причинам</h3><div class="bars">' + (rs.length ? rs.map(k => '<div class="b"><span>' + esc(k) + '</span><div style="flex:1"><div class="fill" style="width:' + Math.max(2, byReason[k] / byReason[rs[0]] * 100) + '%"></div></div><span class="v">' + hm(byReason[k]) + '</span></div>').join("") : '<div class="note">Простоев не записано</div>') + '</div></div>';
+
+  // сетка сдачи смен: кто не сдал
+  const from = $("fFrom").value, to = $("fTo").value, days = daysBetween(from, to);
+  if (days.length && days.length <= 35) {
+    const gridRigs = $("fRig").value ? [$("fRig").value] : RIGS;
+    const idx = {}; SHIFTS.forEach(s => { idx[s.equipmentId + "|" + s.date + "|" + s.smena] = (idx[s.equipmentId + "|" + s.date + "|" + s.smena] || 0) + num(s.metersDrilled) + num(s.metersRedrill); });
+    const has = {}; SHIFTS.forEach(s => { has[s.equipmentId + "|" + s.date + "|" + s.smena] = 1; });
+    h += '<div class="card"><h3>Сдача смен (Н — ночь, Д — день)</h3><div class="note">Серая клетка — смена не сдана (станок мог стоять). Зелёная — сдана, в клетке метры.</div><div style="overflow:auto"><div class="grid" style="grid-template-columns:70px repeat(' + (days.length * 2) + ',34px)">';
+    h += '<div class="gc h"></div>' + days.map(d => '<div class="gc h" style="grid-column:span 2">' + ddmm(d) + '</div>').join("");
+    h += '<div class="gc h"></div>' + days.map(() => '<div class="gc h">Н</div><div class="gc h">Д</div>').join("");
+    gridRigs.forEach(r => { h += '<div class="gc rl">' + esc(r) + "</div>" + days.map(d => [1, 2].map(sm => { const k = r + "|" + d + "|" + sm; return has[k] ? '<div class="gc ok">' + Math.round(idx[k]) + "</div>" : '<div class="gc">·</div>'; }).join("")).join(""); });
+    h += "</div></div></div>";
+  }
+  $("v-sum").innerHTML = h;
+}
+
+// ═════════ Смены ═════════
+let openShift = "", delArm = "";
+function renderShifts() {
+  const list = filtered().slice().sort((a, b) => a.date === b.date ? b.smena - a.smena : (a.date < b.date ? 1 : -1));
+  let h = '<div class="card"><div class="scroll"><table><tr><th>Дата</th><th>Смена</th><th>Станок</th><th>Оператор</th><th>Блок</th><th class="r">Скв.</th><th class="r">Перебур</th><th class="r">Метры</th><th class="r">Бурение</th><th class="r">м/час</th><th class="r">Простой</th><th>Замены</th></tr>';
+  if (!list.length) h += '<tr><td colspan="12" style="color:#64748B">Смен нет</td></tr>';
+  list.forEach(s => {
+    const m = num(s.metersDrilled) + num(s.metersRedrill), mph = num(s.drillMinutes) > 0 ? m * 60 / num(s.drillMinutes) : 0;
+    h += '<tr class="click" data-id="' + esc(s.shiftId) + '"><td>' + ddmmyyyy(s.date) + '</td><td>' + (s.smena === 1 ? "Ночь" : "День") + '</td><td><b>' + esc(s.equipmentId) + '</b></td><td>' + esc(s.empName) + '</td><td>' + esc(s.blocks) + '</td><td class="r">' + fmt(num(s.holesCount)) + '</td><td class="r">' + (num(s.redrillCount) ? '<span class="tag">' + fmt(num(s.redrillCount)) + " / " + fmt(num(s.metersRedrill), 1) + "</span>" : "") + '</td><td class="r"><b>' + fmt(m, 1) + '</b></td><td class="r">' + hm(num(s.drillMinutes)) + '</td><td class="r">' + (num(s.drillMinutes) ? fmt(mph, 1) : "—") + '</td><td class="r">' + (num(s.downtimeMinutes) ? hm(num(s.downtimeMinutes)) : "") + '</td><td>' + (s.replacements || []).map(r => esc(TOOLS[r.tool] || r.tool)).join(", ") + "</td></tr>";
+    if (openShift === s.shiftId) {
+      h += '<tr class="detail"><td colspan="12"><div class="cols"><div><b>Скважины</b><table class="pv"><tr><th>№</th><th class="r">м</th><th class="r">мин</th><th>Прим.</th></tr>' +
+        (s.holes || []).map(x => "<tr><td>" + esc(x.n) + (x.redrill ? ' <span class="tag">перебур' + (x.replacesHole ? " вм. №" + esc(x.replacesHole) : "") + "</span>" : "") + '</td><td class="r">' + fmt(num(x.depth), 2) + '</td><td class="r">' + fmt(num(x.minutes)) + "</td><td>" + esc(x.note || "") + "</td></tr>").join("") + "</table></div>" +
+        '<div><b>Простои</b><br>' + ((s.downtimes || []).length ? (s.downtimes || []).map(d => esc(d.reason) + ": " + fmt(num(d.minutes)) + " мин" + (d.from && d.to ? " (" + esc(d.from) + "–" + esc(d.to) + ")" : "") + (d.note ? " — " + esc(d.note) : "")).join("<br>") : "нет") +
+        '<br><br><b>Замены</b><br>' + ((s.replacements || []).length ? (s.replacements || []).map(r => esc(TOOLS[r.tool] || r.tool) + (r.model ? " " + esc(r.model) : "") + (r.atHole ? ", скв. №" + esc(r.atHole) : ", начало смены")).join("<br>") : "нет") +
+        (s.note ? "<br><br><b>Примечание</b><br>" + esc(s.note) : "") + '<div class="note">Сдана: ' + esc(s.createdAt || "") + (s.updatedAt ? " · исправлена: " + esc(s.updatedAt) : "") + '</div></div></div>' +
+        '<div style="margin-top:10px;display:flex;gap:8px"><a class="btn btn-dark" style="text-decoration:none" href="bvr-form.html?eq=' + encodeURIComponent(s.equipmentId) + "&shift=" + encodeURIComponent(s.shiftId) + '">Исправить</a>' +
+        '<button class="btn btn-red" data-del="' + esc(s.shiftId) + '">' + (delArm === s.shiftId ? "Нажмите ещё раз: удалить смену" : "Удалить") + "</button></div></td></tr>";
+    }
+  });
+  h += "</table></div></div>";
+  $("v-shifts").innerHTML = h;
+  $("v-shifts").querySelectorAll("tr.click").forEach(tr => tr.onclick = () => { openShift = openShift === tr.dataset.id ? "" : tr.dataset.id; delArm = ""; renderShifts(); });
+  $("v-shifts").querySelectorAll("[data-del]").forEach(b => b.onclick = async () => {
+    if (delArm !== b.dataset.del) { delArm = b.dataset.del; renderShifts(); return; }
+    b.disabled = true;
+    try {
+      const r = await fetch(CFG.SHEET_URL, { method: "POST", body: JSON.stringify({ action: "deleteDrillShift", shiftId: b.dataset.del }) }).then(x => x.json());
+      if (!r.ok) throw new Error(r.error || "ошибка");
+      openShift = ""; delArm = ""; await load();
+    } catch (e) { msg("Не удалось удалить: " + e.message, "err"); b.disabled = false; }
+  });
+}
+
+// ═════════ Инструмент ═════════
+function renderTools() {
+  const rigs = $("fRig").value ? [$("fRig").value] : RIGS.filter(r => SHIFTS.some(s => s.equipmentId === r));
+  const from = $("fFrom").value, to = $("fTo").value;
+  let rem = [], h = "";
+  rigs.forEach(r => { rem = rem.concat(buildJournal(r, SHIFTS, from, to, SEEDS[r]).removals); });
+  h += '<div class="card"><h3>Замены инструмента за период</h3><div class="note">Наработка снятого инструмента = счётчик на момент замены (из журнала или начального значения) + метры до скважины замены. Без начального счётчика наработка считается только с начала периода.</div><div class="scroll"><table><tr><th>Дата</th><th>Смена</th><th>Станок</th><th>Инструмент</th><th class="r">Наработка снятого, м</th><th>Поставлен</th></tr>';
+  h += rem.length ? rem.sort((a, b) => a.date === b.date ? a.smena - b.smena : (a.date < b.date ? -1 : 1)).map(x => "<tr><td>" + ddmmyyyy(x.date) + "</td><td>" + (x.smena === 1 ? "Ночь" : "День") + "</td><td><b>" + esc(x.rig) + "</b></td><td>" + esc(TOOLS[x.tool]) + '</td><td class="r"><b>' + fmt(x.life, 1) + "</b></td><td>" + esc(x.newModel) + "</td></tr>").join("") : '<tr><td colspan="6" style="color:#64748B">Замен за период нет</td></tr>';
+  h += "</table></div></div>";
+  h += '<div class="card"><h3>Наработка на конец периода</h3><div class="scroll"><table><tr><th>Станок</th>' + TOOL_KEYS.map(k => '<th class="r">' + esc(TOOLS[k]) + ", м</th>").join("") + "<th>Журнал учтён по</th></tr>";
+  rigs.forEach(r => { const e = buildJournal(r, SHIFTS, from, to, SEEDS[r]).end, sd = SEEDS[r]; h += "<tr><td><b>" + esc(r) + "</b></td>" + TOOL_KEYS.map(k => '<td class="r">' + fmt(e[k], 1) + "</td>").join("") + "<td>" + (sd && sd.asOf ? ddmmyyyy(sd.asOf) : '<span class="tag r">не задан</span>') + "</td></tr>"; });
+  h += "</table></div></div>";
+  $("v-tools").innerHTML = h;
+}
+
+// ═════════ Журнал (выгрузка) ═════════
+let jRig = "";
+function renderJournal() {
+  const from = $("fFrom").value, to = $("fTo").value;
+  const rigs = RIGS.filter(r => SHIFTS.some(s => s.equipmentId === r));
+  if (!rigs.length) { $("v-journal").innerHTML = '<div class="card"><div class="note">За выбранный период нет сданных смен. Выберите период и нажмите «Обновить».</div></div>'; return; }
+  if (rigs.indexOf(jRig) < 0) jRig = rigs[0];
+  const sd = SEEDS[jRig] || {};
+  const J = buildJournal(jRig, SHIFTS, from, to, sd);
+  let h = '<div class="card"><h3>Строки журнала по станку</h3><div class="chips">' + rigs.map(r => '<div class="chip' + (r === jRig ? " on" : "") + '" data-rig="' + esc(r) + '">' + esc(r) + "</div>").join("") + "</div>";
+  if (!sd.asOf && !TOOL_KEYS.some(k => sd[k])) h += '<div class="warnbox">Начальные счётчики проходки по ' + esc(jRig) + ' не заданы — проходка по инструменту считается с нуля. Загрузите ваш журнал (кнопка ниже) или впишите значения.</div>';
+  else if (sd.asOf && from <= sd.asOf) h += '<div class="warnbox">Период начинается не позже даты, по которую журнал уже заполнен (' + ddmmyyyy(sd.asOf) + '). Метры этих дней учтены в счётчиках журнала и посчитаются повторно. Начните период с ' + ddmmyyyy(addDays(sd.asOf, 1)) + '.</div>';
+  const missing = J.rows.filter(r => !r.hasData).length;
+  if (missing) h += '<div class="note">Строк без данных: ' + missing + ' (смена не сдана или станок стоял) — в них только дата и смена, счётчики сохранены.</div>';
+  h += '<div class="note"><b>Счётчики на начало периода</b> (значения журнала по ' + esc(jRig) + ', последняя строка перед периодом):</div><div class="seed">' +
+    TOOL_KEYS.map(k => '<div><label style="font-size:11px;font-weight:700;color:#64748B">' + esc(TOOLS[k]) + ', м</label><input data-seed="' + k + '" value="' + (sd[k] != null ? esc(String(sd[k]).replace(".", ",")) : "") + '" inputmode="decimal"></div>').join("") +
+    '<div><label style="font-size:11px;font-weight:700;color:#64748B">Журнал заполнен по дату</label><input type="date" data-seed="asOf" value="' + esc(sd.asOf || "") + '"></div></div>';
+  h += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0"><label class="btn btn-dark" style="cursor:pointer">Загрузить журнал (.xlsx) — взять счётчики<input type="file" id="fJournal" accept=".xlsx,.xlsm" class="hidden"></label>' +
+    '<button class="btn btn-gold" id="btnCopyAll">Копировать A–U</button><button class="btn btn-gold" id="btnCopyData">Копировать F–U (без даты, оператора, блока)</button><button class="btn btn-dark" id="btnXlsx">Скачать Excel (все станки)</button></div>';
+  h += '<div class="note">Копирование — табличный текст: вставьте в лист ' + esc(rigNo(jRig)) + ' вашего журнала в первую строку периода. Строки идут по порядку «дата, смена 1, смена 2» (как в журнале). Числа с запятой, K — значение (в журнале у вас формула).<br>Проходка инструмента считается в этом же порядке.</div>';
+  h += '<div class="scroll"><table class="pv"><tr>' + JOURNAL_HEAD.map(x => "<th>" + esc(x) + "</th>").join("") + "</tr>" +
+    J.rows.map(r => "<tr" + (r.hasData ? "" : ' class="miss"') + ">" + r.cells.map((v, i) => "<td" + (typeof v === "number" ? ' class="r"' : "") + ">" + (i === 0 ? ddmmyyyy(r.date) : esc(v)) + "</td>").join("") + "</tr>").join("") + "</table></div></div>";
+  $("v-journal").innerHTML = h;
+  document.querySelectorAll("#v-journal .chip").forEach(c => c.onclick = () => { jRig = c.dataset.rig; renderJournal(); });
+  document.querySelectorAll("#v-journal [data-seed]").forEach(i => i.onchange = () => {
+    const s = SEEDS[jRig] || (SEEDS[jRig] = {}); const k = i.dataset.seed;
+    if (k === "asOf") s.asOf = i.value; else s[k] = num(i.value);
+    saveSeeds(); renderJournal();
+  });
+  $("fJournal").onchange = e => { if (e.target.files[0]) readJournal(e.target.files[0]); };
+  $("btnCopyAll").onclick = () => copyText(rowsToTsv(J.rows, 0), "Скопировано: " + J.rows.length + " строк, колонки A–U");
+  $("btnCopyData").onclick = () => copyText(rowsToTsv(J.rows, 5), "Скопировано: " + J.rows.length + " строк, колонки F–U");
+  $("btnXlsx").onclick = () => exportXlsx(rigs);
+}
+
+function copyText(text, okMsg) {
+  const done = () => msg(okMsg);
+  if (navigator.clipboard && window.isSecureContext) { navigator.clipboard.writeText(text).then(done, () => fallbackCopy(text, done)); }
+  else fallbackCopy(text, done);
+}
+function fallbackCopy(text, done) {
+  const ta = document.createElement("textarea"); ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0"; document.body.appendChild(ta); ta.select();
+  try { document.execCommand("copy"); done(); } catch (e) { msg("Не удалось скопировать. Используйте «Скачать Excel».", "err"); }
+  document.body.removeChild(ta);
+}
+
+// Чтение счётчиков из журнала мастера: на листе станка (701, 702, ...) берём последнее числовое значение
+// в колонках проходки (M, O, Q, S, U) и последнюю дату, где есть метры (H или I).
+function readJournal(file) {
+  const fr = new FileReader();
+  fr.onload = () => {
+    try {
+      const wb = XLSX.read(new Uint8Array(fr.result), { type: "array", cellDates: true });
+      const found = [];
+      RIGS.forEach(rig => {
+        const ws = wb.Sheets[rigNo(rig)]; if (!ws) return;
+        const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null });
+        const seed = { asOf: "" };
+        TOOL_KEYS.forEach(k => { let v = null; rows.forEach(r => { const c = r[TOOL_COLS[k][1]]; if (typeof c === "number" && isFinite(c)) v = c; }); if (v != null) seed[k] = r2(v); });
+        rows.forEach(r => { const d = r[0]; if (d instanceof Date && ((typeof r[7] === "number" && r[7] > 0) || (typeof r[8] === "number" && r[8] > 0))) { seed.asOf = new Date(d.getTime() + 12 * 3600 * 1000).toISOString().slice(0, 10); } });
+        SEEDS[rig] = seed; found.push(rig + " (по " + (seed.asOf ? ddmmyyyy(seed.asOf) : "дата не найдена") + ")");
+      });
+      saveSeeds();
+      msg(found.length ? "Счётчики взяты из журнала: " + found.join(", ") + ". Проверьте значения ниже." : "В файле не найдены листы станков (701, 702, ...).");
+      renderJournal();
+    } catch (e) { msg("Не удалось прочитать файл журнала: " + e.message, "err"); }
+  };
+  fr.readAsArrayBuffer(file);
+}
+
+function exportXlsx(rigs) {
+  const from = $("fFrom").value, to = $("fTo").value;
+  const wb = XLSX.utils.book_new(); let allRem = [];
+  rigs.forEach(r => {
+    const J = buildJournal(r, SHIFTS, from, to, SEEDS[r]);
+    const aoa = [JOURNAL_HEAD].concat(J.rows.map(x => x.cells.map((v, i) => i === 0 ? xlDate(x.date) : v)));
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    for (let i = 1; i < aoa.length; i++) { const c = ws["A" + (i + 1)]; if (c) c.z = "dd.mm.yyyy"; }
+    ws["!cols"] = JOURNAL_HEAD.map((h, i) => ({ wch: i === 2 || i === 3 ? 18 : 13 }));
+    XLSX.utils.book_append_sheet(wb, ws, rigNo(r)); allRem = allRem.concat(J.removals);
+  });
+  const remAoa = [["Дата", "Смена", "Станок", "Инструмент", "Наработка снятого, м", "Поставлен (модель)", "Диаметр"]].concat(allRem.map(x => [xlDate(x.date), x.smena, x.rig, TOOLS[x.tool], x.life, x.newModel, x.diameter]));
+  const wr = XLSX.utils.aoa_to_sheet(remAoa); for (let i = 1; i < remAoa.length; i++) { const c = wr["A" + (i + 1)]; if (c) c.z = "dd.mm.yyyy"; }
+  XLSX.utils.book_append_sheet(wb, wr, "Замены");
+  const dtAoa = [["Дата", "Смена", "Станок", "Оператор", "Причина", "Минут", "С", "До", "Комментарий"]];
+  SHIFTS.filter(s => rigs.indexOf(s.equipmentId) >= 0).forEach(s => (s.downtimes || []).forEach(d => dtAoa.push([xlDate(s.date), s.smena, s.equipmentId, s.empName, d.reason, num(d.minutes), d.from || "", d.to || "", d.note || ""])));
+  const wd = XLSX.utils.aoa_to_sheet(dtAoa); for (let i = 1; i < dtAoa.length; i++) { const c = wd["A" + (i + 1)]; if (c) c.z = "dd.mm.yyyy"; }
+  XLSX.utils.book_append_sheet(wb, wd, "Простои");
+  XLSX.writeFile(wb, "БВР_журнал_" + from + "_" + to + ".xlsx");
+  msg("Файл сформирован: листы станков, «Замены», «Простои».");
+}
+</script>
+</body>
+</html>
