@@ -776,7 +776,7 @@ function serialToYmd(v) {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(v || "")); return m ? m[0] : null;
 }
 // Разбор листов книги KPI: массивы строк (header:1) -> план
-function planFromSheets(drvAoa, excAoa) {
+function planFromSheets(drvAoa, excAoa, tsAoa) {
   function one(aoa, eqName, planName) {
     let hi = -1;
     for (let i = 0; i < Math.min(aoa.length, 10); i++) if (aoa[i] && aoa[i].indexOf("Дата") >= 0 && aoa[i].indexOf(eqName) >= 0) { hi = i; break; }
@@ -794,11 +794,47 @@ function planFromSheets(drvAoa, excAoa) {
     }
     return out;
   }
-  const drivers = one(drvAoa, "Самосвал", "План по заданию, т");
+  let drivers = one(drvAoa, "Самосвал", "План по заданию, т");
   const excavators = one(excAoa, "Экскаватор", "План тоннажа, т");
+  // План самосвала в смене — из листа «План ТС» («Мощность при КИО, т», с учётом КТГ по дням), а не из строк по водителям:
+  // машина без закреплённого водителя (вакансия) тоже имеет план, а пересадки ничего не меняют. План машины делится между строками экипажа по часам.
+  const tsPlan = truckPlanFromSheet(tsAoa);
+  if (tsPlan) drivers = applyTruckPlan(drivers, tsPlan);
   if (!drivers.length) throw new Error("В плане водителей нет строк с часами или планом.");
   const month = drivers[0][0].slice(0, 7);
   return { month, drivers, excavators };
+}
+function truckPlanFromSheet(aoa) {
+  if (!aoa) return null;
+  let hi = -1;
+  for (let i = 0; i < Math.min(aoa.length, 10); i++) if (aoa[i] && aoa[i].indexOf("Дата") >= 0 && aoa[i].indexOf("Самосвал") >= 0 && aoa[i].indexOf("Мощность при КИО, т") >= 0) { hi = i; break; }
+  if (hi < 0) return null;
+  const h = aoa[hi], c = n => h.indexOf(n);
+  const ci = { d: c("Дата"), e: c("Самосвал"), ud: c("Полезно день до КИО, ч"), un: c("Полезно ночь до КИО, ч"), cap: c("Мощность при КИО, т") };
+  if (Object.keys(ci).some(k => ci[k] < 0)) return null;
+  const out = {};
+  for (let i = hi + 1; i < aoa.length; i++) {
+    const r = aoa[i]; if (!r) continue;
+    const d = serialToYmd(r[ci.d]); if (!d || !r[ci.e] || typeof r[ci.cap] !== "number") continue;
+    const ud = Number(r[ci.ud]) || 0, un = Number(r[ci.un]) || 0, t = ud + un, cap = r[ci.cap], eq = String(r[ci.e]).trim();
+    out[d + "|" + SH_D + "|" + eq] = t > 0 ? cap * ud / t : 0;
+    out[d + "|" + SH_N + "|" + eq] = t > 0 ? cap * un / t : 0;
+  }
+  return out;
+}
+function applyTruckPlan(rows, tp) {
+  const g = {};
+  rows.forEach(r => { const k = r[0] + "|" + r[1] + "|" + r[2]; (g[k] || (g[k] = [])).push(r); });
+  const out = [];
+  Object.keys(tp).forEach(k => {
+    const L = g[k] || [], mp = tp[k], [d, sh, eq] = k.split("|");
+    const hs = L.reduce((q, r) => q + (r[4] > 0 ? r[4] : 0), 0);
+    if (hs > 0) L.forEach(r => out.push([r[0], r[1], r[2], r[3], r[4], r[4] > 0 ? Math.round(mp * r[4] / hs * 100) / 100 : 0].concat(r.slice(6))));
+    else { L.forEach(r => out.push([r[0], r[1], r[2], r[3], r[4], 0].concat(r.slice(6)))); if (mp > 0) out.push([d, sh, eq, "Вакансия", 0, Math.round(mp * 100) / 100, ""]); }
+  });
+  Object.keys(g).forEach(k => { if (!(k in tp)) g[k].forEach(r => out.push(r)); });
+  out.sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
+  return out;
 }
 // ==CALC-END==
 
@@ -1171,12 +1207,12 @@ async function ingestFile(f) {
   if (isBook) {
     if (typeof XLSX === "undefined") return { kind: "skip", msg: "«" + f.name + "»: библиотека чтения Excel не загрузилась (нет связи с cdnjs.cloudflare.com). Файл пропущен, попробуйте позже." };
     let wb;
-    try { wb = XLSX.read(buf, { type: "array", sheets: ["План водителей", "План экскаваторщиков", "Рейсы", "Статуса", "ROSTER"] }); }
+    try { wb = XLSX.read(buf, { type: "array", sheets: ["План водителей", "План экскаваторщиков", "План ТС", "Рейсы", "Статуса", "ROSTER"] }); }
     catch (e) { return { kind: "skip", msg: "«" + f.name + "»: не удалось прочитать как книгу Excel. Файл пропущен." }; }
     const aoa = n => XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: true, defval: null });
     const res = [];
     if (wb.Sheets["План водителей"] && wb.Sheets["План экскаваторщиков"]) {
-      const plan = planFromSheets(aoa("План водителей"), aoa("План экскаваторщиков"));
+      const plan = planFromSheets(aoa("План водителей"), aoa("План экскаваторщиков"), wb.Sheets["План ТС"] ? aoa("План ТС") : null);
       plan.src = "manual"; PLANS[plan.month] = plan;
       res.push({ kind: "plan", month: plan.month, msg: "План на " + plan.month + " загружен из «" + f.name + "»." });
     }
