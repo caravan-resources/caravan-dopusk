@@ -269,7 +269,7 @@ function totals(list) {
 }
 
 function render() {
-  if (curTab === "sum") renderSum(); else if (curTab === "shifts") renderShifts(); else if (curTab === "tools") renderTools(); else renderJournal();
+  if (curTab === "sum") renderSum(); else if (curTab === "shifts") renderShifts(); else if (curTab === "tools") renderTools(); else { renderJournal(); appendArchive(); }
 }
 
 // ═════════ Сводка ═════════
@@ -327,7 +327,7 @@ function renderShifts() {
         '<br><br><b>Замены</b><br>' + ((s.replacements || []).length ? (s.replacements || []).map(r => esc(TOOLS[r.tool] || r.tool) + (r.model ? " " + esc(r.model) : "") + (r.atHole ? ", скв. №" + esc(r.atHole) : ", начало смены")).join("<br>") : "нет") +
         (s.note ? "<br><br><b>Примечание</b><br>" + esc(s.note) : "") + '<div class="note">Сдана: ' + esc(s.createdAt || "") + (s.updatedAt ? " · исправлена: " + esc(s.updatedAt) : "") + '</div></div></div>' +
         '<div style="margin-top:10px;display:flex;gap:8px"><a class="btn btn-dark" style="text-decoration:none" href="bvr-form.html?eq=' + encodeURIComponent(s.equipmentId) + "&shift=" + encodeURIComponent(s.shiftId) + '">Исправить</a>' +
-        '<button class="btn btn-red" data-del="' + esc(s.shiftId) + '">' + (delArm === s.shiftId ? "Нажмите ещё раз: удалить смену" : "Удалить") + "</button></div></td></tr>";
+        '<button class="btn btn-red" data-del="' + esc(s.shiftId) + '">' + (delArm === s.shiftId ? "Нажмите ещё раз: удалить смену (останется в архиве)" : "Удалить") + "</button></div></td></tr>";
     }
   });
   h += "</table></div></div>";
@@ -406,6 +406,59 @@ function renderJournal() {
   $("btnCopyAll").onclick = () => copyText(rowsToTsv(J.rows, 0, jRig), "Скопировано: " + J.rows.length + " строк, колонки A–U");
   $("btnCopyData").onclick = () => copyText(rowsToTsv(J.rows, 5, jRig), "Скопировано: " + J.rows.length + " строк, колонки F–U");
   $("btnXlsx").onclick = () => exportXlsx(rigs);
+}
+
+// ═════════ Архив ═════════
+function appendArchive() {
+  const box = document.createElement("div");
+  box.innerHTML = '<div class="card"><h3>Архив журнала бурения</h3><div class="note" id="arcInfo">Загрузка...</div>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px"><button class="btn btn-dark" id="btnArcSync">Синхронизировать архив сейчас</button><button class="btn btn-dark" id="btnAllXlsx">Скачать все смены (Excel)</button></div>' +
+    '<div class="note">Каждая сдача, правка и удаление смены дописывается в архив: отдельная таблица на Диске, листы по месяцам. Прежние значения при правке и удалении сохраняются в архиве и в листе «БВР-Изменения». Удалённая смена пропадает из списка, но остаётся в архиве.</div></div>';
+  $("v-journal").appendChild(box.firstChild);
+  const info = () => fetch(CFG.SHEET_URL + "?action=getDrillArchiveInfo").then(r => r.json()).then(i => {
+    if (!i || !i.ok) { $("arcInfo").textContent = "Архив пока недоступен: бэкенд не обновлён."; return; }
+    $("arcInfo").innerHTML = i.created ? 'Архив создан: <a href="' + esc(i.url) + '" target="_blank" rel="noopener">открыть таблицу архива</a>. Последняя сверка: ' + esc(i.lastSync || "ещё не было") : "Архив будет создан при первой сдаче смены или по кнопке ниже.";
+  }).catch(() => { $("arcInfo").textContent = "Не удалось получить сведения об архиве (нет связи)."; });
+  info();
+  $("btnArcSync").onclick = async () => {
+    $("btnArcSync").disabled = true; $("btnArcSync").textContent = "Синхронизация...";
+    try { const r = await fetch(CFG.SHEET_URL, { method: "POST", body: JSON.stringify({ action: "syncDrillArchive" }) }).then(x => x.json());
+      if (!r.ok) throw new Error(r.error || "ошибка"); msg("Архив синхронизирован: добавлено смен " + r.synced + " из " + r.total + "."); await info();
+    } catch (e) { msg("Синхронизация не удалась: " + e.message, "err"); }
+    $("btnArcSync").disabled = false; $("btnArcSync").textContent = "Синхронизировать архив сейчас";
+  };
+  $("btnAllXlsx").onclick = async () => {
+    $("btnAllXlsx").disabled = true; $("btnAllXlsx").textContent = "Формирую файл...";
+    try { await exportAll(); } catch (e) { msg("Не удалось сформировать файл: " + e.message, "err"); }
+    $("btnAllXlsx").disabled = false; $("btnAllXlsx").textContent = "Скачать все смены (Excel)";
+  };
+}
+
+// Полная выгрузка всех смен из системы: смены, скважины, простои, замены (для резервной копии и отчётов)
+async function exportAll() {
+  const to = todayIso();
+  const all = await fetch(CFG.SHEET_URL + "?action=getDrillShifts&from=2024-01-01&to=" + to).then(r => r.json());
+  if (!Array.isArray(all)) throw new Error(all && all.error ? all.error : "ответ сервера не распознан");
+  const dt = iso => xlDate(iso);
+  const sh = [["Дата", "Смена", "Станок", "Оператор", "Табельный №", "Диаметр", "Блоки", "Скв., шт", "Перебур, шт", "Обурено, м", "Перебур, м", "Бурение, мин", "Простой, мин", "Примечание", "Сдана", "Исправлена", "ID смены"]];
+  const hs = [["Дата", "Смена", "Станок", "Оператор", "№ скважины", "Метраж, м", "Время, мин", "Перебур", "Вместо скважины №", "Блок", "Примечание"]];
+  const ds = [["Дата", "Смена", "Станок", "Оператор", "Причина", "Минут", "С", "До", "Комментарий"]];
+  const rp = [["Дата", "Смена", "Станок", "Оператор", "Инструмент", "Модель / номер", "На скважине №"]];
+  all.forEach(s => {
+    const d = dt(s.date), sm = Number(s.smena);
+    sh.push([d, sm, s.equipmentId, s.empName, s.empId, s.diameter, s.blocks, num(s.holesCount), num(s.redrillCount), num(s.metersDrilled), num(s.metersRedrill), num(s.drillMinutes), num(s.downtimeMinutes), s.note || "", s.createdAt || "", s.updatedAt || "", s.shiftId]);
+    (s.holes || []).forEach(h => hs.push([d, sm, s.equipmentId, s.empName, h.n, num(h.depth), num(h.minutes), h.redrill ? "да" : "", h.replacesHole || "", h.block || "", h.note || ""]));
+    (s.downtimes || []).forEach(x => ds.push([d, sm, s.equipmentId, s.empName, x.reason, num(x.minutes), x.from || "", x.to || "", x.note || ""]));
+    (s.replacements || []).forEach(x => rp.push([d, sm, s.equipmentId, s.empName, TOOLS[x.tool] || x.tool, x.model || "", x.atHole || ""]));
+  });
+  const wb = XLSX.utils.book_new();
+  [["Смены", sh], ["Скважины", hs], ["Простои", ds], ["Замены", rp]].forEach(([name, aoa]) => {
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    for (let i = 1; i < aoa.length; i++) { const c = ws["A" + (i + 1)]; if (c) c.z = "dd.mm.yyyy"; }
+    XLSX.utils.book_append_sheet(wb, ws, name);
+  });
+  XLSX.writeFile(wb, "БВР_все_смены_" + to + ".xlsx");
+  msg("Файл сформирован: смен " + (sh.length - 1) + ", скважин " + (hs.length - 1) + ", простоев " + (ds.length - 1) + ", замен " + (rp.length - 1) + ".");
 }
 
 function copyText(text, okMsg) {
