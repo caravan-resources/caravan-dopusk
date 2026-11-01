@@ -1037,8 +1037,18 @@ function noteColor(t) { return t === "red" ? "var(--red)" : t === "yellow" ? "va
 function lowFact(w) { return w.plan > 0 && (w.fact <= 0 || w.fact / w.plan < 0.1); }
 function absText(w) { const ks = Object.keys(w.abs || {}); return ks.map(k => k + " " + w.abs[k].days + " дн. (" + w.abs[k].dates.slice(0, 6).join(", ") + (w.abs[k].dates.length > 6 ? "…" : "") + ")").join("; "); }
 function absTons(w) { return Object.keys(w.abs || {}).reduce((s, k) => s + w.abs[k].tons, 0); }
+// Простой техники по статусам Hexagon (Down) как причина невыполнения плана: план при этом не меняется
+function dnText(w) {
+  if (!(w.plan > 0) || !(w.fact < w.plan * 0.999)) return "";
+  const m = {};
+  if (w.cells) Object.values(w.cells).forEach(c => { if (c.dn > 0) m[c.eq] = (m[c.eq] || 0) + c.dn; });
+  else (w.items || []).forEach(e => { if (e.dn > 0) m[e.eq] = (m[e.eq] || 0) + e.dn; });
+  const ks = Object.keys(m).sort((a, b) => m[b] - m[a]), tot = ks.reduce((q, k) => q + m[k], 0);
+  if (tot < 12) return "";
+  return '<div class="sub" style="color:var(--red)">простой техники по Hexagon: ' + ks.slice(0, 3).map(k => esc(k) + " " + Math.round(m[k]) + " ч").join(", ") + (ks.length > 3 ? "…" : "") + "</div>";
+}
 function noteSub(w) {
-  const sn = shortNote(w), ab = sn ? "" : absText(w); const abH = (sn ? '<div class="sub" style="color:var(--red)">' + esc(sn) + "</div>" : "") + (ab ? '<div class="sub" style="color:var(--red)">по табелю: ' + esc(ab) + (absTons(w) > 0.5 ? ", план " + fmtT(absTons(w)) + " т" : "") + "</div>" : "");
+  const sn = shortNote(w), ab = sn ? "" : absText(w); const abH = dnText(w) + (sn ? '<div class="sub" style="color:var(--red)">' + esc(sn) + "</div>" : "") + (ab ? '<div class="sub" style="color:var(--red)">по табелю: ' + esc(ab) + (absTons(w) > 0.5 ? ", план " + fmtT(absTons(w)) + " т" : "") + "</div>" : "");
   if (!lowFact(w)) return abH; const n = noteFor(w.fio); return abH + (n ? '<div class="sub" style="color:' + noteColor(n.tone) + '">' + esc(n.short) + "</div>" : ""); }
 // Соответствие вахт группам плана определено по наряду мастера: группа B = Вахта-1, группа A = Вахта-2 (совпало у 128 из 129 работников).
 let VT = false, VAUTO = false;   // VT: фильтр вахты менял пользователь; VAUTO: автовыбор работающей вахты уже выполнен
@@ -1403,7 +1413,7 @@ function renderHaul(kind) {
   rows.forEach(r => {
     st += r.tons; sr += r.trips; sm += r.monthPlan; srem += Math.max(0, r.rem); sdn += r.dnH; ssb += r.sbH; scut += r.cut;
     const multi = r.items.length > 1;
-    h += '<tr class="click" onclick="openWorker(\'' + (kind === "drivers" ? "drivers" : "exc") + "'," + JSON.stringify(r.fio).replace(/"/g, "&quot;") + ')"><td><b>' + esc(r.fio) + "</b>" + noteSub({ fio: r.fio, plan: r.plan, fact: r.fact, abs: r.abs }) + "</td><td>" + (multi ? '<span class="sub">техники: ' + r.items.length + "</span>" : esc(r.items[0].eq) + curState(r.items[0].eq)) +
+    h += '<tr class="click" onclick="openWorker(\'' + (kind === "drivers" ? "drivers" : "exc") + "'," + JSON.stringify(r.fio).replace(/"/g, "&quot;") + ')"><td><b>' + esc(r.fio) + "</b>" + noteSub({ fio: r.fio, plan: r.plan, fact: r.fact, abs: r.abs, items: r.items }) + "</td><td>" + (multi ? '<span class="sub">техники: ' + r.items.length + "</span>" : esc(r.items[0].eq) + curState(r.items[0].eq)) +
       '</td><td class="num">' + r.shifts + '</td><td class="num">' + fmtN(r.trips) + '</td><td class="num"><b>' + fmtT(r.tons) + '</b></td><td class="num">' + avg(r.tons, r.trips) + '</td>' +
       (hs ? '<td class="num">' + hrs1(r.dnH) + '</td><td class="num">' + hrs1(r.sbH) + '</td><td class="num">' + (r.cut > 0.5 ? fmtT(r.cut) : "") + "</td>" : "") +
       '<td class="num">' + fmtT(r.monthPlan) + '</td><td class="num">' + (r.rem > 0 ? "<b>" + fmtT(r.rem) + "</b>" : (r.monthPlan > 0 ? '<span class="badge b-green">выполнен +' + fmtT(-r.rem) + "</span>" : "")) + '</td><td class="num">' + (r.shiftsLeft || "") + '</td><td class="num">' + (r.need === null ? "" : fmtT(r.need)) + "</td></tr>";
