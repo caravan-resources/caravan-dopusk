@@ -143,6 +143,7 @@ table.mini td { padding:6px 8px; border-bottom:1px solid var(--border); }
         <h3>2. Выгрузка Hexagon (рейсы и статусы техники)</h3>
         <div class="src-state" id="factState">Выгрузка не загружена.</div>
         <div class="src-state" id="statState"></div>
+        <div class="src-state"><b>Техника в простое (вручную)</b>: по одной в строке, «HT207 — ожидание запчастей». Нужна, когда простой не виден в статусах Hexagon. План не меняется, причина показывается под фамилией.<textarea id="manText" rows="6" style="width:100%;box-sizing:border-box;margin-top:4px" onchange="saveMan()"></textarea></div>
         <div class="src-state" id="saState"></div>
         <label class="btn gold filebtn">Загрузить выгрузку Hexagon
           <input type="file" id="factFile" accept=".xlsx,.xlsm,.xls,.json,.csv,.txt" multiple onchange="onFiles(this.files); this.value=''"></label>
@@ -979,6 +980,8 @@ async function init() {
   PLANS = load(CFG.PLAN_KEY) || {};
   const f = load(CFG.FACT_KEY); if (f && f.shifts) FACT = f;
   const sx = load(CFG.STAT_KEY); if (sx && sx.shifts) STAT = Object.assign(STAT, sx);
+  const mx = load(MAN_KEY); if (mx && typeof mx === "object" && !Array.isArray(mx)) MAN = mx;
+  if ($("manText")) $("manText").value = manToText();
   const rx = load(CFG.ROS_KEY); if (rx && rx.months) { ROS = rx; ROSIDX = null; }
   // План из репозитория подтягивается только на пустой панели; загруженную вручную книгу автозагрузка не заменяет.
   if (!Object.keys(PLANS).length) {
@@ -1039,13 +1042,28 @@ function absText(w) { const ks = Object.keys(w.abs || {}); return ks.map(k => k 
 function absTons(w) { return Object.keys(w.abs || {}).reduce((s, k) => s + w.abs[k].tons, 0); }
 // Простой техники по статусам Hexagon (Down) как причина невыполнения плана: план при этом не меняется
 function dnText(w) {
-  if (!(w.plan > 0) || !(w.fact < w.plan * 0.999)) return "";
-  const m = {};
-  if (w.cells) Object.values(w.cells).forEach(c => { if (c.dn > 0) m[c.eq] = (m[c.eq] || 0) + c.dn; });
-  else (w.items || []).forEach(e => { if (e.dn > 0) m[e.eq] = (m[e.eq] || 0) + e.dn; });
-  const ks = Object.keys(m).sort((a, b) => m[b] - m[a]), tot = ks.reduce((q, k) => q + m[k], 0);
-  if (tot < 12) return "";
-  return '<div class="sub" style="color:var(--red)">простой техники по Hexagon: ' + ks.slice(0, 3).map(k => esc(k) + " " + Math.round(m[k]) + " ч").join(", ") + (ks.length > 3 ? "…" : "") + "</div>";
+  const m = {}, all = {};
+  if (w.cells) Object.values(w.cells).forEach(c => { all[c.eq] = 1; if (c.dn > 0) m[c.eq] = (m[c.eq] || 0) + c.dn; });
+  else (w.items || []).forEach(e => { all[e.eq] = 1; if (e.dn > 0) m[e.eq] = (m[e.eq] || 0) + e.dn; });
+  const low = w.plan > 0 && w.fact < w.plan * 0.999, out = [];
+  // Техника в простое по решению диспетчера (список в блоке «Выгрузка Hexagon»): причина показывается и при нулевом плане
+  const mk = Object.keys(all).filter(k => MAN[k]);
+  if (mk.length && (low || !(w.plan > 0))) out.push('<div class="sub" style="color:var(--red)">техника в простое: ' + mk.map(k => esc(k) + " — " + esc(MAN[k])).join("; ") + "</div>");
+  if (low) {
+    const ks = Object.keys(m).filter(k => !MAN[k]).sort((a, b) => m[b] - m[a]), tot = ks.reduce((q, k) => q + m[k], 0);
+    if (tot >= 12) out.push('<div class="sub" style="color:var(--red)">простой техники по Hexagon: ' + ks.slice(0, 3).map(k => esc(k) + " " + Math.round(m[k]) + " ч").join(", ") + (ks.length > 3 ? "…" : "") + "</div>");
+  }
+  return out.join("");
+}
+// Список техники в простое вручную: по строке «HT207 — причина». Хранится в браузере, план не меняет.
+const MAN_KEY = "dispMass.man.v1";
+const MAN_DEF = { HT154: "ожидание запчастей", HT178: "простой", HT181: "простой", HT185: "простой", HT207: "ожидание запчастей", HT208: "ожидание запчастей" };
+let MAN = Object.assign({}, MAN_DEF);
+function manToText() { return Object.keys(MAN).sort().map(k => k + " — " + MAN[k]).join("\n"); }
+function saveMan() {
+  const o = {};
+  String($("manText").value || "").split(/\r?\n/).forEach(l => { const m = l.trim().match(/^([A-Za-zА-Яа-я]{1,4}\s?\d{1,4})\s*(?:[—–:;\-]\s*(.*))?$/); if (m) o[m[1].replace(/\s+/g, "").toUpperCase()] = (m[2] || "простой").trim() || "простой"; });
+  MAN = o; store(MAN_KEY, MAN); $("manText").value = manToText(); render();
 }
 function noteSub(w) {
   const sn = shortNote(w), ab = sn ? "" : absText(w); const abH = dnText(w) + (sn ? '<div class="sub" style="color:var(--red)">' + esc(sn) + "</div>" : "") + (ab ? '<div class="sub" style="color:var(--red)">по табелю: ' + esc(ab) + (absTons(w) > 0.5 ? ", план " + fmtT(absTons(w)) + " т" : "") + "</div>" : "");
