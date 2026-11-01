@@ -196,6 +196,7 @@ table.mini td { padding:6px 8px; border-bottom:1px solid var(--border); }
       <div class="tab" data-t="haulE" onclick="setTab('haulE')">Вывозка: машинисты</div>
       <div class="tab" data-t="drivers" onclick="setTab('drivers')">KPI водителей</div>
       <div class="tab" data-t="exc" onclick="setTab('exc')">KPI машинистов</div>
+      <div class="tab" data-t="drill" onclick="setTab('drill')">KPI буровиков</div>
       <div class="tab" data-t="eq" onclick="setTab('eq')">По технике</div>
       <div class="tab" data-t="aux" onclick="setTab('aux')">Хоз. работы (WL_510)</div>
       <div class="tab" data-t="dt" onclick="setTab('dt')">Простои: статусы Hexagon</div>
@@ -981,6 +982,7 @@ async function init() {
   const mx = load(MAN_KEY); if (mx && typeof mx === "object" && !Array.isArray(mx)) MAN = mx;
   if ($("manText")) $("manText").value = manToText();
   const rx = load(CFG.ROS_KEY); if (rx && rx.months) { ROS = rx; ROSIDX = null; }
+  const dx = load(DRILL_KEY); if (dx && dx.plan && dx.fact) DRILL = dx;
   // План из репозитория подтягивается только на пустой панели; загруженную вручную книгу автозагрузка не заменяет.
   if (!Object.keys(PLANS).length) {
     try {
@@ -1235,7 +1237,7 @@ async function ingestFile(f) {
   if (isBook) {
     if (typeof XLSX === "undefined") return { kind: "skip", msg: "«" + f.name + "»: библиотека чтения Excel не загрузилась (нет связи с cdnjs.cloudflare.com). Файл пропущен, попробуйте позже." };
     let wb;
-    try { wb = XLSX.read(buf, { type: "array", sheets: ["План водителей", "План экскаваторщиков", "План ТС", "Рейсы", "Статуса", "ROSTER"] }); }
+    try { wb = XLSX.read(buf, { type: "array", sheets: ["План водителей", "План экскаваторщиков", "План ТС", "Рейсы", "Статуса", "ROSTER", "План машинистов", "Факт бурения", "Настройки", "Свод по операторам"] }); }
     catch (e) { return { kind: "skip", msg: "«" + f.name + "»: не удалось прочитать как книгу Excel. Файл пропущен." }; }
     const aoa = n => XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: true, defval: null });
     const res = [];
@@ -1243,6 +1245,10 @@ async function ingestFile(f) {
       const plan = planFromSheets(aoa("План водителей"), aoa("План экскаваторщиков"), wb.Sheets["План ТС"] ? aoa("План ТС") : null);
       plan.src = "manual"; PLANS[plan.month] = plan;
       res.push({ kind: "plan", month: plan.month, msg: "План на " + plan.month + " загружен из «" + f.name + "»." });
+    }
+    if (wb.Sheets["План машинистов"] && wb.Sheets["Факт бурения"]) {
+      try { res.push(ingestDrill(wb, aoa, f.name)); }
+      catch (e) { res.push({ kind: "skip", msg: "«" + f.name + "», KPI буровиков: не прочитано (" + e.message + ")." }); }
     }
     if (wb.Sheets["ROSTER"]) {
       try { res.push(ingestRoster(parseRosterRows(aoa("ROSTER")), f.name)); }
@@ -1274,13 +1280,13 @@ async function ingestFile(f) {
 async function onFiles(list) {
   const files = Array.from(list || []); if (!files.length) return;
   banner("errBanner", ""); banner("warnBanner", ""); banner("infoBanner", "Чтение файлов, подождите…");
-  const ok = [], skipped = []; let planMonth = null, planTouched = false, factTouched = false, statTouched = false, rosTouched = false;
+  const ok = [], skipped = []; let planMonth = null, planTouched = false, factTouched = false, statTouched = false, rosTouched = false, drillTouched = false;
   for (const f of files) {
     try {
       const rs = [].concat(await ingestFile(f));
       rs.forEach(r => {
         if (r.kind === "skip") skipped.push(r.msg);
-        else { ok.push(r.msg); if (r.kind === "plan") { planMonth = r.month; planTouched = true; } else if (r.kind === "stat") statTouched = true; else if (r.kind === "ros") rosTouched = true; else factTouched = true; }
+        else { ok.push(r.msg); if (r.kind === "plan") { planMonth = r.month; planTouched = true; } else if (r.kind === "stat") statTouched = true; else if (r.kind === "ros") rosTouched = true; else if (r.kind === "drill") drillTouched = true; else factTouched = true; }
       });
     } catch (e) { skipped.push("«" + f.name + "»: файл не прочитан (" + e.message + "). Пропущен."); }
   }
@@ -1289,12 +1295,14 @@ async function onFiles(list) {
   if (factTouched && !store(CFG.FACT_KEY, FACT)) storeFail = true;
   if (statTouched && !store(CFG.STAT_KEY, STAT)) storeFail = true;
   if (rosTouched && !store(CFG.ROS_KEY, ROS)) storeFail = true;
+  if (drillTouched && !store(DRILL_KEY, DRILL)) storeFail = true;
   if (storeFail) skipped.push("Данные загружены, но не сохранены в браузере (нет места или хранилище отключено): после перезагрузки страницы файлы придётся загрузить снова.");
   const fm = {}; Object.keys(FACT.shifts).forEach(k => { fm[k.slice(0, 7)] = 1; });
   const noPlan = Object.keys(fm).filter(m => !PLANS[m]);
   if (factTouched && noPlan.length) ok.push("В выгрузке есть данные за " + noPlan.sort().join(", ") + ", плана на этот месяц нет: загрузите книгу KPI.");
   refreshMonths(); if (planMonth) $("fMonth").value = planMonth;
   cutToData(true); updateSourceStates(); rebuildTimeline(); render();
+  if (drillTouched && !planTouched && !factTouched) setTab("drill");
   if (factTouched) { loadChecklists(true); loadStatusLog(true); loadAssignments(true); }
   const prevWarn = $("warnBanner").style.display === "block" ? $("warnBanner").textContent : "";
   banner("infoBanner", ok.join(" ")); banner("warnBanner", skipped.concat(prevWarn ? [prevWarn] : []).join(" "));
@@ -1313,12 +1321,180 @@ function clearFact() {
   banner("infoBanner", ""); updateSourceStates(); cutToData(true); render();
 }
 
-function setTab(t) { TAB = t; document.querySelectorAll(".tab").forEach(e => e.classList.toggle("on", e.dataset.t === t)); if (t === "ch" && RES) render(); else renderTable(); }
+// ── Буровики: KPI по метрам бурения ──
+// Источник: книга KPI буровиков (листы «План машинистов», «Факт бурения»; «Настройки» и «Свод по операторам» — для месяца и сверки).
+// План задан на машиниста на каждые сутки (п.м.); факт — строки «дата, смена, станок, машинист, п.м.». Учитываются строки факта со статусом OK.
+const DRILL_KEY = "dispMass.drill.v1";
+let DRILL = null; // { month, file, at, plan:[[date,rig,vahta,shift,fio,hours,planM]], fact:[[date,shift,rig,fio,m,h,chk]], svod:{plan,fact}|null, planNom:number|null }
+SORT.drill = ["fio", 1];
+
+function drYmd(v) {
+  if (v instanceof Date && !isNaN(v)) return v.toISOString().slice(0, 10);
+  if (typeof v === "number" && v > 20000 && v < 80000) return new Date(Math.round((v - 25569) * 864e5)).toISOString().slice(0, 10);
+  if (typeof v === "string") {
+    let m = v.match(/(\d{4})-(\d{2})-(\d{2})/); if (m) return m[1] + "-" + m[2] + "-" + m[3];
+    m = v.match(/(\d{1,2})\.(\d{1,2})\.(\d{4})/); if (m) return m[3] + "-" + pad2(+m[2]) + "-" + pad2(+m[1]);
+  }
+  return null;
+}
+function drNum(v) { const n = typeof v === "number" ? v : parseFloat(String(v == null ? "" : v).replace(",", ".")); return isFinite(n) ? n : 0; }
+function drStr(v) { return String(v == null ? "" : v).trim(); }
+function drName(v) { return drStr(v).replace(/\s*\((уволен|уволена)\)\s*$/i, ""); } // «Мупбаев Талгат (уволен)» в плане и «Мупбаев Талгат» в факте — один человек
+function drIsVac(fio) { return !fio || /^вакансия/i.test(fio); }
+function drCounted(D) { const has = D.fact.some(x => x[6] !== ""); return x => has ? x[6] === "OK" : (x[0] && x[3] && x[4] > 0); }
+
+function parseDrill(S, label) {
+  const plan = [], fact = [];
+  S.plan.slice(3).forEach(r => { const d = drYmd(r[0]); if (!d) return; plan.push([d, drStr(r[2]), drStr(r[5]), drStr(r[6]), drName(r[7]), drNum(r[8]), drNum(r[11])]); });
+  S.fact.slice(5).forEach(r => {
+    const d = drYmd(r[0]), fio = drName(r[3]); if (!d && !fio && r[4] == null) return;
+    fact.push([d || "", drStr(r[1]), drStr(r[2]), fio, drNum(r[4]), drNum(r[5]), drStr(r[7])]);
+  });
+  let month = S.set && S.set[3] ? drYmd(S.set[3][1]) : null; month = month ? month.slice(0, 7) : null;
+  if (!month && plan.length) month = plan[0][0].slice(0, 7);
+  let svod = null; (S.svod || []).forEach(r => { if (r && drStr(r[0]).toUpperCase() === "ИТОГО") svod = { plan: drNum(r[8]), fact: drNum(r[9]), names: [] }; });
+  if (svod) (S.svod || []).forEach(r => { if (r && typeof r[0] === "number" && drStr(r[1])) svod.names.push(drName(r[1])); });
+  const planNom = S.set && S.set[16] && typeof S.set[16][2] === "number" ? S.set[16][2] : null;
+  return { month, file: label, at: Date.now(), plan, fact, svod, planNom };
+}
+function ingestDrill(wb, aoa, label) {
+  const S = { plan: aoa("План машинистов"), fact: aoa("Факт бурения"), set: wb.Sheets["Настройки"] ? aoa("Настройки") : [], svod: wb.Sheets["Свод по операторам"] ? aoa("Свод по операторам") : [] };
+  const D = parseDrill(S, label);
+  if (!D.plan.length) throw new Error("лист «План машинистов» не содержит строк с датой");
+  DRILL = D;
+  const ok = D.fact.filter(drCounted(D)).length;
+  return { kind: "drill", msg: "KPI буровиков за " + D.month + " из «" + label + "»: строк плана " + D.plan.length + ", строк факта принято " + ok + " из " + D.fact.length + "." };
+}
+
+// Расчёт по работникам и станкам. Срез = последняя дата принятого факта; сутки среза входят в план на срез целиком.
+function drCompute() {
+  const D = DRILL; if (!D) return null;
+  const cnt = drCounted(D), fr = D.fact.filter(cnt);
+  let cut = ""; fr.forEach(x => { if (x[0] > cut) cut = x[0]; });
+  const W = {}, get = fio => W[fio] || (W[fio] = { fio, inPlan: false, vahta: "", shift: "", rigP: {}, rigPC: {}, rigF: {}, shifts: 0, shiftsLeft: 0, planM: 0, planCut: 0, planLeft: 0, fact: 0, hrs: 0, mH: 0, nFact: 0, days: {} });
+  let vacPlan = 0, allPlan = 0;
+  D.plan.forEach(p => {
+    const [d, rig, vh, sh, fio, hrs, pm] = p; allPlan += pm;
+    if (drIsVac(fio)) { vacPlan += pm; return; }
+    const w = get(fio); w.inPlan = true; w.vahta = w.vahta || vh; w.shift = w.shift || sh;
+    w.planM += pm; if (pm > 0) w.rigP[rig] = (w.rigP[rig] || 0) + pm;
+    if (d <= cut) { w.planCut += pm; if (pm > 0) w.rigPC[rig] = (w.rigPC[rig] || 0) + pm; } else w.planLeft += pm;
+    if (hrs > 0) { w.shifts++; if (d > cut) w.shiftsLeft++; }
+    const dy = w.days[d] || (w.days[d] = { plan: 0, hrs: 0, fact: 0, rigs: {} }); dy.plan += pm; dy.hrs += hrs;
+  });
+  let allFact = 0;
+  fr.forEach(x => {
+    const [d, sh, rig, fio, m, h] = x; allFact += m; if (!fio) return;
+    const w = get(fio); w.fact += m; w.nFact++; w.rigF[rig] = (w.rigF[rig] || 0) + m;
+    if (h > 0) { w.hrs += h; w.mH += m; }
+    const dy = w.days[d] || (w.days[d] = { plan: 0, hrs: 0, fact: 0, rigs: {} }); dy.fact += m; dy.rigs[rig + (sh ? " (" + sh.toLowerCase() + ")" : "")] = (dy.rigs[rig + (sh ? " (" + sh.toLowerCase() + ")" : "")] || 0) + m;
+    if (!w.shift && sh) w.shift = sh;
+  });
+  const vf = $("fVahta").value, sf = $("fShiftF").value, q = $("fSearch").value.trim().toLowerCase();
+  const shW = sf ? (sf === SH_N ? "Ночь" : "День") : "";
+  const all = Object.values(W);
+  const rows = all.filter(w => (w.planM > 0 || w.fact > 0) && (!vf || w.vahta === vf) && (!shW || w.shift === shW)).map(w => {
+    const rigs = Object.keys(Object.assign({}, w.rigP, w.rigF)).sort((a, b) => (w.rigF[b] || 0) - (w.rigF[a] || 0) || (w.rigP[b] || 0) - (w.rigP[a] || 0));
+    const rem = w.planM - w.fact;
+    return Object.assign(w, {
+      rigs, rigS: rigs.join(" "), diff: w.fact - w.planCut, pct: pct(w.fact, w.planCut), pctM: w.planM > 0 ? w.fact / w.planM * 100 : null,
+      rem, need: w.shiftsLeft > 0 ? Math.max(0, rem) / w.shiftsLeft : null, perShift: w.shiftsLeft > 0 ? w.planLeft / w.shiftsLeft : null,
+      prod: w.hrs > 0 ? w.mH / w.hrs : null
+    });
+  }).filter(w => !q || w.fio.toLowerCase().indexOf(q) >= 0 || w.rigS.toLowerCase().indexOf(q) >= 0);
+  const R = {};
+  rows.forEach(w => { Object.keys(Object.assign({}, w.rigP, w.rigF)).forEach(rg => { const o = R[rg] || (R[rg] = { rig: rg, plan: 0, planCut: 0, fact: 0 }); o.plan += w.rigP[rg] || 0; o.planCut += w.rigPC[rg] || 0; o.fact += w.rigF[rg] || 0; }); });
+  const rigs = Object.values(R).map(o => Object.assign(o, { pct: pct(o.fact, o.planCut), diff: o.fact - o.planCut })).sort((a, b) => a.rig.localeCompare(b.rig, "ru"));
+  const tot = rows.reduce((t, w) => { t.planM += w.planM; t.planCut += w.planCut; t.fact += w.fact; t.hrs += w.hrs; t.mH += w.mH; return t; }, { planM: 0, planCut: 0, fact: 0, hrs: 0, mH: 0 });
+  const miss = D.svod && D.svod.names.length ? all.filter(w => (w.planM > 0 || w.fact > 0) && D.svod.names.indexOf(w.fio) < 0) : [];
+  const bad = D.fact.filter(x => !cnt(x) && (x[6] !== "" || x[3] || x[4]));
+  return { cut, rows, rigs, tot, vacPlan, allPlan, allFact, noPlan: all.filter(w => !w.inPlan && w.fact > 0), miss, bad, filtered: !!(vf || shW), vf, shW, nAll: all.length };
+}
+
+function drSign(v) { return (v >= 0 ? "+" : "") + fmtT(v); }
+function drPm(v) { return Math.round(v * 10) / 10 === Math.round(v) ? fmtT(v) : v.toFixed(1).replace(".", ","); }
+function renderDrill() {
+  const host = $("tableHost");
+  if (!DRILL) {
+    $("stats").innerHTML = ""; banner("warnBanner", "");
+    host.innerHTML = '<div class="empty">Загрузите книгу KPI буровиков (листы «План машинистов» и «Факт бурения») кнопкой выше или перетащите файл на страницу.</div>'; return;
+  }
+  const C = drCompute(), T = C.tot, p = pct(T.fact, T.planCut);
+  const svodOk = DRILL.svod ? Math.abs(DRILL.svod.fact - C.allFact) < 0.5 : null;
+  $("stats").innerHTML =
+    stat("Срез: последняя дата факта", C.cut ? fmtD(C.cut) : "—") + stat("План на срез, п.м.", fmtT(T.planCut)) + stat("Факт, п.м.", fmtT(T.fact)) +
+    stat("Факт / план", p === null ? "—" : p.toFixed(1) + " %") + stat("План месяца, п.м.", fmtT(T.planM)) + stat("Осталось до плана месяца, п.м.", fmtT(Math.max(0, T.planM - T.fact))) +
+    stat("Буровиков в списке", fmtN(C.rows.length)) + stat("Средняя выработка, п.м./ч", T.hrs > 0 ? (T.mH / T.hrs).toFixed(1).replace(".", ",") : "—") +
+    (C.vacPlan > 0 ? stat("План на вакансии, п.м.", fmtT(C.vacPlan)) : "");
+  banner("warnBanner", [
+    C.filtered ? "Фильтр: " + [C.vf ? "группа (вахта) " + C.vf : "", C.shW ? (C.shW === "Ночь" ? "ночная смена" : "дневная смена") : ""].filter(Boolean).join(", ") + ". Итоги и станки считаются только по показанным буровикам; группа берётся из книги (колонка «Группа вахты»)." : "",
+    C.bad.length ? "Строк факта не принято (статус не OK): " + C.bad.length + ". Они не входят в факт, список на вкладке «Контроль данных» ниже." : "",
+    C.noPlan.length ? "Факт у машинистов, которых нет в плане: " + C.noPlan.map(w => w.fio).join(", ") + "." : ""].filter(Boolean).join(" "));
+  const rows = sortRows(C.rows, "drill");
+  let h = '<div class="sub" style="margin:0 0 8px">Книга «' + esc(DRILL.file) + '», месяц ' + DRILL.month + '. План на срез — суммарно по суткам до даты среза включительно. ' +
+    '<button class="btn ghost" onclick="drExport()">Excel</button> <button class="btn ghost" onclick="drClear()">Удалить данные буровиков</button></div>';
+  const T2 = (l, k, n) => th(l, k, "drill", n);
+  h += '<table class="kpi"><thead><tr>' + T2("ФИО", "fio") + T2("Станок", "rigS") + T2("Группа", "vahta") + T2("Смена", "shift") + T2("Смен по плану", "shifts", 1) + T2("План на срез, п.м.", "planCut", 1) +
+    T2("Факт, п.м.", "fact", 1) + T2("Отклонение, п.м.", "diff", 1) + T2("Факт / план", "pct") + T2("п.м./ч", "prod", 1) + T2("План месяца, п.м.", "planM", 1) + T2("% месяца", "pctM", 1) +
+    T2("Осталось до плана, п.м.", "rem", 1) + T2("Смен осталось", "shiftsLeft", 1) + T2("Нужно за смену, п.м.", "need", 1) + "</tr></thead><tbody>";
+  rows.forEach(w => {
+    h += '<tr class="click" onclick="openDriller(' + JSON.stringify(w.fio).replace(/"/g, "&quot;") + ')"><td><b>' + esc(w.fio) + "</b>" + (w.inPlan ? "" : '<div class="sub">нет в плане</div>') + "</td><td>" + esc(w.rigs.join(" ")) +
+      "</td><td>" + esc(w.vahta) + "</td><td>" + esc(w.shift) + '</td><td class="num">' + w.shifts + '</td><td class="num">' + fmtT(w.planCut) + '</td><td class="num">' + fmtT(w.fact) + '</td><td class="num">' + drSign(w.diff) +
+      "</td><td>" + kpiBadge(w.pct) + '</td><td class="num">' + (w.prod === null ? "" : w.prod.toFixed(1).replace(".", ",")) + '</td><td class="num">' + fmtT(w.planM) + '</td><td class="num">' + (w.pctM === null ? "" : w.pctM.toFixed(1) + " %") +
+      '</td><td class="num">' + (w.planM > 0 ? fmtT(Math.max(0, w.rem)) : "") + '</td><td class="num">' + (w.shiftsLeft || "") + '</td><td class="num">' + (w.need === null ? "" : fmtT(w.need) + (w.perShift ? '<div class="sub">план за смену ' + fmtT(w.perShift) + "</div>" : "")) + "</td></tr>";
+  });
+  h += '</tbody><tfoot><tr><td>Итого по показанным</td><td></td><td></td><td></td><td></td><td class="num">' + fmtT(T.planCut) + '</td><td class="num">' + fmtT(T.fact) + '</td><td class="num">' + drSign(T.fact - T.planCut) +
+    "</td><td>" + kpiBadge(p) + '</td><td class="num">' + (T.hrs > 0 ? (T.mH / T.hrs).toFixed(1).replace(".", ",") : "") + '</td><td class="num">' + fmtT(T.planM) + "</td><td></td><td></td><td></td><td></td></tr></tfoot></table>";
+  h = rows.length ? h : '<div class="empty">Нет данных по фильтру.</div>';
+  // Станки
+  if (C.rigs.length) {
+    h += '<h3 style="font-size:14px;margin:18px 0 6px">По станкам</h3><table class="mini"><thead><tr><th>Станок</th><th class="num">План на срез, п.м.</th><th class="num">Факт, п.м.</th><th class="num">Отклонение, п.м.</th><th>Факт / план</th><th class="num">План месяца, п.м.</th></tr></thead><tbody>' +
+      C.rigs.map(o => "<tr><td><b>" + esc(o.rig) + '</b></td><td class="num">' + fmtT(o.planCut) + '</td><td class="num">' + fmtT(o.fact) + '</td><td class="num">' + drSign(o.diff) + "</td><td>" + kpiBadge(o.pct) + '</td><td class="num">' + fmtT(o.plan) + "</td></tr>").join("") + "</tbody></table>" +
+      '<div class="sub">План станка здесь — сумма планов машинистов, работавших на нём по плану; метры факта относятся к станку, указанному в строке факта.</div>';
+  }
+  // Контроль
+  h += '<h3 style="font-size:14px;margin:18px 0 6px">Контроль данных</h3><table class="mini"><thead><tr><th>Показатель</th><th class="num">Значение</th></tr></thead><tbody>' +
+    "<tr><td>Факт по принятым строкам (все буровики), п.м.</td><td class=\"num\">" + drPm(C.allFact) + "</td></tr>" +
+    (DRILL.svod ? "<tr><td>Факт в книге, лист «Свод по операторам», ИТОГО, п.м. — " + (svodOk ? "совпадает" : "расходится") + '</td><td class="num">' + drPm(DRILL.svod.fact) + "</td></tr>" : "") +
+    (C.miss.length ? "<tr><td>Нет в списке листа «Свод по операторам» (поэтому его итоги занижены): " + C.miss.map(w => esc(w.fio) + " — план " + fmtT(w.planM) + ", факт " + fmtT(w.fact)).join("; ") + '</td><td class="num">' + C.miss.length + "</td></tr>" : "") +
+    "<tr><td>План по листу «План машинистов» (включая вакансии), п.м.</td><td class=\"num\">" + drPm(C.allPlan) + "</td></tr>" +
+    (DRILL.planNom !== null ? "<tr><td>Общий план на листе «Настройки», п.м.</td><td class=\"num\">" + drPm(DRILL.planNom) + "</td></tr>" : "") +
+    "<tr><td>Строк факта не принято (статус не OK)</td><td class=\"num\">" + C.bad.length + "</td></tr></tbody></table>";
+  if (C.bad.length) h += '<table class="mini"><thead><tr><th>Дата</th><th>Смена</th><th>Станок</th><th>Машинист</th><th class="num">п.м.</th><th>Статус проверки</th></tr></thead><tbody>' +
+    C.bad.slice(0, 40).map(x => "<tr><td>" + (x[0] ? fmtD(x[0]) : "") + "</td><td>" + esc(x[1]) + "</td><td>" + esc(x[2]) + "</td><td>" + esc(x[3]) + '</td><td class="num">' + drPm(x[4]) + "</td><td>" + esc(x[6] || "пусто") + "</td></tr>").join("") + "</tbody></table>";
+  host.innerHTML = h;
+}
+function openDriller(fio) {
+  const C = drCompute(), w = C && C.rows.find(x => x.fio === fio); if (!w) return;
+  const ds = Object.keys(w.days).sort();
+  let h = '<div class="modal-head"><div><h2>' + esc(fio) + '</h2><div class="sub">План месяца ' + fmtT(w.planM) + " п.м., факт " + fmtT(w.fact) + " п.м.</div></div><button class=\"btn ghost\" onclick=\"closeModal()\">Закрыть</button></div>";
+  h += '<table class="mini"><thead><tr><th>Сутки</th><th class="num">План, п.м.</th><th class="num">Часы по табелю</th><th>Станок (смена)</th><th class="num">Факт, п.м.</th></tr></thead><tbody>' +
+    ds.filter(d => w.days[d].plan > 0 || w.days[d].fact > 0 || w.days[d].hrs > 0).map(d => { const y = w.days[d]; return "<tr><td>" + fmtD(d) + '</td><td class="num">' + (y.plan ? drPm(y.plan) : "") + '</td><td class="num">' + (y.hrs || "") + "</td><td>" + esc(Object.keys(y.rigs).join(", ")) + '</td><td class="num">' + (y.fact ? drPm(y.fact) : "") + "</td></tr>"; }).join("") + "</tbody></table>";
+  $("modalBox").innerHTML = h; $("modalBg").style.display = "flex";
+}
+function drExport() {
+  if (!DRILL) return; if (typeof XLSX === "undefined") { alert("Библиотека выгрузки не загрузилась (нет связи с cdnjs.cloudflare.com)."); return; }
+  const C = drCompute(), wb = XLSX.utils.book_new();
+  const a = [["ФИО", "Станок", "Группа", "Смена", "Смен по плану", "План на срез, п.м.", "Факт, п.м.", "Отклонение, п.м.", "Факт/план, %", "п.м./ч", "План месяца, п.м.", "% месяца", "Осталось до плана, п.м.", "Смен осталось", "Нужно за смену, п.м."]]
+    .concat(sortRows(C.rows, "drill").map(w => [w.fio, w.rigs.join(" "), w.vahta, w.shift, w.shifts, w.planCut, w.fact, w.diff, w.pct, w.prod, w.planM, w.pctM, w.planM > 0 ? Math.max(0, w.rem) : "", w.shiftsLeft, w.need]));
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(a), "Буровики");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Станок", "План на срез, п.м.", "Факт, п.м.", "Отклонение, п.м.", "Факт/план, %", "План месяца, п.м."]].concat(C.rigs.map(o => [o.rig, o.planCut, o.fact, o.diff, o.pct, o.plan]))), "Станки");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Месяц", DRILL.month], ["Срез (последняя дата факта)", C.cut], ["Книга", DRILL.file]]), "Параметры");
+  XLSX.writeFile(wb, "KPI_бурение_" + DRILL.month + ".xlsx");
+}
+function drClear() {
+  if (!confirm("Удалить загруженные данные буровиков из браузера?")) return;
+  DRILL = null; try { localStorage.removeItem(DRILL_KEY); } catch (e) {}
+  render();
+}
+
+function setTab(t) { const prevTab = TAB; TAB = t; document.querySelectorAll(".tab").forEach(e => e.classList.toggle("on", e.dataset.t === t)); if ((t === "ch" && RES) || t === "drill" || prevTab === "drill") render(); else renderTable(); }
 
 function cutOrd() { const d = $("fCutDate").value; return d ? shiftOrd(d, $("fCutShift").value) : -1; }
 
 function render() {
   updateVahtaLabels();
+  if (TAB === "drill") { renderDrill(); return; }
   const m = $("fMonth").value, plan0 = PLANS[m];
   if (!plan0) { $("stats").innerHTML = ""; $("tableHost").innerHTML = '<div class="empty">Загрузите план месяца.</div>'; RES = null; return; }
   const rf = $("fRosSh").value === "1" ? fixPlanByRoster(plan0, m) : { plan: plan0, moved: 0, tons: 0 }, plan = rf.plan;
@@ -1615,6 +1791,7 @@ function renderAux() {
   return h + "</tbody></table>";
 }
 function renderTable() {
+  if (TAB === "drill") { renderDrill(); return; }
   const host = $("tableHost"); if (!RES) return;
   if (TAB === "haulD" || TAB === "haulE") { host.innerHTML = renderHaul(TAB === "haulD" ? "drivers" : "exc"); return; }
   if (TAB === "dt") { host.innerHTML = renderDowntime(); return; }
