@@ -343,7 +343,15 @@ let jRig = "";
 function renderJournal() {
   const from = $("fFrom").value, to = $("fTo").value;
   const rigs = RIGS.filter(r => SHIFTS.some(s => s.equipmentId === r));
-  if (!rigs.length) { $("v-journal").innerHTML = '<div class="card"><div class="note">За выбранный период нет сданных смен. Выберите период и нажмите «Обновить».</div></div>'; return; }
+  if (!rigs.length) {
+    // Смен ещё нет (первый запуск) — загрузка журнала всё равно нужна: счётчики берутся заранее.
+    const have = Object.keys(SEEDS).filter(r => SEEDS[r] && (SEEDS[r].asOf || TOOL_KEYS.some(k => SEEDS[r][k]))).map(r => r + (SEEDS[r].asOf ? " (по " + ddmmyyyy(SEEDS[r].asOf) + ")" : ""));
+    $("v-journal").innerHTML = '<div class="card"><h3>Журнал (выгрузка)</h3><div class="note">За выбранный период нет сданных смен. Загрузите ваш журнал сейчас — панель запомнит счётчики проходки по инструменту, и строки для выгрузки появятся, как только буровики сдадут смены.</div>' +
+      '<div style="margin:10px 0"><label class="btn btn-dark" style="cursor:pointer">Загрузить журнал (.xlsx) — взять счётчики<input type="file" id="fJournal" accept=".xlsx,.xlsm" class="hidden"></label></div>' +
+      '<div class="note">' + (have.length ? "Счётчики уже загружены: " + esc(have.join(", ")) : "Счётчики пока не загружены.") + "</div></div>";
+    $("fJournal").onchange = e => { if (e.target.files[0]) readJournal(e.target.files[0]); };
+    return;
+  }
   if (rigs.indexOf(jRig) < 0) jRig = rigs[0];
   const sd = SEEDS[jRig] || {};
   const J = buildJournal(jRig, SHIFTS, from, to, sd);
