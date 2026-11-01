@@ -110,6 +110,10 @@ function shortName(n) {
   if (p.length === 1) return p[0];
   return p[0] + " " + p[1].replace(/\./g, "").charAt(0).toUpperCase();
 }
+const SWAP_GH = { "708": true };   // лист 708 в журнале: колонки G и H поменяны местами
+const hasSwap = rig => !!SWAP_GH[String(rig || "").replace(/^\D+/, "")];
+const headFor = rig => { const h = JOURNAL_HEAD.slice(); if (hasSwap(rig)) { const t = h[6]; h[6] = h[7]; h[7] = t; } return h; };
+const cellsFor = (rig, cells) => { if (!hasSwap(rig)) return cells; const c = cells.slice(); const t = c[6]; c[6] = c[7]; c[7] = t; return c; };
 const rigNo = id => String(id || "").replace(/^\D+/, "");   // DR702 -> 702 (имя листа журнала)
 
 // Все сданные записи по одному станку на (дата, смена) сливаются в одну строку журнала.
@@ -170,8 +174,8 @@ function buildJournal(rig, shifts, from, to, seed) {
   return { rows: rows, removals: removals, end: st };
 }
 
-function rowsToTsv(rows, c0) {
-  return rows.map(r => r.cells.map((v, i) => {
+function rowsToTsv(rows, c0, rig) {
+  return rows.map(r => cellsFor(rig, r.cells).map((v, i) => {
     if (i === 0) return ddmmyyyy(r.date);
     return typeof v === "number" ? String(v).replace(".", ",") : String(v == null ? "" : v);
   }).slice(c0 || 0).join("\t")).join("\n");
@@ -180,6 +184,20 @@ function rowsToTsv(rows, c0) {
 // ═════════ состояние ═════════
 let SHIFTS = [], EQUIP = [], RIGS = [], SEEDS = {}, curRig = "", curTab = "sum";
 try { SEEDS = JSON.parse(localStorage.getItem(CFG.SEED_KEY) || "{}"); } catch (e) { SEEDS = {}; }
+// Смены из загруженного журнала мастера (только для просмотра в сводке и списке смен; в выгрузку не идут)
+let JROWS = [];
+try { JROWS = JSON.parse(localStorage.getItem("bvr.jrows.v1") || "[]"); } catch (e) { JROWS = []; }
+function saveJrows() { try { localStorage.setItem("bvr.jrows.v1", JSON.stringify(JROWS)); } catch (e) { msg("Журнал загружен, но не поместился в память браузера: после обновления страницы его нужно загрузить снова.", "err"); } }
+// Смены от буровиков + строки журнала, которых нет среди смен от буровиков (за выбранный период)
+function allShifts() {
+  const from = $("fFrom").value, to = $("fTo").value, have = {};
+  SHIFTS.forEach(s => { have[s.equipmentId + "|" + s.date + "|" + s.smena] = 1; });
+  const jr = JROWS.filter(r => r.date >= from && r.date <= to && !have[r.rig + "|" + r.date + "|" + r.smena]).map(r => ({
+    shiftId: "j|" + r.rig + "|" + r.date + "|" + r.smena, source: "journal", equipmentId: r.rig, date: r.date, smena: r.smena,
+    empName: r.op, empId: "", diameter: r.diam, blocks: r.block, blockList: [], holesCount: r.f, redrillCount: r.g,
+    metersDrilled: r.h, metersRedrill: r.i, drillMinutes: r.j, downtimeMinutes: 0, holes: [], downtimes: [], replacements: [], note: "" }));
+  return SHIFTS.concat(jr);
+}
 function saveSeeds() { try { localStorage.setItem(CFG.SEED_KEY, JSON.stringify(SEEDS)); } catch (e) {} }
 
 function checkPin() {
@@ -236,7 +254,7 @@ async function load() {
 
 function filtered() {
   const rig = $("fRig").value, sm = $("fSmena").value;
-  return SHIFTS.filter(s => (!rig || s.equipmentId === rig) && (!sm || String(s.smena) === sm));
+  return allShifts().filter(s => (!rig || s.equipmentId === rig) && (!sm || String(s.smena) === sm));
 }
 
 // итоги по списку смен
@@ -255,7 +273,7 @@ function render() {
 function renderSum() {
   const list = filtered(), t = totals(list);
   let h = '<div class="kpis">' +
-    '<div class="kpi"><span>Смен сдано</span><b>' + t.shifts + '</b></div>' +
+    '<div class="kpi"><span>Смен в периоде</span><b>' + t.shifts + '</b></div>' +
     '<div class="kpi"><span>Обурено, п/м</span><b>' + fmt(t.mH, 1) + '</b><small>' + fmt(t.holes) + ' скв.</small></div>' +
     '<div class="kpi"><span>Перебур, п/м</span><b>' + fmt(t.mI, 1) + '</b><small>' + fmt(t.redrill) + ' скв. · ' + fmt(t.pctRe, 1) + ' % метров</small></div>' +
     '<div class="kpi"><span>Время бурения</span><b>' + hm(t.min) + '</b></div>' +
@@ -279,8 +297,8 @@ function renderSum() {
   const from = $("fFrom").value, to = $("fTo").value, days = daysBetween(from, to);
   if (days.length && days.length <= 35) {
     const gridRigs = $("fRig").value ? [$("fRig").value] : RIGS;
-    const idx = {}; SHIFTS.forEach(s => { idx[s.equipmentId + "|" + s.date + "|" + s.smena] = (idx[s.equipmentId + "|" + s.date + "|" + s.smena] || 0) + num(s.metersDrilled) + num(s.metersRedrill); });
-    const has = {}; SHIFTS.forEach(s => { has[s.equipmentId + "|" + s.date + "|" + s.smena] = 1; });
+    const idx = {}; allShifts().forEach(s => { idx[s.equipmentId + "|" + s.date + "|" + s.smena] = (idx[s.equipmentId + "|" + s.date + "|" + s.smena] || 0) + num(s.metersDrilled) + num(s.metersRedrill); });
+    const has = {}; allShifts().forEach(s => { has[s.equipmentId + "|" + s.date + "|" + s.smena] = 1; });
     h += '<div class="card"><h3>Сдача смен (Н — ночь, Д — день)</h3><div class="note">Серая клетка — смена не сдана (станок мог стоять). Зелёная — сдана, в клетке метры.</div><div style="overflow:auto"><div class="grid" style="grid-template-columns:70px repeat(' + (days.length * 2) + ',34px)">';
     h += '<div class="gc h"></div>' + days.map(d => '<div class="gc h" style="grid-column:span 2">' + ddmm(d) + '</div>').join("");
     h += '<div class="gc h"></div>' + days.map(() => '<div class="gc h">Н</div><div class="gc h">Д</div>').join("");
@@ -298,7 +316,7 @@ function renderShifts() {
   if (!list.length) h += '<tr><td colspan="12" style="color:#64748B">Смен нет</td></tr>';
   list.forEach(s => {
     const m = num(s.metersDrilled) + num(s.metersRedrill), mph = num(s.drillMinutes) > 0 ? m * 60 / num(s.drillMinutes) : 0;
-    h += '<tr class="click" data-id="' + esc(s.shiftId) + '"><td>' + ddmmyyyy(s.date) + '</td><td>' + (s.smena === 1 ? "Ночь" : "День") + '</td><td><b>' + esc(s.equipmentId) + '</b></td><td>' + esc(s.empName) + '</td><td>' + esc(s.blocks) + '</td><td class="r">' + fmt(num(s.holesCount)) + '</td><td class="r">' + (num(s.redrillCount) ? '<span class="tag">' + fmt(num(s.redrillCount)) + " / " + fmt(num(s.metersRedrill), 1) + "</span>" : "") + '</td><td class="r"><b>' + fmt(m, 1) + '</b></td><td class="r">' + hm(num(s.drillMinutes)) + '</td><td class="r">' + (num(s.drillMinutes) ? fmt(mph, 1) : "—") + '</td><td class="r">' + (num(s.downtimeMinutes) ? hm(num(s.downtimeMinutes)) : "") + '</td><td>' + (s.replacements || []).map(r => esc(TOOLS[r.tool] || r.tool)).join(", ") + "</td></tr>";
+    h += '<tr' + (s.source === "journal" ? "" : ' class="click"') + ' data-id="' + esc(s.shiftId) + '"><td>' + ddmmyyyy(s.date) + '</td><td>' + (s.smena === 1 ? "Ночь" : "День") + '</td><td><b>' + esc(s.equipmentId) + '</b>' + (s.source === "journal" ? ' <span class="tag g">журнал</span>' : "") + '</td><td>' + esc(s.empName) + '</td><td>' + esc(s.blocks) + '</td><td class="r">' + fmt(num(s.holesCount)) + '</td><td class="r">' + (num(s.redrillCount) ? '<span class="tag">' + fmt(num(s.redrillCount)) + " / " + fmt(num(s.metersRedrill), 1) + "</span>" : "") + '</td><td class="r"><b>' + fmt(m, 1) + '</b></td><td class="r">' + hm(num(s.drillMinutes)) + '</td><td class="r">' + (num(s.drillMinutes) ? fmt(mph, 1) : "—") + '</td><td class="r">' + (num(s.downtimeMinutes) ? hm(num(s.downtimeMinutes)) : "") + '</td><td>' + (s.replacements || []).map(r => esc(TOOLS[r.tool] || r.tool)).join(", ") + "</td></tr>";
     if (openShift === s.shiftId) {
       h += '<tr class="detail"><td colspan="12"><div class="cols"><div><b>Скважины</b><table class="pv"><tr><th>№</th><th class="r">м</th><th class="r">мин</th><th>Прим.</th></tr>' +
         (s.holes || []).map(x => "<tr><td>" + esc(x.n) + (x.redrill ? ' <span class="tag">перебур' + (x.replacesHole ? " вм. №" + esc(x.replacesHole) : "") + "</span>" : "") + '</td><td class="r">' + fmt(num(x.depth), 2) + '</td><td class="r">' + fmt(num(x.minutes)) + "</td><td>" + esc(x.note || "") + "</td></tr>").join("") + "</table></div>" +
@@ -368,8 +386,8 @@ function renderJournal() {
   h += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0"><label class="btn btn-dark" style="cursor:pointer">Загрузить журнал (.xlsx) — взять счётчики<input type="file" id="fJournal" accept=".xlsx,.xlsm" class="hidden"></label>' +
     '<button class="btn btn-gold" id="btnCopyAll">Копировать A–U</button><button class="btn btn-gold" id="btnCopyData">Копировать F–U (без даты, оператора, блока)</button><button class="btn btn-dark" id="btnXlsx">Скачать Excel (все станки)</button></div>';
   h += '<div class="note">Копирование — табличный текст: вставьте в лист ' + esc(rigNo(jRig)) + ' вашего журнала в первую строку периода. Строки идут по порядку «дата, смена 1, смена 2» (как в журнале). Числа с запятой, K — значение (в журнале у вас формула).<br>Проходка инструмента считается в этом же порядке.</div>';
-  h += '<div class="scroll"><table class="pv"><tr>' + JOURNAL_HEAD.map(x => "<th>" + esc(x) + "</th>").join("") + "</tr>" +
-    J.rows.map(r => "<tr" + (r.hasData ? "" : ' class="miss"') + ">" + r.cells.map((v, i) => "<td" + (typeof v === "number" ? ' class="r"' : "") + ">" + (i === 0 ? ddmmyyyy(r.date) : esc(v)) + "</td>").join("") + "</tr>").join("") + "</table></div></div>";
+  h += '<div class="scroll"><table class="pv"><tr>' + headFor(jRig).map(x => "<th>" + esc(x) + "</th>").join("") + "</tr>" +
+    J.rows.map(r => "<tr" + (r.hasData ? "" : ' class="miss"') + ">" + cellsFor(jRig, r.cells).map((v, i) => "<td" + (typeof v === "number" ? ' class="r"' : "") + ">" + (i === 0 ? ddmmyyyy(r.date) : esc(v)) + "</td>").join("") + "</tr>").join("") + "</table></div></div>";
   $("v-journal").innerHTML = h;
   document.querySelectorAll("#v-journal .chip").forEach(c => c.onclick = () => { jRig = c.dataset.rig; renderJournal(); });
   document.querySelectorAll("#v-journal [data-seed]").forEach(i => i.onchange = () => {
@@ -378,8 +396,8 @@ function renderJournal() {
     saveSeeds(); renderJournal();
   });
   $("fJournal").onchange = e => { if (e.target.files[0]) readJournal(e.target.files[0]); };
-  $("btnCopyAll").onclick = () => copyText(rowsToTsv(J.rows, 0), "Скопировано: " + J.rows.length + " строк, колонки A–U");
-  $("btnCopyData").onclick = () => copyText(rowsToTsv(J.rows, 5), "Скопировано: " + J.rows.length + " строк, колонки F–U");
+  $("btnCopyAll").onclick = () => copyText(rowsToTsv(J.rows, 0, jRig), "Скопировано: " + J.rows.length + " строк, колонки A–U");
+  $("btnCopyData").onclick = () => copyText(rowsToTsv(J.rows, 5, jRig), "Скопировано: " + J.rows.length + " строк, колонки F–U");
   $("btnXlsx").onclick = () => exportXlsx(rigs);
 }
 
@@ -401,17 +419,26 @@ function readJournal(file) {
   fr.onload = () => {
     try {
       const wb = XLSX.read(new Uint8Array(fr.result), { type: "array", cellDates: true });
-      const found = [];
+      const found = [], jr = [];
+      const nn = v => (typeof v === "number" && isFinite(v)) ? v : 0;
       RIGS.forEach(rig => {
         const ws = wb.Sheets[rigNo(rig)]; if (!ws) return;
         const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null });
         const seed = { asOf: "" };
         TOOL_KEYS.forEach(k => { let v = null; rows.forEach(r => { const c = r[TOOL_COLS[k][1]]; if (typeof c === "number" && isFinite(c)) v = c; }); if (v != null) seed[k] = r2(v); });
-        rows.forEach(r => { const d = r[0]; if (d instanceof Date && ((typeof r[7] === "number" && r[7] > 0) || (typeof r[8] === "number" && r[8] > 0))) { seed.asOf = new Date(d.getTime() + 12 * 3600 * 1000).toISOString().slice(0, 10); } });
+        rows.forEach(r => { const d = r[0]; if (d instanceof Date && ((typeof r[hasSwap(rig) ? 6 : 7] === "number" && r[hasSwap(rig) ? 6 : 7] > 0) || (typeof r[8] === "number" && r[8] > 0))) { seed.asOf = new Date(d.getTime() + 12 * 3600 * 1000).toISOString().slice(0, 10); } });
+        rows.forEach(r => {
+          const d = r[0], sm = Number(r[1]);
+          if (!(d instanceof Date) || (sm !== 1 && sm !== 2)) return;
+          const sw = hasSwap(rig), f = nn(r[5]), g = nn(r[sw ? 7 : 6]), h = nn(r[sw ? 6 : 7]), i = nn(r[8]), j = nn(r[9]);
+          if (!(h > 0 || i > 0 || j > 0)) return;
+          jr.push({ rig: rig, date: new Date(d.getTime() + 12 * 3600 * 1000).toISOString().slice(0, 10), smena: sm, op: String(r[2] == null ? "" : r[2]).trim(), block: String(r[3] == null ? "" : r[3]).trim(), diam: r[4] == null ? "" : r[4], f: f, g: g, h: h, i: i, j: j });
+        });
         SEEDS[rig] = seed; found.push(rig + " (по " + (seed.asOf ? ddmmyyyy(seed.asOf) : "дата не найдена") + ")");
       });
       saveSeeds();
-      msg(found.length ? "Счётчики взяты из журнала: " + found.join(", ") + ". Проверьте значения ниже." : "В файле не найдены листы станков (701, 702, ...).");
+      if (found.length) { JROWS = jr; saveJrows(); }
+      msg(found.length ? "Из журнала загружено смен: " + jr.length + " (" + found.join(", ") + "). Они видны во вкладках «Сводка» и «Смены» с пометкой «журнал»; счётчики проходки взяты по последним значениям." : "В файле не найдены листы станков (701, 702, ...).");
       renderJournal();
     } catch (e) { msg("Не удалось прочитать файл журнала: " + e.message, "err"); }
   };
@@ -423,7 +450,7 @@ function exportXlsx(rigs) {
   const wb = XLSX.utils.book_new(); let allRem = [];
   rigs.forEach(r => {
     const J = buildJournal(r, SHIFTS, from, to, SEEDS[r]);
-    const aoa = [JOURNAL_HEAD].concat(J.rows.map(x => x.cells.map((v, i) => i === 0 ? xlDate(x.date) : v)));
+    const aoa = [headFor(r)].concat(J.rows.map(x => cellsFor(r, x.cells).map((v, i) => i === 0 ? xlDate(x.date) : v)));
     const ws = XLSX.utils.aoa_to_sheet(aoa);
     for (let i = 1; i < aoa.length; i++) { const c = ws["A" + (i + 1)]; if (c) c.z = "dd.mm.yyyy"; }
     ws["!cols"] = JOURNAL_HEAD.map((h, i) => ({ wch: i === 2 || i === 3 ? 18 : 13 }));
