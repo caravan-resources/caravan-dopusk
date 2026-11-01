@@ -177,7 +177,7 @@ table.mini td { padding:6px 8px; border-bottom:1px solid var(--border); }
       <div class="field"><label>Вахта (группа плана)</label><select id="fVahta" onchange="VT = true; render()"><option value="">Все</option><option value="B">Вахта 1 (группа B)</option><option value="A">Вахта 2 (группа A)</option></select></div>
       <div class="field"><label>Смена</label><select id="fShiftF" onchange="render()"><option value="">Обе</option><option value="Д">День</option><option value="Н">Ночь</option></select></div>
       <div class="field"><label>Смена по табелю</label><select id="fRosSh" onchange="render()"><option value="1">Переносить по табелю</option><option value="0">Не переносить</option></select></div>
-      <div class="field"><label>Ремонт техники (Down)</label><select id="fAdj" onchange="render()"><option value="1">Вычитать из плана</option><option value="0">Не вычитать</option></select></div>
+      <div class="field"><label>Ремонт техники (Down)</label><select id="fAdj" onchange="render()"><option value="0" selected>Не вычитать (книга уже учитывает КТГ)</option><option value="1">Вычитать из плана</option></select></div>
       <div class="field"><label>Зелёный от, %</label><input type="number" id="pGreen" value="100" min="1" max="200" onchange="render()"></div>
       <div class="field"><label>Жёлтый от, %</label><input type="number" id="pYellow" value="90" min="1" max="200" onchange="render()"></div>
       <div class="field"><label>Оператор рейса определяется</label>
