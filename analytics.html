@@ -187,6 +187,17 @@ body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans
       <div id="equipmentList" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px"></div>
     </div>
 
+    <div class="panel" id="dayChecklistPanel">
+      <div class="panel-title">🗓 Чек-лист на любую дату — <span id="titleSite3"></span></div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+        <select id="dayEq" style="font-size:13px;padding:6px 8px;border:1.5px solid var(--border);border-radius:8px;min-width:220px"></select>
+        <input type="date" id="dayDate" style="font-size:13px;padding:6px 8px;border:1.5px solid var(--border);border-radius:8px">
+        <button class="btn-ghost" style="padding:7px 14px;font-size:12px" onclick="openDayChecklist()">Открыть</button>
+        <button class="btn-ghost" id="dayXlsBtn" style="padding:7px 14px;font-size:12px;display:none" onclick="downloadDayChecklistExcel()">⬇ Скачать Excel</button>
+      </div>
+      <div id="dayResult"><div class="empty" style="padding:14px">Выберите технику и дату, затем нажмите «Открыть»</div></div>
+    </div>
+
     <div class="panel">
       <div class="panel-title">Проведённые осмотры — <span id="titleSite2"></span></div>
       <div id="recordsList"></div>
@@ -554,6 +565,7 @@ function renderAll() {
   renderByOperator();
   renderEquipmentList();
   renderRecordsList();
+  renderDayPicker();
 }
 
 function parseRecordDate(s) {
@@ -726,6 +738,139 @@ function renderRecordsList() {
 function toggleRecord(idx) {
   const el = document.getElementById("recordDetail"+idx);
   if (el) el.style.display = el.style.display === "none" ? "block" : "none";
+}
+
+
+// ══ ЧЕК-ЛИСТ НА ЛЮБУЮ ДАТУ ══
+// Берёт полный (без свёртки «ok»-пунктов) чек-лист одной техники за выбранный
+// день через существующий экшен getEquipmentDayDetail и позволяет скачать его
+// в .xlsx. Один запрос = одна техника + один день, поэтому объём маленький.
+let DAY_DETAIL = null;
+
+function dayEsc(v) {
+  return String(v == null ? "" : v).replace(/[&<>"']/g,
+    c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+function dayToLocalISO(d) {
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+}
+function dayItemStatus(it) {
+  if (it.status === "ok") return "Исправно";
+  if (it.status === "defect") return "Неисправно";
+  return String(it.status == null ? "" : it.status); // числовые поля: топливо, моточасы, пробег
+}
+
+// Заполняет выпадающий список техники текущего участка; выбранное сохраняет.
+function renderDayPicker() {
+  const sel = document.getElementById("dayEq");
+  const dt  = document.getElementById("dayDate");
+  if (!sel || !dt) return;
+  const prev = sel.value;
+  const list = siteEquipment().slice().sort((a,b) =>
+    String(a.equipmentId).localeCompare(String(b.equipmentId), "ru", {numeric:true}));
+  sel.innerHTML = list.length
+    ? list.map(e => `<option value="${dayEsc(e.equipmentId)}">${dayEsc(e.equipmentId)}${e.model ? " — " + dayEsc(e.model) : ""}</option>`).join("")
+    : `<option value="">Нет техники</option>`;
+  if (prev && list.some(e => String(e.equipmentId) === prev)) sel.value = prev;
+  if (!dt.value) dt.value = dayToLocalISO(new Date());
+  dt.max = dayToLocalISO(new Date());
+}
+
+async function openDayChecklist() {
+  const eqId = document.getElementById("dayEq").value;
+  const date = document.getElementById("dayDate").value;
+  const out  = document.getElementById("dayResult");
+  const btn  = document.getElementById("dayXlsBtn");
+  btn.style.display = "none";
+  DAY_DETAIL = null;
+  if (!eqId || !date) {
+    out.innerHTML = `<div style="color:var(--red);font-size:12px">Выберите технику и дату</div>`;
+    return;
+  }
+  out.innerHTML = `<div style="font-size:12px;color:var(--gray);padding:8px 0">⏳ Загрузка...</div>`;
+  try {
+    const url = `${CFG.SHEET_URL}?action=getEquipmentDayDetail&equipmentId=${encodeURIComponent(eqId)}&date=${encodeURIComponent(date)}`;
+    const data = await fetchWithRetry(url, 30000, 3);
+    if (!data || !data.ok) {
+      out.innerHTML = `<div style="color:var(--red);font-size:12px">Ошибка: ${dayEsc((data && data.error) || "не удалось загрузить")}</div>`;
+      return;
+    }
+    DAY_DETAIL = { equipmentId: eqId, date: date, checklists: data.checklists || [], fuel: data.fuel || [] };
+    renderDayChecklist();
+  } catch (e) {
+    out.innerHTML = `<div style="color:var(--red);font-size:12px">Ошибка загрузки: ${dayEsc(e.message || e)}</div>`;
+  }
+}
+
+function renderDayChecklist() {
+  const out = document.getElementById("dayResult");
+  const btn = document.getElementById("dayXlsBtn");
+  const D = DAY_DETAIL;
+  if (!D) return;
+  if (!D.checklists.length) {
+    btn.style.display = "none";
+    out.innerHTML = `<div class="empty" style="padding:14px"><div class="empty-icon">📭</div>За ${dayEsc(D.date)} осмотров по технике ${dayEsc(D.equipmentId)} нет</div>`;
+    return;
+  }
+  btn.style.display = "";
+  out.innerHTML = D.checklists.map(rec => {
+    const items = rec.items || [];
+    const defects = items.filter(it => it.status === "defect").length;
+    const rows = items.map(it => {
+      const bad = it.status === "defect";
+      const tail = (it.status === "ok" || bad) ? "" : ` — ${dayEsc(it.status)}`;
+      return `<div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0;font-size:12px;color:${bad ? "var(--red)" : "var(--navy)"}">
+        <span>[${dayEsc(it.section)}] ${dayEsc(it.itemText)}${tail}${it.comment ? `<br><span style="font-size:11px;color:var(--gray)">${dayEsc(it.comment)}</span>` : ""}</span>
+        <span style="white-space:nowrap;color:var(--gray)">${it.status === "ok" ? "✓ исправно" : bad ? "✗ неисправно" : ""}</span>
+      </div>`;
+    }).join("");
+    return `<div style="border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <div><b>${fmtRecordDateTime(rec.date)}</b> <span style="color:var(--gray);font-size:12px">· ${dayEsc(rec.empName || "—")}</span></div>
+        ${defects
+          ? `<span style="background:var(--redbg);color:var(--red);font-size:12px;font-weight:700;padding:3px 10px;border-radius:99px">⚠ ${defects}</span>`
+          : `<span style="background:var(--greenbg);color:var(--green);font-size:12px;font-weight:700;padding:3px 10px;border-radius:99px">✓ Без замечаний</span>`}
+      </div>
+      <details open><summary style="font-size:11px;color:var(--gray);cursor:pointer">Все пункты (${items.length})</summary>${rows}</details>
+    </div>`;
+  }).join("");
+}
+
+// Выгрузка открытого чек-листа в .xlsx: лист «Чек-лист» — все пункты всех
+// осмотров за день плоской таблицей; лист «Заправки» — если они были.
+function downloadDayChecklistExcel() {
+  const D = DAY_DETAIL;
+  if (!D || !D.checklists.length) { alert("Сначала откройте чек-лист за нужную дату."); return; }
+  if (typeof XLSX === "undefined") {
+    alert("Библиотека Excel не загрузилась (нужен интернет) — попробуйте ещё раз.");
+    return;
+  }
+  const eq = (DATA.equipment || []).find(e => String(e.equipmentId) === String(D.equipmentId));
+  const model = eq ? (eq.model || "") : "";
+
+  const aoa = [["Дата","Время","Техника","Модель","Оператор","Раздел","Пункт","Статус","Комментарий"]];
+  D.checklists.forEach(rec => {
+    const d = parseRecordDate(rec.date);
+    const dStr = d ? `${String(d.getDate()).padStart(2,"0")}.${String(d.getMonth()+1).padStart(2,"0")}.${d.getFullYear()}` : "";
+    const tStr = d ? `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}` : "";
+    (rec.items || []).forEach(it => {
+      aoa.push([dStr, tStr, D.equipmentId, model, rec.empName || "", it.section || "",
+        it.itemText || "", dayItemStatus(it), it.comment || ""]);
+    });
+  });
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws["!cols"] = [{wch:11},{wch:7},{wch:10},{wch:22},{wch:28},{wch:22},{wch:48},{wch:12},{wch:36}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Чек-лист");
+
+  if (D.fuel && D.fuel.length) {
+    const f = [["Время","Литров","Оператор"]];
+    D.fuel.forEach(x => f.push([fmtRecordDateTime(x.date), x.amountLiters, x.empName || ""]));
+    const wf = XLSX.utils.aoa_to_sheet(f);
+    wf["!cols"] = [{wch:18},{wch:10},{wch:28}];
+    XLSX.utils.book_append_sheet(wb, wf, "Заправки");
+  }
+  XLSX.writeFile(wb, `Чеклист_${D.equipmentId}_${D.date}.xlsx`);
 }
 
 // ══ ТОПЛИВО ══
