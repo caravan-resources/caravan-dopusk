@@ -345,10 +345,12 @@ function renderJournal() {
   const rigs = RIGS.filter(r => SHIFTS.some(s => s.equipmentId === r));
   if (!rigs.length) {
     // Смен ещё нет (первый запуск) — загрузка журнала всё равно нужна: счётчики берутся заранее.
-    const have = Object.keys(SEEDS).filter(r => SEEDS[r] && (SEEDS[r].asOf || TOOL_KEYS.some(k => SEEDS[r][k]))).map(r => r + (SEEDS[r].asOf ? " (по " + ddmmyyyy(SEEDS[r].asOf) + ")" : ""));
-    $("v-journal").innerHTML = '<div class="card"><h3>Журнал (выгрузка)</h3><div class="note">За выбранный период нет сданных смен. Загрузите ваш журнал сейчас — панель запомнит счётчики проходки по инструменту, и строки для выгрузки появятся, как только буровики сдадут смены.</div>' +
+    const rg = Object.keys(SEEDS).filter(r => SEEDS[r] && (SEEDS[r].asOf || TOOL_KEYS.some(k => SEEDS[r][k]))).sort((a, b) => rigNo(a).localeCompare(rigNo(b)));
+    const tbl = rg.length ? '<div class="scroll" style="margin-top:10px"><table><tr><th>Станок</th>' + TOOL_KEYS.map(k => '<th class="r">' + esc(TOOLS[k]) + ', м</th>').join("") + '<th>Журнал заполнен по</th></tr>' +
+      rg.map(r => "<tr><td><b>" + esc(r) + "</b></td>" + TOOL_KEYS.map(k => '<td class="r">' + (SEEDS[r][k] != null ? fmt(SEEDS[r][k], 2) : "—") + "</td>").join("") + "<td>" + (SEEDS[r].asOf ? ddmmyyyy(SEEDS[r].asOf) : "—") + "</td></tr>").join("") + "</table></div>" : "";
+    $("v-journal").innerHTML = '<div class="card"><h3>Журнал (выгрузка)</h3><div class="note">За выбранный период нет сданных смен, поэтому строк для выгрузки пока нет — они появятся, когда буровики сдадут смены. Загрузите ваш журнал сейчас: панель запомнит счётчики проходки по инструменту.</div>' +
       '<div style="margin:10px 0"><label class="btn btn-dark" style="cursor:pointer">Загрузить журнал (.xlsx) — взять счётчики<input type="file" id="fJournal" accept=".xlsx,.xlsm" class="hidden"></label></div>' +
-      '<div class="note">' + (have.length ? "Счётчики уже загружены: " + esc(have.join(", ")) : "Счётчики пока не загружены.") + "</div></div>";
+      (rg.length ? '<div class="note"><b>Счётчики загружены и сохранены в этом браузере:</b></div>' + tbl : '<div class="note">Счётчики пока не загружены.</div>') + "</div>";
     $("fJournal").onchange = e => { if (e.target.files[0]) readJournal(e.target.files[0]); };
     return;
   }
