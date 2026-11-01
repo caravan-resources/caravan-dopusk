@@ -187,7 +187,10 @@ try { SEEDS = JSON.parse(localStorage.getItem(CFG.SEED_KEY) || "{}"); } catch (e
 // Смены из загруженного журнала мастера (только для просмотра в сводке и списке смен; в выгрузку не идут)
 let JROWS = [];
 try { JROWS = JSON.parse(localStorage.getItem("bvr.jrows.v1") || "[]"); } catch (e) { JROWS = []; }
-function saveJrows() { try { localStorage.setItem("bvr.jrows.v1", JSON.stringify(JROWS)); } catch (e) { msg("Журнал загружен, но не поместился в память браузера: после обновления страницы его нужно загрузить снова.", "err"); } }
+let JREPL = [];
+try { JREPL = JSON.parse(localStorage.getItem("bvr.jrepl.v1") || "[]"); } catch (e) { JREPL = []; }
+function saveJrows() { try { localStorage.setItem("bvr.jrepl.v1", JSON.stringify(JREPL)); } catch (e) {} saveJrows2(); }
+function saveJrows2() { try { localStorage.setItem("bvr.jrows.v1", JSON.stringify(JROWS)); } catch (e) { msg("Журнал загружен, но не поместился в память браузера: после обновления страницы его нужно загрузить снова.", "err"); } }
 // Смены от буровиков + строки журнала, которых нет среди смен от буровиков (за выбранный период)
 function allShifts() {
   const from = $("fFrom").value, to = $("fTo").value, have = {};
@@ -343,12 +346,16 @@ function renderShifts() {
 
 // ═════════ Инструмент ═════════
 function renderTools() {
-  const rigs = $("fRig").value ? [$("fRig").value] : RIGS.filter(r => SHIFTS.some(s => s.equipmentId === r));
+  const rigs = $("fRig").value ? [$("fRig").value] : RIGS.filter(r => SHIFTS.some(s => s.equipmentId === r) || SEEDS[r]);
   const from = $("fFrom").value, to = $("fTo").value;
   let rem = [], h = "";
   rigs.forEach(r => { rem = rem.concat(buildJournal(r, SHIFTS, from, to, SEEDS[r]).removals); });
-  h += '<div class="card"><h3>Замены инструмента за период</h3><div class="note">Наработка снятого инструмента = счётчик на момент замены (из журнала или начального значения) + метры до скважины замены. Без начального счётчика наработка считается только с начала периода.</div><div class="scroll"><table><tr><th>Дата</th><th>Смена</th><th>Станок</th><th>Инструмент</th><th class="r">Наработка снятого, м</th><th>Поставлен</th></tr>';
-  h += rem.length ? rem.sort((a, b) => a.date === b.date ? a.smena - b.smena : (a.date < b.date ? -1 : 1)).map(x => "<tr><td>" + ddmmyyyy(x.date) + "</td><td>" + (x.smena === 1 ? "Ночь" : "День") + "</td><td><b>" + esc(x.rig) + "</b></td><td>" + esc(TOOLS[x.tool]) + '</td><td class="r"><b>' + fmt(x.life, 1) + "</b></td><td>" + esc(x.newModel) + "</td></tr>").join("") : '<tr><td colspan="6" style="color:#64748B">Замен за период нет</td></tr>';
+  // Замены из загруженного журнала; если за ту же дату/смену/инструмент есть запись от буровика — берётся она
+  const sysKey = {}; rem.forEach(x => { sysKey[x.rig + "|" + x.date + "|" + x.smena + "|" + x.tool] = 1; });
+  JREPL.filter(x => x.date >= from && x.date <= to && (!$("fRig").value || x.rig === $("fRig").value) && !sysKey[x.rig + "|" + x.date + "|" + x.smena + "|" + x.tool])
+    .forEach(x => rem.push({ rig: x.rig, tool: x.tool, date: x.date, smena: x.smena, life: x.counter, newModel: x.model, src: "journal" }));
+  h += '<div class="card"><h3>Замены инструмента за период</h3><div class="note">Наработка снятого инструмента = счётчик на момент замены (из журнала или начального значения) + метры до скважины замены. Для строк «журнал» в колонке наработки стоит значение счётчика из вашего журнала в строке замены. Без начального счётчика наработка считается только с начала периода.</div><div class="scroll"><table><tr><th>Дата</th><th>Смена</th><th>Станок</th><th>Инструмент</th><th class="r">Наработка снятого, м</th><th>Поставлен</th></tr>';
+  h += rem.length ? rem.sort((a, b) => a.date === b.date ? a.smena - b.smena : (a.date < b.date ? -1 : 1)).map(x => "<tr><td>" + ddmmyyyy(x.date) + "</td><td>" + (x.smena === 1 ? "Ночь" : x.smena === 2 ? "День" : "—") + "</td><td><b>" + esc(x.rig) + "</b>" + (x.src === "journal" ? ' <span class="tag g">журнал</span>' : "") + "</td><td>" + esc(TOOLS[x.tool]) + '</td><td class="r"><b>' + fmt(x.life, 1) + "</b></td><td>" + esc(x.newModel) + "</td></tr>").join("") : '<tr><td colspan="6" style="color:#64748B">Замен за период нет</td></tr>';
   h += "</table></div></div>";
   h += '<div class="card"><h3>Наработка на конец периода</h3><div class="scroll"><table><tr><th>Станок</th>' + TOOL_KEYS.map(k => '<th class="r">' + esc(TOOLS[k]) + ", м</th>").join("") + "<th>Журнал учтён по</th></tr>";
   rigs.forEach(r => { const e = buildJournal(r, SHIFTS, from, to, SEEDS[r]).end, sd = SEEDS[r]; h += "<tr><td><b>" + esc(r) + "</b></td>" + TOOL_KEYS.map(k => '<td class="r">' + fmt(e[k], 1) + "</td>").join("") + "<td>" + (sd && sd.asOf ? ddmmyyyy(sd.asOf) : '<span class="tag r">не задан</span>') + "</td></tr>"; });
@@ -419,7 +426,7 @@ function readJournal(file) {
   fr.onload = () => {
     try {
       const wb = XLSX.read(new Uint8Array(fr.result), { type: "array", cellDates: true });
-      const found = [], jr = [];
+      const found = [], jr = [], jrep = [];
       const nn = v => (typeof v === "number" && isFinite(v)) ? v : 0;
       RIGS.forEach(rig => {
         const ws = wb.Sheets[rigNo(rig)]; if (!ws) return;
@@ -427,6 +434,13 @@ function readJournal(file) {
         const seed = { asOf: "" };
         TOOL_KEYS.forEach(k => { let v = null; rows.forEach(r => { const c = r[TOOL_COLS[k][1]]; if (typeof c === "number" && isFinite(c)) v = c; }); if (v != null) seed[k] = r2(v); });
         rows.forEach(r => { const d = r[0]; if (d instanceof Date && ((typeof r[hasSwap(rig) ? 6 : 7] === "number" && r[hasSwap(rig) ? 6 : 7] > 0) || (typeof r[8] === "number" && r[8] > 0))) { seed.asOf = new Date(d.getTime() + 12 * 3600 * 1000).toISOString().slice(0, 10); } });
+        rows.forEach(r => {
+          const d0 = r[0];
+          if (d0 instanceof Date) TOOL_KEYS.forEach(k => {
+            const m = r[TOOL_COLS[k][0]];
+            if (m != null && String(m).trim() !== "") jrep.push({ rig: rig, tool: k, date: new Date(d0.getTime() + 12 * 3600 * 1000).toISOString().slice(0, 10), smena: Number(r[1]) || 0, model: String(m).trim(), counter: nn(r[TOOL_COLS[k][1]]) });
+          });
+        });
         rows.forEach(r => {
           const d = r[0], sm = Number(r[1]);
           if (!(d instanceof Date) || (sm !== 1 && sm !== 2)) return;
@@ -437,8 +451,8 @@ function readJournal(file) {
         SEEDS[rig] = seed; found.push(rig + " (по " + (seed.asOf ? ddmmyyyy(seed.asOf) : "дата не найдена") + ")");
       });
       saveSeeds();
-      if (found.length) { JROWS = jr; saveJrows(); }
-      msg(found.length ? "Из журнала загружено смен: " + jr.length + " (" + found.join(", ") + "). Они видны во вкладках «Сводка» и «Смены» с пометкой «журнал»; счётчики проходки взяты по последним значениям." : "В файле не найдены листы станков (701, 702, ...).");
+      if (found.length) { JROWS = jr; JREPL = jrep; saveJrows(); }
+      msg(found.length ? "Из журнала загружено смен: " + jr.length + ", замен инструмента: " + jrep.length + " (" + found.join(", ") + "). Смены видны во вкладках «Сводка» и «Смены», замены во вкладке «Инструмент» (с пометкой «журнал»); счётчики проходки взяты по последним значениям." : "В файле не найдены листы станков (701, 702, ...).");
       renderJournal();
     } catch (e) { msg("Не удалось прочитать файл журнала: " + e.message, "err"); }
   };
