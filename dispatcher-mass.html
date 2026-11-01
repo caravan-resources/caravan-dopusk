@@ -1488,6 +1488,76 @@ function drClear() {
   render();
 }
 
+// Бурение на вкладке «Диаграмма смен»: отдельный блок под диаграммами вывозки, данные вывозки и бурения не смешиваются.
+// Четыре смены (вахта × день/ночь) берутся из группы машиниста в плане книги; метры без группы показаны серым и отдельной строкой.
+function drSeriesIdx(g, sh) { return g === "B" ? (sh === "Ночь" ? 1 : 0) : g === "A" ? (sh === "Ночь" ? 3 : 2) : -1; }
+function drShiftCharts() {
+  if (!DRILL) return "";
+  const D = DRILL, cnt = drCounted(D), fr = D.fact.filter(cnt), GREY = "#98A2B3";
+  const grp = {}; D.plan.forEach(p => { if (p[2] && !drIsVac(p[4]) && !grp[p[4]]) grp[p[4]] = p[2]; });
+  let cut = ""; fr.forEach(x => { if (x[0] > cut) cut = x[0]; });
+  if (!cut) return "";
+  const S = {}, slot = (d, sh) => S[d + "|" + sh] || (S[d + "|" + sh] = { d, sh, fact: 0, plan: 0, ser: {} });
+  fr.forEach(x => { if (!x[0] || !x[1] || x[0] > cut) return; const s = slot(x[0], x[1]), i = drSeriesIdx(grp[x[3]] || "", x[1]); s.fact += x[4]; s.ser[i] = (s.ser[i] || 0) + x[4]; });
+  const planS = [0, 0, 0, 0], planSh = { "День": 0, "Ночь": 0 };
+  D.plan.forEach(p => { if (drIsVac(p[4]) || !(p[6] > 0) || p[0] > cut || !p[3]) return; slot(p[0], p[3]).plan += p[6]; const i = drSeriesIdx(p[2], p[3]); if (i >= 0) planS[i] += p[6]; if (p[3] in planSh) planSh[p[3]] += p[6]; });
+  const keys = Object.keys(S), dates = Array.from(new Set(keys.map(k => k.split("|")[0]))).sort();
+  const val = (d, sh, f) => (S[d + "|" + sh] ? S[d + "|" + sh][f] : 0);
+  const domIdx = s => { let b = -1, m = 0; Object.keys(s.ser).forEach(i => { if (s.ser[i] > m) { m = s.ser[i]; b = +i; } }); return b; };
+  // 1. По суткам
+  const max = Math.max.apply(null, keys.map(k => Math.max(S[k].fact, S[k].plan))) || 1;
+  const step = Math.pow(10, Math.floor(Math.log10(max))); let top = Math.ceil(max / step) * step; if (top / step > 5) top = Math.ceil(max / (step * 2)) * step * 2;
+  const W = Math.max(720, dates.length * 44 + 80), H = 340, L = 64, B = 44, T = 16, pw = W - L - 12, ph = H - B - T, gw = pw / dates.length, bw = Math.min(16, gw / 2 - 3), y = v => T + ph - v / top * ph;
+  let svg = '<svg viewBox="0 0 ' + W + " " + H + '" width="' + W + '" height="' + H + '" style="max-width:100%;height:auto;font-family:inherit">';
+  for (let i = 0; i <= 5; i++) { const v = top / 5 * i, yy = y(v); svg += '<line x1="' + L + '" x2="' + (W - 12) + '" y1="' + yy + '" y2="' + yy + '" stroke="#d6dbe4"/><text x="' + (L - 6) + '" y="' + (yy + 4) + '" text-anchor="end" font-size="11" fill="#667085">' + fmtT(v) + "</text>"; }
+  let grey = false;
+  dates.forEach((d, i) => {
+    const cx = L + gw * i + gw / 2;
+    [["День", -bw - 1], ["Ночь", 1]].forEach(([sh, dx]) => {
+      const s = S[d + "|" + sh]; if (!s) return; const x = cx + dx, di = domIdx(s), col = di >= 0 ? SERIES4[di].col : GREY, nm = di >= 0 ? SERIES4[di].n : sh.toLowerCase() + ", группа не определена";
+      if (di < 0 && s.fact > 0) grey = true;
+      svg += "<g><title>" + fmtD(d) + ", " + nm + ": факт " + drPm(s.fact) + " п.м., план " + drPm(s.plan) + " п.м." + (s.plan > 0 ? ", " + (s.fact / s.plan * 100).toFixed(0) + " % плана" : "") + '</title><rect x="' + x + '" y="' + y(s.fact) + '" width="' + bw + '" height="' + Math.max(0, T + ph - y(s.fact)) + '" fill="' + col + '" rx="2"/>' +
+        (s.plan > 0 ? '<line x1="' + (x - 2) + '" x2="' + (x + bw + 2) + '" y1="' + y(s.plan) + '" y2="' + y(s.plan) + '" stroke="#DC2626" stroke-width="2"/>' : "") + "</g>";
+    });
+    svg += '<text x="' + cx + '" y="' + (H - B + 16) + '" text-anchor="middle" font-size="10" fill="#475467">' + d.slice(8) + "." + d.slice(5, 7) + "</text>";
+  });
+  svg += '<line x1="' + L + '" x2="' + (W - 12) + '" y1="' + (T + ph) + '" y2="' + (T + ph) + '" stroke="#98A2B3"/></svg>';
+  // 2. Четыре смены за месяц
+  const tot = [0, 0, 0, 0], nS = [0, 0, 0, 0]; let rest = 0, all = 0;
+  keys.forEach(k => { const s = S[k]; all += s.fact; Object.keys(s.ser).forEach(i => { if (+i < 0) rest += s.ser[i]; else if (s.ser[i] > 0) { tot[i] += s.ser[i]; nS[i]++; } }); });
+  const sum4 = tot[0] + tot[1] + tot[2] + tot[3];
+  let g4 = "";
+  if (sum4 > 0) {
+    const m4 = Math.max.apply(null, tot.concat(planS)), st4 = Math.pow(10, Math.floor(Math.log10(m4))); let t4 = Math.ceil(m4 * 1.12 / st4) * st4; if (t4 / st4 > 5) t4 = Math.ceil(m4 * 1.12 / (st4 * 2)) * st4 * 2;
+    const W4 = 420, H4 = 300, L4 = 56, B4 = 52, T4 = 22, pw4 = W4 - L4 - 10, ph4 = H4 - B4 - T4, gw4 = pw4 / 4, bw4 = Math.min(56, gw4 - 16), y4 = v => T4 + ph4 - v / t4 * ph4;
+    g4 = '<svg viewBox="0 0 ' + W4 + " " + H4 + '" width="' + W4 + '" height="' + H4 + '" style="max-width:100%;height:auto;font-family:inherit">';
+    for (let i = 0; i <= 5; i++) { const v = t4 / 5 * i; g4 += '<line x1="' + L4 + '" x2="' + (W4 - 10) + '" y1="' + y4(v) + '" y2="' + y4(v) + '" stroke="#d6dbe4"/><text x="' + (L4 - 6) + '" y="' + (y4(v) + 4) + '" text-anchor="end" font-size="11" fill="#667085">' + fmtT(v) + "</text>"; }
+    SERIES4.forEach((q, i) => { const cx = L4 + gw4 * i + gw4 / 2;
+      g4 += "<g><title>" + q.n + ": " + drPm(tot[i]) + " п.м., смен " + nS[i] + ", в среднем " + (nS[i] ? fmtT(tot[i] / nS[i]) : "—") + " п.м., план на срез " + fmtT(planS[i]) + '</title><rect x="' + (cx - bw4 / 2) + '" y="' + y4(tot[i]) + '" width="' + bw4 + '" height="' + Math.max(0, T4 + ph4 - y4(tot[i])) + '" fill="' + q.col + '" rx="3"/>' +
+        (planS[i] > 0 ? '<line x1="' + (cx - bw4 / 2 - 4) + '" x2="' + (cx + bw4 / 2 + 4) + '" y1="' + y4(planS[i]) + '" y2="' + y4(planS[i]) + '" stroke="#DC2626" stroke-width="2"/>' : "") + "</g>" +
+        '<text x="' + cx + '" y="' + (y4(tot[i]) - 5) + '" text-anchor="middle" font-size="11" font-weight="600" fill="#1f2937">' + fmtT(tot[i]) + '</text><text x="' + cx + '" y="' + (H4 - B4 + 15) + '" text-anchor="middle" font-size="11" fill="#475467">' + q.n.split(", ")[0] + '</text><text x="' + cx + '" y="' + (H4 - B4 + 29) + '" text-anchor="middle" font-size="11" fill="#475467">' + q.n.split(", ")[1] + "</text>"; });
+    g4 += '<line x1="' + L4 + '" x2="' + (W4 - 10) + '" y1="' + (T4 + ph4) + '" y2="' + (T4 + ph4) + '" stroke="#98A2B3"/></svg>';
+  }
+  // 3. День / ночь
+  const dn = { "День": { f: 0, n: 0 }, "Ночь": { f: 0, n: 0 } };
+  keys.forEach(k => { const s = S[k]; if (s.fact > 0 && dn[s.sh]) { dn[s.sh].f += s.fact; dn[s.sh].n++; } });
+  const row = (l, a, b) => "<tr><td>" + l + '</td><td class="num">' + a + '</td><td class="num">' + b + "</td></tr>", dd = dn["День"], nn = dn["Ночь"];
+  const pc = (f, p) => p > 0 ? (f / p * 100).toFixed(0) + " %" : "—";
+  const tbl = '<table class="mini"><thead><tr><th>Показатель</th><th class="num">День</th><th class="num">Ночь</th></tr></thead><tbody>' +
+    row("Пробурено, п.м.", fmtT(dd.f), fmtT(nn.f)) + row("Смен с бурением", dd.n, nn.n) + row("Среднее за смену, п.м.", dd.n ? fmtT(dd.f / dd.n) : "—", nn.n ? fmtT(nn.f / nn.n) : "—") +
+    row("План на срез, п.м.", fmtT(planSh["День"]), fmtT(planSh["Ночь"])) + row("Факт / план", pc(dd.f, planSh["День"]), pc(nn.f, planSh["Ночь"])) + "</tbody></table>";
+  const leg = SERIES4.map(q => '<span><i style="display:inline-block;width:12px;height:12px;background:' + q.col + ';border-radius:2px;vertical-align:-1px"></i> ' + q.n + "</span>").join("") +
+    (grey ? '<span><i style="display:inline-block;width:12px;height:12px;background:' + GREY + ';border-radius:2px;vertical-align:-1px"></i> группа не определена</span>' : "");
+  const o = [0, 1, 2, 3].sort((a, b) => tot[b] - tot[a]);
+  return '<div style="padding:0 16px 16px"><h3 style="font-size:14px;margin:8px 0 8px;border-top:1px solid var(--border);padding-top:16px">Бурение: метры по сменам</h3>' +
+    '<div class="sub" style="margin-bottom:8px">Книга «' + esc(D.file) + '», месяц ' + D.month + ", срез " + fmtD(cut) + ". Фильтры вахты и смены на этот блок не действуют.</div>" +
+    '<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:center;font-size:12px;margin-bottom:6px">' + leg + '<span><i style="display:inline-block;width:14px;height:2px;background:#DC2626;vertical-align:3px"></i> план смены</span></div>' +
+    '<div style="overflow-x:auto">' + svg + '</div><div class="sub" style="margin-top:6px">Столбец = метры, пробуренные сменой за сутки; цвет по группе (вахте) преобладающего машиниста; красная черта = план смены.</div>' +
+    '<div style="display:flex;flex-wrap:wrap;gap:24px;align-items:flex-start;margin-top:14px"><div style="min-width:320px">' + tbl + "</div>" +
+    (g4 ? '<div><div class="sub" style="margin-bottom:4px">Пробурено за месяц по четырём сменам, п.м.</div>' + g4 + '<div class="sub" style="max-width:420px;margin-top:4px">Больше всех: <b>' + SERIES4[o[0]].n + "</b> (" + fmtT(tot[o[0]]) + " п.м.), меньше всех: " + SERIES4[o[3]].n + " (" + fmtT(tot[o[3]]) + " п.м.). Смен: " + nS.join(" / ") + ". Красная черта = план на срез." +
+      (rest > 0.5 ? " Не отнесено к группе: " + drPm(rest) + " п.м. (машинист не в плане)." : "") + "</div></div>" : "") + "</div></div>";
+}
+
 function setTab(t) { const prevTab = TAB; TAB = t; document.querySelectorAll(".tab").forEach(e => e.classList.toggle("on", e.dataset.t === t)); if ((t === "ch" && RES) || t === "drill" || prevTab === "drill") render(); else renderTable(); }
 
 function cutOrd() { const d = $("fCutDate").value; return d ? shiftOrd(d, $("fCutShift").value) : -1; }
@@ -1796,7 +1866,7 @@ function renderTable() {
   if (TAB === "haulD" || TAB === "haulE") { host.innerHTML = renderHaul(TAB === "haulD" ? "drivers" : "exc"); return; }
   if (TAB === "dt") { host.innerHTML = renderDowntime(); return; }
   if (TAB === "aux") { host.innerHTML = renderAux(); return; }
-  if (TAB === "ch") { host.innerHTML = renderShiftChart(); return; }
+  if (TAB === "ch") { host.innerHTML = renderShiftChart() + drShiftCharts(); return; }
   if (TAB === "drivers" || TAB === "exc") {
     const rows = sortRows(workerRows(TAB), TAB);
     const lab = TAB === "drivers" ? "Самосвалы" : "Экскаваторы";
