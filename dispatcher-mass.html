@@ -1313,7 +1313,7 @@ function clearFact() {
   banner("infoBanner", ""); updateSourceStates(); cutToData(true); render();
 }
 
-function setTab(t) { TAB = t; document.querySelectorAll(".tab").forEach(e => e.classList.toggle("on", e.dataset.t === t)); renderTable(); }
+function setTab(t) { TAB = t; document.querySelectorAll(".tab").forEach(e => e.classList.toggle("on", e.dataset.t === t)); if (t === "ch" && RES) render(); else renderTable(); }
 
 function cutOrd() { const d = $("fCutDate").value; return d ? shiftOrd(d, $("fCutShift").value) : -1; }
 
@@ -1336,6 +1336,9 @@ function render() {
   const o3 = byPerson ? Object.assign({}, o2, { shift: "" }) : o2;
   RES = { drivers: compute(plan, FACT.shifts, "drivers", m, c, o3), exc: compute(plan, FACT.shifts, "exc", m, c, o3) };
   if (byPerson) { RES.drivers = personShiftFilter(RES.drivers, sf, m); RES.exc = personShiftFilter(RES.exc, sf, m); }
+  // для диаграммы смен: вывозка по четырём сменам (вахта × день/ночь), без фильтров вахты и смены
+  RES.grp = null;
+  if (TAB === "ch" && hasGrp) { try { RES.grp = {}; ["A", "B"].forEach(g => { RES.grp[g] = compute(plan, FACT.shifts, "drivers", m, c, Object.assign({}, o2, { vahta: g, shift: "" })).shiftsData || {}; }); } catch (e) { RES.grp = null; } }
   const nowMin = Math.floor((Date.now() + 5 * 3600000) / 60000);
   RES.drivers.idle = idleAnalysis(fplan, FACT.shifts, "drivers", m, c, STL, nowMin, TL);
   RES.exc.idle = idleAnalysis(fplan, FACT.shifts, "exc", m, c, STL, nowMin, TL);
@@ -1467,6 +1470,15 @@ function statSummary(month, cut, only) {
   });
   return { eqs, reasons };
 }
+// Четыре смены: вахта × день/ночь. Вахта 1 = группа B, вахта 2 = группа A. Оттенок: вахта, светлее = день, темнее = ночь
+const SERIES4 = [{ g: "B", n: "Вахта 1, день", col: "#F59E0B" }, { g: "B", n: "Вахта 1, ночь", col: "#9A3412" }, { g: "A", n: "Вахта 2, день", col: "#38BDF8" }, { g: "A", n: "Вахта 2, ночь", col: "#1E3A8A" }];
+// какая из четырёх смен работала в «дата|смена»: группа с большей вывозкой (при пересменке на одной технике — основная)
+function shiftSeries(key, sh) {
+  const G = RES && RES.grp; if (!G) return sh === SH_N ? 1 : 0;
+  const a = G.A && G.A[key] ? G.A[key].fact : 0, b = G.B && G.B[key] ? G.B[key].fact : 0;
+  if (!(a > 0) && !(b > 0)) return sh === SH_N ? 1 : 0;
+  return (b >= a ? (sh === SH_N ? 1 : 0) : (sh === SH_N ? 3 : 2));
+}
 // Диаграмма: сколько вывезла каждая смена (день / ночь) по суткам, с отметкой плана смены
 function renderShiftChart() {
   const D = RES.drivers.shiftsData || {}; const keys = Object.keys(D);
@@ -1483,9 +1495,10 @@ function renderShiftChart() {
   for (let i = 0; i <= 5; i++) { const v = top / 5 * i, yy = y(v); svg += '<line x1="' + L + '" x2="' + (W - 12) + '" y1="' + yy + '" y2="' + yy + '" stroke="#d6dbe4" stroke-width="1"/><text x="' + (L - 6) + '" y="' + (yy + 4) + '" text-anchor="end" font-size="11" fill="#667085">' + fmtT(v / 1000) + " тыс</text>"; }
   dates.forEach((d, i) => {
     const cx = L + gw * i + gw / 2;
-    [[SH_D, -bw - 1, "#F59E0B", "день"], [SH_N, 1, "#1F2A44", "ночь"]].forEach(([sh, dx, col, nm]) => {
+    [[SH_D, -bw - 1, "день"], [SH_N, 1, "ночь"]].forEach(([sh, dx, nm0]) => {
       const f = val(d, sh, "fact"), p = val(d, sh, "plan"), x = cx + dx;
       if (!D[d + "|" + sh]) return;
+      const sr = SERIES4[shiftSeries(d + "|" + sh, sh)], col = sr.col, nm = RES && RES.grp ? sr.n : nm0;
       svg += '<g><title>' + fmtD(d) + ", " + nm + ": факт " + fmtT(f) + " т, план " + fmtT(p) + " т, рейсов " + fmtN(val(d, sh, "trips")) + (p > 0 ? ", " + (f / p * 100).toFixed(0) + " % плана" : "") + '</title><rect x="' + x + '" y="' + y(f) + '" width="' + bw + '" height="' + Math.max(0, T + ph - y(f)) + '" fill="' + col + '" rx="2"/>' +
         (p > 0 ? '<line x1="' + (x - 2) + '" x2="' + (x + bw + 2) + '" y1="' + y(p) + '" y2="' + y(p) + '" stroke="#DC2626" stroke-width="2"/>' : "") + "</g>";
     });
@@ -1498,15 +1511,39 @@ function renderShiftChart() {
     card("Дневные смены, т", fmtT(tD), "смен " + nD + ", в среднем " + avg(tD, nD) + " т за смену" + (pD ? ", " + (tD / pD * 100).toFixed(0) + " % плана" : "")) +
     card("Ночные смены, т", fmtT(tN), "смен " + nN + ", в среднем " + avg(tN, nN) + " т за смену" + (pN ? ", " + (tN / pN * 100).toFixed(0) + " % плана" : "")) +
     card("Доля дня / ночи", (tD + tN ? (tD / (tD + tN) * 100).toFixed(0) : "0") + " / " + (tD + tN ? (tN / (tD + tN) * 100).toFixed(0) : "0") + " %") + "</div>" +
-    '<div style="display:flex;gap:16px;align-items:center;font-size:12px;margin-bottom:6px"><span><i style="display:inline-block;width:12px;height:12px;background:#F59E0B;border-radius:2px;vertical-align:-1px"></i> день (07:00–19:00)</span><span><i style="display:inline-block;width:12px;height:12px;background:#1F2A44;border-radius:2px;vertical-align:-1px"></i> ночь (19:00–07:00)</span><span><i style="display:inline-block;width:14px;height:0;border-top:2px solid #DC2626;vertical-align:3px"></i> план смены</span></div>' +
+    '<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:center;font-size:12px;margin-bottom:6px">' + (RES && RES.grp ? SERIES4.map(q => '<span><i style="display:inline-block;width:12px;height:12px;background:' + q.col + ';border-radius:2px;vertical-align:-1px"></i> ' + q.n + (q.n.slice(-4) === "день" ? " (07:00–19:00)" : " (19:00–07:00)") + "</span>").join("") : '<span><i style="display:inline-block;width:12px;height:12px;background:#F59E0B;border-radius:2px;vertical-align:-1px"></i> день (07:00–19:00)</span><span><i style="display:inline-block;width:12px;height:12px;background:#1F2A44;border-radius:2px;vertical-align:-1px"></i> ночь (19:00–07:00)</span>') + '<span><i style="display:inline-block;width:14px;height:0;border-top:2px solid #DC2626;vertical-align:3px"></i> план смены</span></div>' +
     '<div style="overflow-x:auto">' + svg + '</div><div class="sub" style="margin-top:6px">Столбец = масса, вывезенная сменой за сутки; красная черта = плановый тоннаж этой смены. Учитываются фильтры вахты и смены и поправка на ремонт. Ночь суток D начинается в 19:00 дня D−1. Подсказка с точными числами появляется при наведении.</div>' + shiftAnalytics(dates, D) + "</div>";
   return h;
 }
+// Диаграмма из четырёх столбцов: сколько вывезла за месяц каждая из четырёх смен (вахта × день/ночь)
+function shift4Chart(D) {
+  const G = RES && RES.grp; if (!G) return '<div class="sub" style="max-width:360px">Диаграмма по четырём сменам недоступна: в плане нет разбивки по вахтам (группам).</div>';
+  const tot = [0, 0, 0, 0], cnt = [0, 0, 0, 0];
+  [["B", 0], ["B", 1], ["A", 2], ["A", 3]].forEach(([g, i]) => { const sh = i % 2 ? SH_N : SH_D;
+    Object.keys(G[g]).forEach(k => { if (k.split("|")[1] !== sh) return; const f = G[g][k].fact; if (f > 0) tot[i] += f; }); });
+  // число смен и средний объём смены: смена относится к вахте с большей вывозкой (при пересменке на одной технике факт делится между двумя вахтами)
+  const full = [0, 0, 0, 0]; Object.keys(D).forEach(k => { if (!(D[k].fact > 0)) return; const i = shiftSeries(k, k.split("|")[1]); cnt[i]++; full[i] += D[k].fact; });
+  const sumAll = tot[0] + tot[1] + tot[2] + tot[3]; if (!(sumAll > 0)) return "";
+  let dAll = 0; Object.keys(D).forEach(k => { dAll += D[k].fact; });
+  const rest = dAll - sumAll;
+  const max = Math.max.apply(null, tot), step = Math.pow(10, Math.floor(Math.log10(max))); let top = Math.ceil(max * 1.12 / step) * step; if (top / step > 5) top = Math.ceil(max * 1.12 / (step * 2)) * step * 2;
+  const W = 420, H = 300, L = 56, B = 52, T = 22, pw = W - L - 10, ph = H - B - T, gw = pw / 4, bw = Math.min(56, gw - 16), y = v => T + ph - v / top * ph;
+  let g = '<svg viewBox="0 0 ' + W + " " + H + '" width="' + W + '" height="' + H + '" style="max-width:100%;height:auto;font-family:inherit">';
+  for (let i = 0; i <= 5; i++) { const v = top / 5 * i; g += '<line x1="' + L + '" x2="' + (W - 10) + '" y1="' + y(v) + '" y2="' + y(v) + '" stroke="#d6dbe4"/><text x="' + (L - 6) + '" y="' + (y(v) + 4) + '" text-anchor="end" font-size="11" fill="#667085">' + fmtT(v / 1000) + " тыс</text>"; }
+  SERIES4.forEach((q, i) => { const cx = L + gw * i + gw / 2;
+    g += "<g><title>" + q.n + ": " + fmtT(tot[i]) + " т, смен " + cnt[i] + ", в среднем " + (cnt[i] ? fmtT(full[i] / cnt[i]) : "—") + " т, доля " + (tot[i] / sumAll * 100).toFixed(1).replace(".", ",") + ' %</title><rect x="' + (cx - bw / 2) + '" y="' + y(tot[i]) + '" width="' + bw + '" height="' + (T + ph - y(tot[i])) + '" fill="' + q.col + '" rx="3"/>' +
+      '<text x="' + cx + '" y="' + (y(tot[i]) - 5) + '" text-anchor="middle" font-size="11" font-weight="600" fill="#1f2937">' + fmtT(tot[i]) + '</text><text x="' + cx + '" y="' + (H - B + 15) + '" text-anchor="middle" font-size="11" fill="#475467">' + q.n.split(", ")[0] + '</text><text x="' + cx + '" y="' + (H - B + 29) + '" text-anchor="middle" font-size="11" fill="#475467">' + q.n.split(", ")[1] + " · " + (tot[i] / sumAll * 100).toFixed(0) + ' %</text></g>'; });
+  g += '<line x1="' + L + '" x2="' + (W - 10) + '" y1="' + (T + ph) + '" y2="' + (T + ph) + '" stroke="#98A2B3"/></svg>';
+  const o = tot.map((t, i) => i).sort((a, b) => tot[b] - tot[a]);
+  return '<div><div class="sub" style="margin-bottom:4px">Вывезено за месяц по четырём сменам, т</div>' + g +
+    '<div class="sub" style="max-width:420px;margin-top:4px">Больше всех: <b>' + SERIES4[o[0]].n + "</b> (" + fmtT(tot[o[0]]) + " т), меньше всех: " + SERIES4[o[3]].n + " (" + fmtT(tot[o[3]]) + " т). Смен: " + cnt.join(" / ") + ". Среднее за смену: " + full.map((t, i) => cnt[i] ? fmtT(t / cnt[i]) : "—").join(" / ") + " т. Суммы столбцов считаются по факту каждой вахты (в смену пересменки на одной технике объём делится между двумя вахтами)." +
+    (Math.abs(rest) > 1 ? " Не отнесено к вахте: " + fmtT(rest) + " т (техника без вахты в плане)." : "") + "</div></div>";
+}
 // Аналитика месяца: какая смена вывезла больше + гистограмма распределения тоннажа смен (день / ночь)
 function shiftAnalytics(dates, D) {
-  const vD = [], vN = [], pairs = [];
+  const vD = [], vN = [], pairs = [], v4 = [[], [], [], []], G4 = !!(RES && RES.grp);
   dates.forEach(d => { const a = D[d + "|" + SH_D], b = D[d + "|" + SH_N]; const fa = a && a.fact > 0 ? a.fact : null, fb = b && b.fact > 0 ? b.fact : null;
-    if (fa !== null) vD.push(fa); if (fb !== null) vN.push(fb); if (fa !== null && fb !== null) pairs.push([d, fa, fb]); });
+    if (fa !== null) { vD.push(fa); v4[shiftSeries(d + "|" + SH_D, SH_D)].push(fa); } if (fb !== null) { vN.push(fb); v4[shiftSeries(d + "|" + SH_N, SH_N)].push(fb); } if (fa !== null && fb !== null) pairs.push([d, fa, fb]); });
   if (!vD.length || !vN.length) return "";
   const sum = a => a.reduce((x, y) => x + y, 0), mean = a => sum(a) / a.length;
   const med = a => { const b = a.slice().sort((x, y) => x - y), n = b.length; return n % 2 ? b[(n - 1) / 2] : (b[n / 2 - 1] + b[n / 2]) / 2; };
@@ -1519,12 +1556,14 @@ function shiftAnalytics(dates, D) {
   const b0 = Math.floor(lo / bs) * bs, nb = Math.max(1, Math.ceil((hi - b0) / bs + 1e-9)), cD = new Array(nb).fill(0), cN = new Array(nb).fill(0);
   const bi = v => Math.min(nb - 1, Math.floor((v - b0) / bs));
   vD.forEach(v => cD[bi(v)]++); vN.forEach(v => cN[bi(v)]++);
-  const cm = Math.max.apply(null, cD.concat(cN)) || 1, ct = cm <= 5 ? cm : Math.ceil(cm / 2) * 2;
-  const W = 520, H = 300, L = 40, B = 52, T = 14, pw = W - L - 10, ph = H - B - T, gw = pw / nb, bw = Math.max(6, Math.min(26, gw / 2 - 3)), y = v => T + ph - v / ct * ph;
+  const HS = G4 ? SERIES4.map((q, i) => ({ col: q.col, nm: q.n, c: (() => { const c = new Array(nb).fill(0); v4[i].forEach(v => c[bi(v)]++); return c; })() }))
+    : [{ col: "#F59E0B", nm: "день", c: cD }, { col: "#1F2A44", nm: "ночь", c: cN }];
+  const cm = Math.max.apply(null, [].concat.apply([], HS.map(h => h.c))) || 1, ct = cm <= 5 ? cm : Math.ceil(cm / 2) * 2;
+  const W = 520, H = 300, L = 40, B = 52, T = 14, pw = W - L - 10, ph = H - B - T, gw = pw / nb, bw = Math.max(5, Math.min(26, (gw - 6) / HS.length)), y = v => T + ph - v / ct * ph;
   let g = '<svg viewBox="0 0 ' + W + " " + H + '" width="' + W + '" height="' + H + '" style="max-width:100%;height:auto;font-family:inherit">';
   for (let i = 0; i <= ct; i += Math.max(1, Math.round(ct / 5))) g += '<line x1="' + L + '" x2="' + (W - 10) + '" y1="' + y(i) + '" y2="' + y(i) + '" stroke="#d6dbe4"/><text x="' + (L - 6) + '" y="' + (y(i) + 4) + '" text-anchor="end" font-size="11" fill="#667085">' + i + "</text>";
   for (let i = 0; i < nb; i++) { const cx = L + gw * i + gw / 2, a = b0 + bs * i, b = a + bs;
-    [[cD[i], -bw - 1, "#F59E0B", "день"], [cN[i], 1, "#1F2A44", "ночь"]].forEach(([c, dx, col, nm]) => { if (!c) return;
+    HS.forEach((h, j) => { const c = h.c[i], dx = (j - HS.length / 2) * bw + (j - (HS.length - 1) / 2) * 1, col = h.col, nm = h.nm; if (!c) return;
       g += "<g><title>" + fmtT(a) + "–" + fmtT(b) + " т, " + nm + ": смен " + c + "</title><rect x=\"" + (cx + dx) + '" y="' + y(c) + '" width="' + bw + '" height="' + (T + ph - y(c)) + '" fill="' + col + '" rx="2"/><text x="' + (cx + dx + bw / 2) + '" y="' + (y(c) - 3) + '" text-anchor="middle" font-size="10" fill="#475467">' + c + "</text></g>"; });
     g += '<text x="' + cx + '" y="' + (H - B + 14) + '" text-anchor="middle" font-size="10" fill="#475467">' + Math.round(a / 1000 * 10) / 10 + "–" + Math.round(b / 1000 * 10) / 10 + "</text>"; }
   g += '<line x1="' + L + '" x2="' + (W - 10) + '" y1="' + (T + ph) + '" y2="' + (T + ph) + '" stroke="#98A2B3"/><text x="' + (L + pw / 2) + '" y="' + (H - 6) + '" text-anchor="middle" font-size="11" fill="#667085">тонн за смену, тыс. т</text></svg>';
@@ -1535,8 +1574,7 @@ function shiftAnalytics(dates, D) {
     row("Разброс (станд. откл.), т", f1(sd(vD)), f1(sd(vN))) + row("Суток, где смена вывезла больше", nWinD + " из " + pairs.length, nWinN + " из " + pairs.length) + "</tbody></table>";
   const verdict = "<b>" + lead + " смена вывезла больше</b> на " + fmtT(leadT) + " т (" + (base ? (leadT / base * 100).toFixed(1).replace(".", ",") : "0") + " %). В среднем за смену: ночь " + f1(mean(vN)) + " т, день " + f1(mean(vD)) + " т. Ночь была выше дня в " + nWinN + " сутках из " + pairs.length + ", день выше ночи в " + nWinD + ". Рекорд дня: " + fmtD(bestD[0]) + ", " + f1(bestD[1]) + " т; рекорд ночи: " + fmtD(bestN[0]) + ", " + f1(bestN[2]) + " т.";
   return '<h3 style="font-size:14px;margin:18px 0 8px">Итоги месяца по сменам</h3><div style="font-size:13px;margin-bottom:10px">' + verdict + "</div>" +
-    '<div style="display:flex;flex-wrap:wrap;gap:24px;align-items:flex-start"><div style="min-width:320px">' + tbl + '</div><div><div class="sub" style="margin-bottom:4px">Гистограмма: число смен по диапазону тоннажа (шаг ' + fmtT(bs) + ' т)</div>' + g +
-    '</div></div><div class="sub" style="margin-top:6px">Гистограмма показывает, как распределены смены по объёму вывозки: чем правее столбцы цвета смены, тем выше её типичный объём. Если ночные столбцы сдвинуты вправо относительно дневных, ночь стабильно вывозит больше.</div>';
+    '<div style="display:flex;flex-wrap:wrap;gap:24px;align-items:flex-start"><div style="min-width:320px">' + tbl + '</div><div><div class="sub" style="margin-bottom:4px">Гистограмма: число смен по диапазону тоннажа (шаг ' + fmtT(bs) + ' т)</div>' + g + '</div>' + shift4Chart(D) + '</div><div class="sub" style="margin-top:6px">Гистограмма показывает, как распределены смены по объёму вывозки: чем правее столбцы цвета смены, тем выше её типичный объём. Если ночные столбцы сдвинуты вправо относительно дневных, ночь стабильно вывозит больше.</div>';
 }
 function renderDowntime() {
   if (!Object.keys(STAT.shifts).length) return '<div class="empty">Статусы техники не загружены. Загрузите книгу выгрузки Hexagon с листом «Статуса».</div>';
