@@ -73,10 +73,10 @@ tr.miss td { background:var(--redbg); }
       <button class="btn btn-gold" id="btnLoad">Обновить</button>
     </div>
     <div class="tabs" id="tabs">
-      <div class="tab on" data-t="sum">Сводка</div><div class="tab" data-t="shifts">Смены</div><div class="tab" data-t="tools">Инструмент</div><div class="tab" data-t="crew">Буровики</div><div class="tab" data-t="insp">Осмотры</div><div class="tab" data-t="journal">Журнал (выгрузка)</div>
+      <div class="tab on" data-t="sum">Сводка</div><div class="tab" data-t="shifts">Смены</div><div class="tab" data-t="tools">Инструмент</div><div class="tab" data-t="crew">Буровики</div><div class="tab" data-t="insp">Осмотры</div><div class="tab" data-t="kpi">KPI</div><div class="tab" data-t="journal">Журнал (выгрузка)</div>
     </div>
     <div id="msg"></div>
-    <div id="v-sum"></div><div id="v-shifts" class="hidden"></div><div id="v-tools" class="hidden"></div><div id="v-crew" class="hidden"></div><div id="v-insp" class="hidden"></div><div id="v-journal" class="hidden"></div>
+    <div id="v-sum"></div><div id="v-shifts" class="hidden"></div><div id="v-tools" class="hidden"></div><div id="v-crew" class="hidden"></div><div id="v-insp" class="hidden"></div><div id="v-kpi" class="hidden"></div><div id="v-journal" class="hidden"></div>
   </div>
 </div>
 
@@ -192,14 +192,15 @@ try { JREPL = JSON.parse(localStorage.getItem("bvr.jrepl.v1") || "[]"); } catch 
 function saveJrows() { try { localStorage.setItem("bvr.jrepl.v1", JSON.stringify(JREPL)); } catch (e) {} saveJrows2(); }
 function saveJrows2() { try { localStorage.setItem("bvr.jrows.v1", JSON.stringify(JROWS)); } catch (e) { msg("Журнал загружен, но не поместился в память браузера: после обновления страницы его нужно загрузить снова.", "err"); } }
 // Смены от буровиков + строки журнала, которых нет среди смен от буровиков (за выбранный период)
-function allShifts() {
-  const from = $("fFrom").value, to = $("fTo").value, have = {};
-  SHIFTS.forEach(s => { have[s.equipmentId + "|" + s.date + "|" + s.smena] = 1; });
-  const jr = JROWS.filter(r => r.date >= from && r.date <= to && !have[r.rig + "|" + r.date + "|" + r.smena]).map(r => ({
+function allShifts() { return mergeSys(SHIFTS, JROWS, $("fFrom").value, $("fTo").value); }
+function mergeSys(sys, jrows, from, to) {
+  const have = {};
+  sys.forEach(s => { have[s.equipmentId + "|" + s.date + "|" + s.smena] = 1; });
+  const jr = jrows.filter(r => r.date >= from && r.date <= to && !have[r.rig + "|" + r.date + "|" + r.smena]).map(r => ({
     shiftId: "j|" + r.rig + "|" + r.date + "|" + r.smena, source: "journal", equipmentId: r.rig, date: r.date, smena: r.smena,
     empName: r.op, empId: "", diameter: r.diam, blocks: r.block, blockList: [], holesCount: r.f, redrillCount: r.g,
     metersDrilled: r.h, metersRedrill: r.i, drillMinutes: r.j, downtimeMinutes: 0, holes: [], downtimes: [], replacements: [], note: "" }));
-  return SHIFTS.concat(jr);
+  return sys.concat(jr);
 }
 function saveSeeds() { try { localStorage.setItem(CFG.SEED_KEY, JSON.stringify(SEEDS)); } catch (e) {} }
 
@@ -224,7 +225,7 @@ async function init() {
   ["fRig", "fSmena"].forEach(id => $(id).onchange = render);
   document.querySelectorAll("#tabs .tab").forEach(t => t.onclick = () => {
     curTab = t.dataset.t; document.querySelectorAll("#tabs .tab").forEach(x => x.classList.toggle("on", x === t));
-    ["sum", "shifts", "tools", "crew", "insp", "journal"].forEach(k => $("v-" + k).classList.toggle("hidden", k !== curTab)); render();
+    ["sum", "shifts", "tools", "crew", "insp", "kpi", "journal"].forEach(k => $("v-" + k).classList.toggle("hidden", k !== curTab)); render();
   });
   try { EQUIP = await fetch(CFG.SHEET_URL + "?action=getEquipment").then(r => r.json()); } catch (e) { EQUIP = []; }
   await load();
@@ -268,8 +269,198 @@ function totals(list) {
   return t;
 }
 
+// ═════════ KPI буровиков ═════════
+// План — из книги KPI буровиков (лист «План машинистов», как в панели диспетчера). Факт — смены БВР (форма буровика + загруженный журнал).
+// Учёт по суткам станка: суточный план станка (сумма по всем строкам плана станка за дату) и суточный факт станка (день + ночь)
+// делятся поровну между машинистами, стоящими в плане на эти сутки. Сутки = дата начала смены (ночь 1 + день 2).
+// KPI-LOGIC-BEGIN
+const KP_KEY = "bvr.kpi.v1", KP_THR = "bvr.kpi.thr";
+function kpYmd(v) {
+  if (v instanceof Date && !isNaN(v)) return new Date(v.getTime() + 12 * 3600 * 1000).toISOString().slice(0, 10);
+  if (typeof v === "number" && v > 20000 && v < 80000) return new Date(Math.round((v - 25569) * 864e5)).toISOString().slice(0, 10);
+  if (typeof v === "string") {
+    let m = v.match(/(\d{4})-(\d{2})-(\d{2})/); if (m) return m[1] + "-" + m[2] + "-" + m[3];
+    m = v.match(/(\d{1,2})\.(\d{1,2})\.(\d{4})/); if (m) return m[3] + "-" + ("0" + m[2]).slice(-2) + "-" + ("0" + m[1]).slice(-2);
+  }
+  return null;
+}
+const kpNum = v => { const n = typeof v === "number" ? v : parseFloat(String(v == null ? "" : v).replace(",", ".")); return isFinite(n) ? n : 0; };
+const kpStr = v => String(v == null ? "" : v).trim();
+const kpName = v => kpStr(v).replace(/\s*\((уволен|уволена)\)\s*$/i, "");   // «Фамилия Имя (уволен)» в плане = тот же человек
+const kpVac = fio => !fio || /^вакансия/i.test(fio);
+const kpPk = n => { const p = String(n || "").trim().toLowerCase().replace(/\./g, " ").split(/\s+/).filter(Boolean); return p.length ? p[0] + "|" + (p[1] ? p[1][0] : "") : ""; };
+const kpRig = r => String(r || "").replace(/\D+/g, "");   // DR702 / «702» -> 702
+
+// plan: [[date, rig, vahta, shift, fio, hours, planM]]
+function kpParsePlan(planAoa, setAoa) {
+  const plan = [];
+  (planAoa || []).slice(3).forEach(r => { const d = kpYmd(r[0]); if (!d) return; plan.push([d, kpStr(r[2]), kpStr(r[5]), kpStr(r[6]), kpName(r[7]), kpNum(r[8]), kpNum(r[11])]); });
+  let month = setAoa && setAoa[3] ? kpYmd(setAoa[3][1]) : null; month = month ? month.slice(0, 7) : null;
+  if (!month && plan.length) month = plan[0][0].slice(0, 7);
+  return { month, plan };
+}
+
+// shifts: смены БВР {equipmentId,date,smena,empName,metersDrilled,metersRedrill}
+function kpCompute(plan, shifts) {
+  const days = {}; let pmin = "9999", pmax = "";
+  plan.forEach(p => {
+    const [d, rig, vh, sh, fio, hrs, pm] = p; if (d < pmin) pmin = d; if (d > pmax) pmax = d;
+    const k = kpRig(rig) + "|" + d;
+    const o = days[k] || (days[k] = { rig: kpRig(rig), rigName: rig, date: d, P: 0, F: 0, n: 0, own: {}, names: {}, people: [], vacPlan: 0 });
+    o.P += pm;
+    if (kpVac(fio)) { o.vacPlan += pm; return; }
+    if ((pm > 0 || hrs > 0) && !o.people.some(x => x.fio === fio)) o.people.push({ fio, vahta: vh, shift: sh });
+  });
+  const noPlan = {}; let cut = "";
+  (shifts || []).forEach(s => {
+    const d = s.date; if (!d || d < pmin || d > pmax) return;
+    const m = (+s.metersDrilled || 0) + (+s.metersRedrill || 0);
+    const k = kpRig(s.equipmentId) + "|" + d, o = days[k];
+    if (!o) { if (m > 0) { const q = noPlan[k] || (noPlan[k] = { rig: s.equipmentId, date: d, m: 0 }); q.m += m; if (d > cut) cut = d; } return; }
+    o.F += m; o.n++; const pk = kpPk(s.empName); if (pk) { o.own[pk] = (o.own[pk] || 0) + m; o.names[pk] = s.empName; }
+    if (m > 0 && d > cut) cut = d;
+  });
+  const W = {}, R = {}, control = { vacTotal: 0, noPeopleFact: 0, noPlanFact: Object.values(noPlan), noFact: [], offPlan: [] };
+  Object.keys(days).sort().forEach(k => {
+    const o = days[k], past = cut && o.date <= cut, N = o.people.length;
+    const r = R[o.rig] || (R[o.rig] = { rig: o.rigName, plan: 0, planCut: 0, fact: 0 });
+    r.plan += o.P; if (past) { r.planCut += o.P; r.fact += o.F; }
+    if (past && o.P > 0 && !(o.F > 0)) control.noFact.push({ rig: o.rigName, date: o.date, plan: o.P });
+    if (!N) { control.vacTotal += o.P; if (o.F > 0) control.noPeopleFact += o.F; return; }
+    const pks = o.people.map(p => kpPk(p.fio));
+    Object.keys(o.own).forEach(pk => { if (pks.indexOf(pk) < 0 && o.own[pk] > 0) control.offPlan.push({ rig: o.rigName, date: o.date, name: o.names[pk], m: o.own[pk] }); });
+    o.people.forEach(p => {
+      const w = W[p.fio] || (W[p.fio] = { fio: p.fio, vahta: p.vahta, shift: p.shift, rigs: {}, planM: 0, planCut: 0, fact: 0, own: 0, left: 0, daysLeft: 0, days: [] });
+      const share = o.P / N, fs = past ? o.F / N : 0, own = o.own[kpPk(p.fio)] || 0;
+      w.planM += share; w.rigs[o.rigName] = 1;
+      if (past) { w.planCut += share; w.fact += fs; w.own += own; } else if (share > 0) { w.daysLeft++; w.left += share; }
+      w.days.push({ date: o.date, rig: o.rigName, dayP: o.P, dayF: o.F, n: N, plan: share, fact: fs, own, past: !!past, partners: o.people.filter(x => x.fio !== p.fio).map(x => x.fio) });
+    });
+  });
+  const rows = Object.values(W).map(w => {
+    const rem = w.planM - w.fact;
+    return Object.assign(w, { rigS: Object.keys(w.rigs).join(" "), diff: w.fact - w.planCut, pct: w.planCut > 0 ? w.fact / w.planCut * 100 : null, pctM: w.planM > 0 ? w.fact / w.planM * 100 : null, rem, need: w.daysLeft > 0 ? Math.max(0, rem) / w.daysLeft : null });
+  }).sort((a, b) => a.fio.localeCompare(b.fio, "ru"));
+  const rigs = Object.values(R).map(r => Object.assign(r, { diff: r.fact - r.planCut, pct: r.planCut > 0 ? r.fact / r.planCut * 100 : null })).sort((a, b) => kpRig(a.rig).localeCompare(kpRig(b.rig)));
+  const tot = rows.reduce((t, w) => { t.planM += w.planM; t.planCut += w.planCut; t.fact += w.fact; return t; }, { planM: 0, planCut: 0, fact: 0 });
+  return { cut, pmin, pmax, rows, rigs, tot, control };
+}
+// KPI-LOGIC-END
+
+let KPLAN = null, KSH = null, KOPEN = "", KBUSY = false;
+try { KPLAN = JSON.parse(localStorage.getItem(KP_KEY) || "null"); } catch (e) { KPLAN = null; }
+function kpThr() { let t = { g: 100, y: 90 }; try { const s = JSON.parse(localStorage.getItem(KP_THR) || "null"); if (s && s.g > 0 && s.y > 0) t = s; } catch (e) {} return t; }
+function kpBadge(p) {
+  if (p === null || p === undefined) return '<span class="tag g" style="background:#E2E8F0;color:#64748B">нет плана</span>';
+  const t = kpThr(), cls = p >= t.g ? "tag g" : p >= t.y ? "tag" : "tag r";
+  return '<span class="' + cls + '">' + fmt(p, 1) + " %</span>";
+}
+const kpSign = v => (v >= 0 ? "+" : "") + fmt(v, 1);
+
+function kpReadFile(file) {
+  const fr = new FileReader();
+  fr.onload = () => {
+    try {
+      const wb = XLSX.read(new Uint8Array(fr.result), { type: "array", sheets: ["План машинистов", "Настройки"] });
+      if (!wb.Sheets["План машинистов"]) throw new Error("в книге нет листа «План машинистов»");
+      const aoa = n => XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: true, defval: null });
+      const P = kpParsePlan(aoa("План машинистов"), wb.Sheets["Настройки"] ? aoa("Настройки") : []);
+      if (!P.plan.length) throw new Error("лист «План машинистов» не содержит строк с датой");
+      KPLAN = { month: P.month, file: file.name, at: Date.now(), plan: P.plan }; KSH = null;
+      try { localStorage.setItem(KP_KEY, JSON.stringify(KPLAN)); } catch (e) { msg("План загружен, но не поместился в память браузера: после обновления страницы его нужно загрузить снова.", "err"); }
+      if (curTab === "kpi") renderKpi();
+    } catch (e) { msg("План KPI не прочитан: " + e.message, "err"); }
+  };
+  fr.readAsArrayBuffer(file);
+}
+async function kpFetch(force) {
+  if (!KPLAN || KBUSY) return;
+  if (!force && KSH && KSH.month === KPLAN.month && Date.now() - KSH.at < 180000) return;
+  const ds = KPLAN.plan.map(p => p[0]).sort(), from = ds[0], to = ds[ds.length - 1];
+  KBUSY = true; renderKpi();
+  try {
+    const data = await fetch(CFG.SHEET_URL + "?action=getDrillShifts&from=" + from + "&to=" + to).then(r => r.json());
+    if (!Array.isArray(data)) throw new Error(data && data.error ? data.error : "ответ сервера не распознан");
+    KSH = { month: KPLAN.month, at: Date.now(), list: data.map(s => Object.assign({}, s, { smena: Number(s.smena) })) };
+    msg("");
+  } catch (e) { msg("Не удалось загрузить смены для KPI: " + e.message, "err"); KSH = KSH || { month: KPLAN.month, at: 0, list: [] }; }
+  KBUSY = false; if (curTab === "kpi") renderKpi();
+}
+function kpFacts() {
+  const ds = KPLAN.plan.map(p => p[0]).sort();
+  return mergeSys(KSH ? KSH.list : [], JROWS, ds[0], ds[ds.length - 1]);
+}
+function kpClear() {
+  if (!confirm("Удалить загруженный план KPI из браузера?")) return;
+  KPLAN = null; KSH = null; KOPEN = ""; try { localStorage.removeItem(KP_KEY); } catch (e) {}
+  renderKpi();
+}
+function kpSetThr() {
+  const g = +$("kpG").value, y = +$("kpY").value;
+  if (g > 0 && y > 0) { try { localStorage.setItem(KP_THR, JSON.stringify({ g, y })); } catch (e) {} }
+  renderKpi();
+}
+function kpExport() {
+  if (!KPLAN || typeof XLSX === "undefined") return;
+  const C = kpCompute(KPLAN.plan, kpFacts()), wb = XLSX.utils.book_new();
+  const a = [["ФИО", "Группа", "Смена", "Станок", "План на срез, п.м.", "Факт, п.м.", "Отклонение, п.м.", "Факт/план, %", "Личные метры, п.м.", "План месяца, п.м.", "% месяца", "Осталось до плана, п.м.", "Суток осталось", "Нужно в сутки, п.м."]]
+    .concat(C.rows.map(w => [w.fio, w.vahta, w.shift, w.rigS, r1(w.planCut), r1(w.fact), r1(w.diff), w.pct === null ? "" : r1(w.pct), r1(w.own), r1(w.planM), w.pctM === null ? "" : r1(w.pctM), w.planM > 0 ? r1(Math.max(0, w.rem)) : "", w.daysLeft || "", w.need === null ? "" : r1(w.need)]));
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(a), "Буровики");
+  const d = [["ФИО", "Дата", "Станок", "План станка за сутки, п.м.", "Факт станка за сутки, п.м.", "Машинистов в сутках", "План доли, п.м.", "Факт доли, п.м.", "Факт/план, %", "Личные метры, п.м.", "Напарник"]];
+  C.rows.forEach(w => w.days.slice().sort((x, y) => x.date < y.date ? -1 : 1).forEach(x => d.push([w.fio, ddmmyyyy(x.date), x.rig, r1(x.dayP), x.past ? r1(x.dayF) : "", x.n, r1(x.plan), x.past ? r1(x.fact) : "", x.past && x.plan > 0 ? r1(x.fact / x.plan * 100) : "", x.past ? r1(x.own) : "", x.partners.join(", ")])));
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(d), "Сутки");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Станок", "План на срез, п.м.", "Факт, п.м.", "Отклонение, п.м.", "Факт/план, %", "План месяца, п.м."]].concat(C.rigs.map(r => [r.rig, r1(r.planCut), r1(r.fact), r1(r.diff), r.pct === null ? "" : r1(r.pct), r1(r.plan)]))), "Станки");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Месяц", KPLAN.month], ["Срез (последняя дата факта)", C.cut], ["Книга плана", KPLAN.file], ["Правило", "План и факт станка за сутки делятся поровну между машинистами суток"]]), "Параметры");
+  XLSX.writeFile(wb, "KPI_бурение_" + KPLAN.month + ".xlsx");
+}
+
+function renderKpi() {
+  const host = $("v-kpi");
+  const up = '<input type="file" id="kpFile" accept=".xlsx,.xlsm,.xls" style="display:none"><button class="btn btn-gold" onclick="$(\'kpFile\').click()">' + (KPLAN ? "Загрузить другой план" : "Загрузить план KPI") + "</button>";
+  if (!KPLAN) {
+    host.innerHTML = '<div class="card"><h3>KPI буровиков</h3><div class="note">Загрузите ту же книгу KPI буровиков, что и в панели диспетчера (нужен лист «План машинистов», для месяца — «Настройки»). План хранится в этом браузере. Факт берётся из смен, которые сдают буровики, и из загруженного журнала.</div>' + up + "</div>";
+    $("kpFile").onchange = e => { if (e.target.files[0]) kpReadFile(e.target.files[0]); };
+    return;
+  }
+  if (!KSH && !KBUSY) { kpFetch(); }
+  if (!KSH) { host.innerHTML = '<div class="card"><div class="note">Загрузка смен за месяц…</div></div>'; return; }
+  const C = kpCompute(KPLAN.plan, kpFacts()), T = C.tot, thr = kpThr(), p = T.planCut > 0 ? T.fact / T.planCut * 100 : null;
+  let h = '<div class="card"><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">' + up +
+    '<button class="btn" onclick="kpFetch(true)"' + (KBUSY ? " disabled" : "") + '>' + (KBUSY ? "Загрузка…" : "Обновить смены") + '</button><button class="btn" onclick="kpExport()">Excel</button><button class="btn" onclick="kpClear()">Удалить план</button>' +
+    '<span class="note" style="margin-left:auto">Цвет: зелёный от <input id="kpG" type="number" value="' + thr.g + '" style="width:56px" onchange="kpSetThr()"> %, жёлтый от <input id="kpY" type="number" value="' + thr.y + '" style="width:56px" onchange="kpSetThr()"> %</span></div>' +
+    '<div class="note">План «' + esc(KPLAN.file) + '», месяц ' + esc(KPLAN.month) + '. Учёт по суткам станка: план и факт станка за сутки (день + ночь) делятся поровну между машинистами суток. Факт — обурено + перебур. Сутки среза входят в план целиком.</div></div>';
+  h += '<div class="kpis">' +
+    '<div class="kpi"><span>Срез: последняя дата факта</span><b>' + (C.cut ? ddmmyyyy(C.cut) : "—") + "</b></div>" +
+    '<div class="kpi"><span>План на срез, п.м.</span><b>' + fmt(T.planCut, 1) + "</b></div>" +
+    '<div class="kpi"><span>Факт, п.м.</span><b>' + fmt(T.fact, 1) + "</b></div>" +
+    '<div class="kpi"><span>Факт / план</span><b>' + (p === null ? "—" : fmt(p, 1) + " %") + "</b></div>" +
+    '<div class="kpi"><span>План месяца, п.м.</span><b>' + fmt(T.planM, 1) + "</b><small>осталось " + fmt(Math.max(0, T.planM - T.fact), 1) + "</small></div></div>";
+  if (!C.cut) h += '<div class="warnbox">В загруженных сменах нет метров за даты плана — факт пока нулевой.</div>';
+  h += '<div class="card"><h3>Буровики</h3><div class="scroll"><table><tr><th>ФИО</th><th>Станок</th><th>Группа</th><th>Смена</th><th class="r">План на срез, п.м.</th><th class="r">Факт, п.м.</th><th class="r">Откл., п.м.</th><th>Факт / план</th><th class="r">Личные метры</th><th class="r">План месяца</th><th class="r">% месяца</th><th class="r">Осталось</th><th class="r">Суток</th><th class="r">Нужно в сутки</th></tr>';
+  h += C.rows.length ? C.rows.map(w => '<tr class="click" data-fio="' + esc(w.fio) + '"><td><b>' + esc(w.fio) + "</b></td><td>" + esc(w.rigS) + "</td><td>" + esc(w.vahta) + "</td><td>" + esc(w.shift) + '</td><td class="r">' + fmt(w.planCut, 1) + '</td><td class="r"><b>' + fmt(w.fact, 1) + '</b></td><td class="r">' + kpSign(w.diff) + "</td><td>" + kpBadge(w.pct) + '</td><td class="r">' + fmt(w.own, 1) + '</td><td class="r">' + fmt(w.planM, 1) + '</td><td class="r">' + (w.pctM === null ? "" : fmt(w.pctM, 1) + " %") + '</td><td class="r">' + (w.planM > 0 ? fmt(Math.max(0, w.rem), 1) : "") + '</td><td class="r">' + (w.daysLeft || "") + '</td><td class="r">' + (w.need === null ? "" : fmt(w.need, 1)) + "</td></tr>").join("") : '<tr><td colspan="14" style="color:#64748B">В плане нет машинистов</td></tr>';
+  h += '<tr><td><b>Итого</b></td><td></td><td></td><td></td><td class="r"><b>' + fmt(T.planCut, 1) + '</b></td><td class="r"><b>' + fmt(T.fact, 1) + '</b></td><td class="r">' + kpSign(T.fact - T.planCut) + "</td><td>" + kpBadge(p) + '</td><td></td><td class="r"><b>' + fmt(T.planM, 1) + "</b></td><td></td><td></td><td></td><td></td></tr></table></div>";
+  h += '<div class="note">«Личные метры» — сколько буровик обурил сам (по смене, которую он сдал); справочно, в % не входит. Нажмите на строку — разбивка по суткам.</div></div>';
+  const sel = C.rows.find(w => w.fio === KOPEN);
+  if (sel) {
+    h += '<div class="card"><h3>Сутки: ' + esc(sel.fio) + '</h3><div class="scroll"><table><tr><th>Дата</th><th>Станок</th><th class="r">План станка</th><th class="r">Факт станка</th><th class="r">Машинистов</th><th class="r">План доли</th><th class="r">Факт доли</th><th>Факт / план</th><th class="r">Личные метры</th><th>Напарник</th></tr>' +
+      sel.days.slice().sort((a, b) => a.date < b.date ? -1 : 1).map(x => "<tr><td>" + ddmmyyyy(x.date) + "</td><td>" + esc(x.rig) + '</td><td class="r">' + fmt(x.dayP, 1) + '</td><td class="r">' + (x.past ? fmt(x.dayF, 1) : "") + '</td><td class="r">' + x.n + '</td><td class="r">' + fmt(x.plan, 1) + '</td><td class="r">' + (x.past ? fmt(x.fact, 1) : "") + "</td><td>" + (x.past && x.plan > 0 ? kpBadge(x.fact / x.plan * 100) : "") + '</td><td class="r">' + (x.past ? fmt(x.own, 1) : "") + "</td><td>" + esc(x.partners.join(", ")) + "</td></tr>").join("") + "</table></div></div>";
+  }
+  h += '<div class="card"><h3>По станкам</h3><table><tr><th>Станок</th><th class="r">План на срез, п.м.</th><th class="r">Факт, п.м.</th><th class="r">Откл., п.м.</th><th>Факт / план</th><th class="r">План месяца</th></tr>' +
+    C.rigs.map(r => "<tr><td><b>" + esc(r.rig) + '</b></td><td class="r">' + fmt(r.planCut, 1) + '</td><td class="r">' + fmt(r.fact, 1) + '</td><td class="r">' + kpSign(r.diff) + "</td><td>" + kpBadge(r.pct) + '</td><td class="r">' + fmt(r.plan, 1) + "</td></tr>").join("") + "</table></div>";
+  const c = C.control, ctl = [];
+  if (c.vacTotal > 0) ctl.push("План на сутки без машинистов (одни вакансии), не распределён: " + fmt(c.vacTotal, 1) + " п.м.");
+  if (c.noPeopleFact > 0) ctl.push("Факт на сутках, где в плане нет машинистов: " + fmt(c.noPeopleFact, 1) + " п.м.");
+  if (c.noPlanFact.length) ctl.push("Факт на станках и датах без плана: " + c.noPlanFact.slice(0, 12).map(x => esc(x.rig) + " " + ddmm(x.date) + " — " + fmt(x.m, 1) + " м").join("; ") + (c.noPlanFact.length > 12 ? " и ещё " + (c.noPlanFact.length - 12) : ""));
+  if (c.offPlan.length) ctl.push("Работали не по плану (метры идут в факт суток, но не личным): " + c.offPlan.slice(0, 12).map(x => esc(x.name) + " · " + esc(x.rig) + " " + ddmm(x.date) + " — " + fmt(x.m, 1) + " м").join("; ") + (c.offPlan.length > 12 ? " и ещё " + (c.offPlan.length - 12) : ""));
+  if (c.noFact.length) ctl.push("Сутки с планом до среза, но без факта (смены не сданы или станок стоял): " + c.noFact.length + " — " + c.noFact.slice(0, 15).map(x => esc(x.rig) + " " + ddmm(x.date)).join(", ") + (c.noFact.length > 15 ? " …" : ""));
+  h += '<div class="card"><h3>Контроль данных</h3>' + (ctl.length ? ctl.map(t => '<div class="note">• ' + t + "</div>").join("") : '<div class="note">Расхождений нет</div>') + "</div>";
+  host.innerHTML = h;
+  $("kpFile").onchange = e => { if (e.target.files[0]) kpReadFile(e.target.files[0]); };
+  host.querySelectorAll("tr.click").forEach(tr => tr.onclick = () => { KOPEN = KOPEN === tr.dataset.fio ? "" : tr.dataset.fio; renderKpi(); });
+}
+
 function render() {
-  if (curTab === "sum") renderSum(); else if (curTab === "shifts") renderShifts(); else if (curTab === "tools") renderTools(); else if (curTab === "crew") renderCrew(); else if (curTab === "insp") renderInsp(); else { renderJournal(); appendArchive(); }
+  if (curTab === "sum") renderSum(); else if (curTab === "shifts") renderShifts(); else if (curTab === "tools") renderTools(); else if (curTab === "crew") renderCrew(); else if (curTab === "insp") renderInsp(); else if (curTab === "kpi") renderKpi(); else { renderJournal(); appendArchive(); }
 }
 
 // ═════════ Сводка ═════════
