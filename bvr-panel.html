@@ -349,7 +349,7 @@ function kpCompute(plan, shifts) {
 
 let KPLAN = null, KSH = null, KOPEN = "", KBUSY = false;
 try { KPLAN = JSON.parse(localStorage.getItem(KP_KEY) || "null"); } catch (e) { KPLAN = null; }
-function kpThr() { let t = { g: 100, y: 90 }; try { const s = JSON.parse(localStorage.getItem(KP_THR) || "null"); if (s && s.g > 0 && s.y > 0) t = s; } catch (e) {} return t; }
+function kpThr() { let t = { g: 100, y: 80 }; try { const s = JSON.parse(localStorage.getItem(KP_THR) || "null"); if (s && s.g > 0 && s.y > 0) t = s; } catch (e) {} return t; }
 function kpBadge(p) {
   if (p === null || p === undefined) return '<span class="tag g" style="background:#E2E8F0;color:#64748B">нет плана</span>';
   const t = kpThr(), cls = p >= t.g ? "tag g" : p >= t.y ? "tag" : "tag r";
