@@ -73,10 +73,10 @@ tr.miss td { background:var(--redbg); }
       <button class="btn btn-gold" id="btnLoad">Обновить</button>
     </div>
     <div class="tabs" id="tabs">
-      <div class="tab on" data-t="sum">Сводка</div><div class="tab" data-t="shifts">Смены</div><div class="tab" data-t="tools">Инструмент</div><div class="tab" data-t="crew">Буровики</div><div class="tab" data-t="journal">Журнал (выгрузка)</div>
+      <div class="tab on" data-t="sum">Сводка</div><div class="tab" data-t="shifts">Смены</div><div class="tab" data-t="tools">Инструмент</div><div class="tab" data-t="crew">Буровики</div><div class="tab" data-t="insp">Осмотры</div><div class="tab" data-t="journal">Журнал (выгрузка)</div>
     </div>
     <div id="msg"></div>
-    <div id="v-sum"></div><div id="v-shifts" class="hidden"></div><div id="v-tools" class="hidden"></div><div id="v-crew" class="hidden"></div><div id="v-journal" class="hidden"></div>
+    <div id="v-sum"></div><div id="v-shifts" class="hidden"></div><div id="v-tools" class="hidden"></div><div id="v-crew" class="hidden"></div><div id="v-insp" class="hidden"></div><div id="v-journal" class="hidden"></div>
   </div>
 </div>
 
@@ -224,7 +224,7 @@ async function init() {
   ["fRig", "fSmena"].forEach(id => $(id).onchange = render);
   document.querySelectorAll("#tabs .tab").forEach(t => t.onclick = () => {
     curTab = t.dataset.t; document.querySelectorAll("#tabs .tab").forEach(x => x.classList.toggle("on", x === t));
-    ["sum", "shifts", "tools", "crew", "journal"].forEach(k => $("v-" + k).classList.toggle("hidden", k !== curTab)); render();
+    ["sum", "shifts", "tools", "crew", "insp", "journal"].forEach(k => $("v-" + k).classList.toggle("hidden", k !== curTab)); render();
   });
   try { EQUIP = await fetch(CFG.SHEET_URL + "?action=getEquipment").then(r => r.json()); } catch (e) { EQUIP = []; }
   await load();
@@ -269,7 +269,7 @@ function totals(list) {
 }
 
 function render() {
-  if (curTab === "sum") renderSum(); else if (curTab === "shifts") renderShifts(); else if (curTab === "tools") renderTools(); else if (curTab === "crew") renderCrew(); else { renderJournal(); appendArchive(); }
+  if (curTab === "sum") renderSum(); else if (curTab === "shifts") renderShifts(); else if (curTab === "tools") renderTools(); else if (curTab === "crew") renderCrew(); else if (curTab === "insp") renderInsp(); else { renderJournal(); appendArchive(); }
 }
 
 // ═════════ Сводка ═════════
@@ -481,12 +481,94 @@ function renderCrew() {
   });
 }
 
+// ═════════ Осмотры буровых станков (чек-листы целиком) ═════════
+// Данные: тот же лист «Чек-листы-Записи», что и в панели мастера; в панели БВР отбираются станки DR*.
+let INSP = null, INSP_KEY = "", inspOpen = "", inspBusy = false; const inspFull = {};
+const chkRu = st => st === "ok" ? "Исправно" : st === "defect" ? "Неисправно" : String(st == null ? "" : st);
+const atDate = at => ddmmyyyy(String(at).slice(0, 10)), atTime = at => String(at).slice(11, 16);
+async function fetchInsp(from, to, rig, light, recordId) {
+  const u = CFG.SHEET_URL + "?action=getDrillChecklists&from=" + from + "&to=" + to + (rig ? "&equipmentId=" + encodeURIComponent(rig) : "") + (light ? "&light=1" : "") + (recordId ? "&recordId=" + encodeURIComponent(recordId) : "");
+  const d = await fetch(u).then(r => r.json());
+  if (!d || !d.ok) throw new Error(d && d.error ? d.error : "бэкенд не обновлён (нет действия getDrillChecklists)");
+  return d.records || [];
+}
+async function renderInsp() {
+  const from = $("fFrom").value, to = $("fTo").value, rig = $("fRig").value, key = from + "|" + to + "|" + rig;
+  if (INSP_KEY !== key || !INSP) {
+    if (inspBusy) return; inspBusy = true;
+    $("v-insp").innerHTML = '<div class="card"><div class="note">Загрузка осмотров буровых за период (до 20 секунд)...</div></div>';
+    try { INSP = await fetchInsp(from, to, rig, true); INSP_KEY = key; }
+    catch (e) { inspBusy = false; INSP = null; $("v-insp").innerHTML = '<div class="card"><div class="warnbox">Не удалось загрузить осмотры: ' + esc(e.message) + '</div><button class="btn" id="btnInspRetry">Повторить</button></div>'; $("btnInspRetry").onclick = renderInsp; return; }
+    inspBusy = false;
+  }
+  const list = INSP, bad = list.filter(x => x.defects > 0).length;
+  let h = '<div class="card"><h3>Осмотры буровых станков</h3><div class="note">Период и станок берутся из фильтров вверху. Нажмите на осмотр, чтобы открыть его целиком. Осмотров: <b>' + list.length + "</b>, с неисправностями: <b>" + bad + "</b>.</div>" +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin:10px 0"><div><label style="display:block;font-size:11px;font-weight:700;color:#64748B;margin-bottom:3px">Дата для выгрузки</label><input type="date" id="inspDate" value="' + esc(to) + '"></div>' +
+    '<button class="btn btn-gold" id="btnInspDate">Скачать Excel за дату</button><button class="btn btn-dark" id="btnInspPeriod">Скачать Excel за период</button><button class="btn" id="btnInspReload">Обновить</button></div>' +
+    '<div class="scroll"><table><tr><th>Дата</th><th>Время</th><th>Станок</th><th>Оператор</th><th class="r">Пунктов</th><th class="r">Неисправн.</th><th class="r">Замечаний</th></tr>';
+  if (!list.length) h += '<tr><td colspan="7" style="color:#64748B">За период осмотров нет</td></tr>';
+  list.forEach(x => {
+    h += '<tr class="click' + (x.defects ? " miss" : "") + '" data-rid="' + esc(x.recordId) + '"><td>' + atDate(x.at) + "</td><td>" + atTime(x.at) + "</td><td><b>" + esc(x.equipmentId) + "</b></td><td>" + esc(x.empName) + '</td><td class="r">' + fmt(x.totalItems) + '</td><td class="r">' + (x.defects ? '<span class="tag r">' + fmt(x.defects) + "</span>" : "0") + '</td><td class="r">' + fmt(x.comments) + "</td></tr>";
+    if (inspOpen === x.recordId) {
+      const full = inspFull[x.recordId];
+      h += '<tr class="detail"><td colspan="7">' + (!full ? '<div class="note">Загрузка осмотра...</div>' : renderInspItems(full)) + "</td></tr>";
+    }
+  });
+  h += "</table></div></div>";
+  $("v-insp").innerHTML = h;
+  $("v-insp").querySelectorAll("tr.click").forEach(tr => tr.onclick = () => openInsp(tr.dataset.rid));
+  $("btnInspReload").onclick = () => { INSP = null; renderInsp(); };
+  $("btnInspDate").onclick = () => exportInsp($("inspDate").value, $("inspDate").value, rig, $("btnInspDate"));
+  $("btnInspPeriod").onclick = () => exportInsp(from, to, rig, $("btnInspPeriod"));
+}
+function renderInspItems(rec) {
+  const secs = {}, order = [];
+  rec.items.forEach(i => { const k = i.section || "Без раздела"; if (!secs[k]) { secs[k] = []; order.push(k); } secs[k].push(i); });
+  return '<div class="note"><b>' + esc(rec.equipmentId) + "</b>, " + esc(rec.empName) + (rec.empId ? " (" + esc(rec.empId) + ")" : "") + ", " + atDate(rec.at) + " " + atTime(rec.at) + ", пунктов: " + rec.items.length + "</div>" +
+    order.map(k => '<div style="margin:8px 0 2px;font-weight:800">' + esc(k) + "</div>" + secs[k].map(i => '<div style="padding:2px 0;font-size:13px">' + (i.status === "ok" ? '<span class="tag g">Исправно</span> ' : i.status === "defect" ? '<span class="tag r">Неисправно</span> ' : '<span class="tag">' + esc(chkRu(i.status)) + "</span> ") + esc(i.itemText) + (i.comment ? ' <i style="color:#B45309">— ' + esc(i.comment) + "</i>" : "") + "</div>").join("")).join("");
+}
+async function openInsp(id) {
+  if (inspOpen === id) { inspOpen = ""; renderInsp(); return; }
+  inspOpen = id; renderInsp();
+  if (inspFull[id]) return;
+  const rec = (INSP || []).find(x => x.recordId === id); if (!rec) return;
+  try { const r = await fetchInsp(rec.at.slice(0, 10), rec.at.slice(0, 10), rec.equipmentId, false, id); inspFull[id] = r[0] || rec; }
+  catch (e) { inspFull[id] = Object.assign({}, rec, { items: [{ section: "Ошибка", itemText: "Не удалось загрузить осмотр: " + e.message, status: "", comment: "" }] }); }
+  if (inspOpen === id) renderInsp();
+}
+async function exportInsp(from, to, rig, btn) {
+  if (!from || !to || from > to) { msg("Проверьте дату выгрузки", "err"); return; }
+  const label = btn.textContent; btn.disabled = true; btn.textContent = "Формирую файл...";
+  try {
+    const recs = await fetchInsp(from, to, rig, false);
+    if (!recs.length) { msg("За " + (from === to ? ddmmyyyy(from) : ddmmyyyy(from) + "–" + ddmmyyyy(to)) + " осмотров буровых нет."); return; }
+    recs.sort((a, b) => a.at < b.at ? -1 : a.at > b.at ? 1 : (a.equipmentId < b.equipmentId ? -1 : 1));
+    const flat = [["Дата", "Время", "Станок", "Оператор", "Табельный №", "Раздел", "Пункт осмотра", "Статус", "Комментарий"]];
+    const sum = [["Дата", "Время", "Станок", "Оператор", "Табельный №", "Пунктов", "Неисправностей", "Замечаний", "ID осмотра"]];
+    recs.forEach(r => {
+      const d = xlDate(r.at.slice(0, 10)), t = atTime(r.at);
+      sum.push([d, t, r.equipmentId, r.empName, r.empId, r.totalItems, r.defects, r.comments, r.recordId]);
+      r.items.forEach(i => flat.push([d, t, r.equipmentId, r.empName, r.empId, i.section, i.itemText, chkRu(i.status), i.comment || ""]));
+    });
+    const wb = XLSX.utils.book_new();
+    [["Осмотры", flat, [12, 7, 9, 28, 12, 26, 60, 12, 36]], ["Сводка", sum, [12, 7, 9, 28, 12, 9, 14, 11, 30]]].forEach(([name, aoa, w]) => {
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      for (let i = 1; i < aoa.length; i++) { const c = ws["A" + (i + 1)]; if (c) c.z = "dd.mm.yyyy"; }
+      ws["!cols"] = w.map(x => ({ wch: x })); XLSX.utils.book_append_sheet(wb, ws, name);
+    });
+    XLSX.writeFile(wb, "БВР_осмотры_" + (from === to ? from : from + "_" + to) + (rig ? "_" + rig : "") + ".xlsx");
+    msg("Файл сформирован: осмотров " + recs.length + ", строк пунктов " + (flat.length - 1) + ".");
+  } catch (e) { msg("Не удалось выгрузить осмотры: " + e.message, "err"); }
+  btn.disabled = false; btn.textContent = label;
+}
+
 // ═════════ Архив ═════════
 function appendArchive() {
   const box = document.createElement("div");
   box.innerHTML = '<div class="card"><h3>Архив журнала бурения</h3><div class="note" id="arcInfo">Загрузка...</div>' +
     '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px"><button class="btn btn-dark" id="btnArcSync">Синхронизировать архив сейчас</button><button class="btn btn-dark" id="btnAllXlsx">Скачать все смены (Excel)</button></div>' +
-    '<div class="note">Каждая сдача, правка и удаление смены дописывается в архив: отдельная таблица на Диске, листы по месяцам. Прежние значения при правке и удалении сохраняются в архиве и в листе «БВР-Изменения». Удалённая смена пропадает из списка, но остаётся в архиве.</div></div>';
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-top:10px"><div><label style="display:block;font-size:11px;font-weight:700;color:#64748B;margin-bottom:3px">Осмотры буровых: за сколько дней</label><input type="number" id="chkDays" value="30" min="1" max="120" style="width:90px"></div><button class="btn btn-dark" id="btnChkSync">Заархивировать осмотры буровых</button></div>' +
+    '<div class="note">Каждая сдача, правка и удаление смены дописывается в архив: отдельная таблица на Диске, листы по месяцам. Прежние значения при правке и удалении сохраняются в архиве и в листе «БВР-Изменения». Удалённая смена пропадает из списка, но остаётся в архиве. Осмотры буровых станков дописываются в тот же архив на листы «ОСМ-ГГГГ-ММ» (по месяцам) при каждой сдаче; кнопка выше добивает пропущенное за выбранное число дней.</div></div>';
   $("v-journal").appendChild(box.firstChild);
   const info = () => fetch(CFG.SHEET_URL + "?action=getDrillArchiveInfo").then(r => r.json()).then(i => {
     if (!i || !i.ok) { $("arcInfo").textContent = "Архив пока недоступен: бэкенд не обновлён."; return; }
@@ -499,6 +581,14 @@ function appendArchive() {
       if (!r.ok) throw new Error(r.error || "ошибка"); msg("Архив синхронизирован: добавлено смен " + r.synced + " из " + r.total + "."); await info();
     } catch (e) { msg("Синхронизация не удалась: " + e.message, "err"); }
     $("btnArcSync").disabled = false; $("btnArcSync").textContent = "Синхронизировать архив сейчас";
+  };
+  $("btnChkSync").onclick = async () => {
+    const days = Math.max(1, Math.min(120, Number($("chkDays").value) || 30));
+    $("btnChkSync").disabled = true; $("btnChkSync").textContent = "Архивирую (может занять до минуты)...";
+    try { const r = await fetch(CFG.SHEET_URL, { method: "POST", body: JSON.stringify({ action: "syncDrillChecklists", days: days }) }).then(x => x.json());
+      if (!r.ok) throw new Error(r.error || "ошибка"); msg("Осмотры буровых за " + r.days + " дн.: найдено " + r.records + ", добавлено в архив " + r.added + ".");
+    } catch (e) { msg("Архивация осмотров не удалась: " + e.message, "err"); }
+    $("btnChkSync").disabled = false; $("btnChkSync").textContent = "Заархивировать осмотры буровых";
   };
   $("btnAllXlsx").onclick = async () => {
     $("btnAllXlsx").disabled = true; $("btnAllXlsx").textContent = "Формирую файл...";
