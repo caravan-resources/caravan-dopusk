@@ -172,7 +172,7 @@ const K_DRAFT = "bvr.draft." + EQ_ID, K_QUEUE = "bvr.queue", K_EMP = "bvr.lastEm
 const $ = id => document.getElementById(id);
 const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
 
-let equipment = null, EMPLOYEES = [], editIdx = -1, shiftMeta = null;
+let equipment = null, EMPLOYEES = [], ROSTER = [], editIdx = -1, shiftMeta = null;
 let S = freshState();
 
 function uid() { return "c" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
@@ -261,11 +261,15 @@ function renderEmp() {
     const a = $("empChange"); if (a) a.onclick = e => { e.preventDefault(); S.emp = null; renderEmp(); saveDraft(); };
     return;
   }
-  box.innerHTML = '<input id="empQ" placeholder="Начните вводить фамилию" autocomplete="off"><div id="empRes" style="margin-top:8px"></div>';
+  const crew = crewOfRig();
+  box.innerHTML = (crew.length ? '<label class="lb">Экипаж станка</label>' + crew.map((e, i) => '<button class="emp-item" data-crew="' + i + '"><span class="avatar">' + esc(initials(e.name)) + '</span><span>' + esc(e.name) + '</span></button>').join("") + '<label class="lb" style="margin-top:6px">Другой оператор (поиск)</label>' : "") +
+    '<input id="empQ" placeholder="Начните вводить фамилию" autocomplete="off"><div id="empRes" style="margin-top:8px"></div>';
+  box.querySelectorAll("[data-crew]").forEach(b => b.onclick = () => pickEmp(crew[Number(b.dataset.crew)]));
   $("empQ").oninput = function () {
     const q = this.value.trim().toLowerCase(); const res = $("empRes");
     if (q.length < 2) { res.innerHTML = ""; return; }
-    const found = EMPLOYEES.filter(e => e.name.toLowerCase().includes(q)).slice(0, 8);
+    const gone = goneSet();
+    const found = EMPLOYEES.filter(e => e.name.toLowerCase().includes(q) && !gone[nameKey(e.name)]).slice(0, 8);
     res.innerHTML = found.length ? found.map((e, i) => '<button class="emp-item" data-i="' + i + '"><span class="avatar">' + esc(initials(e.name)) + '</span><span>' + esc(e.name) + '<br><small style="color:#64748B">' + esc(e.position) + '</small></span></button>').join("") : '<div class="empty">Не найдено. Проверьте написание.</div>';
     res.querySelectorAll(".emp-item").forEach(b => b.onclick = () => {
       const e = found[Number(b.dataset.i)]; S.emp = { id: e.id, name: e.name };
@@ -274,6 +278,39 @@ function renderEmp() {
     });
   };
 }
+// ── состав экипажей (тот же лист «Смены», что и в панели горного мастера) ──
+// Уволенным считается: статус «уволен», либо «увольняется» с датой, которая уже наступила.
+function rosterGone(r) {
+  const st = String(r.status || "").trim().toLowerCase();
+  if (st === "уволен") return true;
+  if (st === "увольняется" && r.dismissDate) { const d = new Date(r.dismissDate); return !isNaN(d) && d <= new Date(); }
+  return false;
+}
+// Ключ человека: фамилия + имя (без отчества): в составе экипажей чаще «Мупбаев Талгат», в базе сотрудников — с отчеством
+function nameKey(n) { return String(n || "").trim().toLowerCase().replace(/ё/g, "е").split(/\s+/).slice(0, 2).join(" "); }
+function goneSet() {
+  const gone = {}, live = {};
+  ROSTER.forEach(r => { const k = nameKey(r.empName); if (!k) return; if (rosterGone(r)) gone[k] = 1; else live[k] = 1; });
+  Object.keys(live).forEach(k => { delete gone[k]; });   // если человек где-то ещё числится действующим — не считаем уволенным
+  return gone;
+}
+function crewOfRig() {
+  const gone = goneSet(), seen = {}, out = [];
+  ROSTER.forEach(r => {
+    const k = nameKey(r.empName), st = String(r.status || "").trim().toLowerCase();
+    if (String(r.equipmentId) !== EQ_ID || !k || seen[k] || gone[k] || st === "вакансия" || st === "не_заехал") return;
+    seen[k] = 1; out.push({ id: String(r.empId || ""), name: String(r.empName).trim() });
+  });
+  return out;
+}
+function pickEmp(e) {
+  // в журнал идёт полное ФИО из базы сотрудников, если человек в ней найден
+  const f = e.id ? EMPLOYEES.find(x => String(x.id) === String(e.id)) : EMPLOYEES.find(x => nameKey(x.name) === nameKey(e.name));
+  S.emp = { id: e.id || (f ? f.id : ""), name: f ? f.name : e.name };
+  try { localStorage.setItem(K_EMP, JSON.stringify(S.emp)); } catch (x) {}
+  renderEmp(); saveDraft();
+}
+
 function initials(n) { return String(n || "").trim().split(/\s+/).slice(0, 2).map(w => w[0] || "").join("").toUpperCase(); }
 
 // ── отрисовка ──
@@ -502,6 +539,8 @@ async function init() {
     renderAll();
     fetch(CFG.SHEET_URL + "?action=list&site=" + encodeURIComponent(equipment.site || "")).then(r => r.json())
       .then(emp => { EMPLOYEES = (emp || []).map(e => ({ id: e.id, name: e.name, position: e.position })); }).catch(() => {});
+    fetch(CFG.SHEET_URL + "?action=getShiftAssignments&site=" + encodeURIComponent(equipment.site || "")).then(r => r.json())
+      .then(rows => { ROSTER = Array.isArray(rows) ? rows : []; if (S.emp && goneSet()[nameKey(S.emp.name)]) S.emp = null; if (!S.emp) renderEmp(); }).catch(() => {});
     flushQueue();
   } catch (e) {
     fail("Ошибка соединения", "Не удалось загрузить данные станка. Проверьте связь и обновите страницу. Если вы уже начали смену, введённое сохранено на телефоне.");

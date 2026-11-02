@@ -73,10 +73,10 @@ tr.miss td { background:var(--redbg); }
       <button class="btn btn-gold" id="btnLoad">Обновить</button>
     </div>
     <div class="tabs" id="tabs">
-      <div class="tab on" data-t="sum">Сводка</div><div class="tab" data-t="shifts">Смены</div><div class="tab" data-t="tools">Инструмент</div><div class="tab" data-t="journal">Журнал (выгрузка)</div>
+      <div class="tab on" data-t="sum">Сводка</div><div class="tab" data-t="shifts">Смены</div><div class="tab" data-t="tools">Инструмент</div><div class="tab" data-t="crew">Буровики</div><div class="tab" data-t="journal">Журнал (выгрузка)</div>
     </div>
     <div id="msg"></div>
-    <div id="v-sum"></div><div id="v-shifts" class="hidden"></div><div id="v-tools" class="hidden"></div><div id="v-journal" class="hidden"></div>
+    <div id="v-sum"></div><div id="v-shifts" class="hidden"></div><div id="v-tools" class="hidden"></div><div id="v-crew" class="hidden"></div><div id="v-journal" class="hidden"></div>
   </div>
 </div>
 
@@ -224,7 +224,7 @@ async function init() {
   ["fRig", "fSmena"].forEach(id => $(id).onchange = render);
   document.querySelectorAll("#tabs .tab").forEach(t => t.onclick = () => {
     curTab = t.dataset.t; document.querySelectorAll("#tabs .tab").forEach(x => x.classList.toggle("on", x === t));
-    ["sum", "shifts", "tools", "journal"].forEach(k => $("v-" + k).classList.toggle("hidden", k !== curTab)); render();
+    ["sum", "shifts", "tools", "crew", "journal"].forEach(k => $("v-" + k).classList.toggle("hidden", k !== curTab)); render();
   });
   try { EQUIP = await fetch(CFG.SHEET_URL + "?action=getEquipment").then(r => r.json()); } catch (e) { EQUIP = []; }
   await load();
@@ -269,7 +269,7 @@ function totals(list) {
 }
 
 function render() {
-  if (curTab === "sum") renderSum(); else if (curTab === "shifts") renderShifts(); else if (curTab === "tools") renderTools(); else { renderJournal(); appendArchive(); }
+  if (curTab === "sum") renderSum(); else if (curTab === "shifts") renderShifts(); else if (curTab === "tools") renderTools(); else if (curTab === "crew") renderCrew(); else { renderJournal(); appendArchive(); }
 }
 
 // ═════════ Сводка ═════════
@@ -406,6 +406,79 @@ function renderJournal() {
   $("btnCopyAll").onclick = () => copyText(rowsToTsv(J.rows, 0, jRig), "Скопировано: " + J.rows.length + " строк, колонки A–U");
   $("btnCopyData").onclick = () => copyText(rowsToTsv(J.rows, 5, jRig), "Скопировано: " + J.rows.length + " строк, колонки F–U");
   $("btnXlsx").onclick = () => exportXlsx(rigs);
+}
+
+// ═════════ Буровики: состав, выработка по людям, осмотры ═════════
+// Состав и статусы — из того же листа «Смены», что и в панели горного мастера (master.html); там ничего не меняется.
+let CREW = null, CSTATS = null, crewLoading = false, dismissArm = "";
+const personKey = n => { const p = String(n || "").trim().toLowerCase().replace(/\./g, " ").split(/\s+/).filter(Boolean); return p.length ? p[0] + "|" + (p[1] ? p[1][0] : "") : ""; };
+function rosterGone(r) {
+  const st = String(r.status || "").trim().toLowerCase();
+  if (st === "уволен") return true;
+  if (st === "увольняется" && r.dismissDate) { const d = new Date(r.dismissDate); return !isNaN(d) && d <= new Date(); }
+  return false;
+}
+async function loadCrew() {
+  if (crewLoading) return; crewLoading = true;
+  try {
+    const days = Math.min(90, Math.max(1, Math.round((Date.parse(todayIso()) - Date.parse($("fFrom").value)) / 86400000) + 1));
+    const [a, b] = await Promise.all([
+      fetch(CFG.SHEET_URL + "?action=getShiftAssignments").then(r => r.json()),
+      fetch(CFG.SHEET_URL + "?action=getChecklistStats&days=" + days).then(r => r.json()).catch(() => null)]);
+    if (!Array.isArray(a)) throw new Error("состав экипажей не получен");
+    CREW = a.filter(r => /^DR/i.test(String(r.equipmentId || ""))); CSTATS = b && b.ok ? b : null;
+  } catch (e) { msg("Не удалось загрузить состав: " + e.message, "err"); CREW = []; }
+  crewLoading = false; renderCrew();
+}
+const statusTag = r => { const st = String(r.status || "").trim().toLowerCase();
+  if (rosterGone(r)) return '<span class="tag r">уволен' + (r.dismissDate ? " с " + ddmmyyyy(new Date(r.dismissDate).toISOString().slice(0, 10)) : "") + "</span>";
+  if (st === "увольняется") return '<span class="tag">увольняется' + (r.dismissDate ? " до " + ddmmyyyy(new Date(r.dismissDate).toISOString().slice(0, 10)) : "") + "</span>";
+  if (st === "не_заехал") return '<span class="tag">не заехал</span>';
+  return '<span class="tag g">' + esc(st || "работает") + "</span>"; };
+function renderCrew() {
+  if (!CREW) { $("v-crew").innerHTML = '<div class="card"><div class="note">Загрузка состава и осмотров...</div></div>'; loadCrew(); return; }
+  const st = {}; filtered().forEach(x => { const k = personKey(x.empName); if (!k) return; const o = st[k] || (st[k] = { n: 0, m: 0, min: 0 }); o.n++; o.m += num(x.metersDrilled) + num(x.metersRedrill); o.min += num(x.drillMinutes); });
+  const rows = CREW.filter(r => String(r.empName || "").trim() && String(r.status || "").trim().toLowerCase() !== "вакансия")
+    .sort((a, b) => rigNo(a.equipmentId).localeCompare(rigNo(b.equipmentId)) || String(a.site).localeCompare(String(b.site)) || String(a.vahta).localeCompare(String(b.vahta)) || Number(a.smena) - Number(b.smena));
+  let h = '<div class="card"><h3>Состав буровых и выработка за период</h3><div class="note">Состав и статусы берутся из состава экипажей панели горного мастера (лист «Смены»). Выработка считается по сменам за выбранный период и фильтры (смены от буровиков и из загруженного журнала). Уволенные не предлагаются в форме буровика.</div>' +
+    '<div class="scroll"><table><tr><th>Станок</th><th>Участок</th><th>Вахта</th><th>Смена</th><th>ФИО</th><th>Статус</th><th class="r">Смен</th><th class="r">Метры</th><th class="r">м/час</th><th></th></tr>';
+  if (!rows.length) h += '<tr><td colspan="10" style="color:#64748B">Состав буровых не найден</td></tr>';
+  rows.forEach(r => {
+    const k = personKey(r.empName), x = st[k], gone = rosterGone(r), key = "r" + r.__row, armed = dismissArm === key;
+    h += "<tr" + (gone ? ' style="opacity:.55"' : "") + "><td><b>" + esc(r.equipmentId) + "</b></td><td>" + esc(r.site) + "</td><td>" + esc(r.vahta) + "</td><td>" + (Number(r.smena) === 1 ? "Ночь" : "День") + "</td><td>" + esc(r.empName) + "</td><td>" + statusTag(r) +
+      '</td><td class="r">' + (x ? x.n : "") + '</td><td class="r">' + (x ? fmt(x.m, 1) : "") + '</td><td class="r">' + (x && x.min ? fmt(x.m * 60 / x.min, 1) : "") + "</td><td>" +
+      (gone ? "" : armed ? '<input type="date" id="dismDate" value="' + todayIso() + '" style="padding:4px 6px"> <button class="btn btn-red" data-dismok="' + esc(r.__row) + '">Подтвердить</button> <button class="btn" data-dismno="1">Отмена</button>' : '<button class="btn" data-dism="' + esc(key) + '">Отметить уволенным</button>') + "</td></tr>";
+  });
+  h += "</table></div></div>";
+  // осмотры (чек-листы) буровых
+  const a = CSTATS && CSTATS.all;
+  h += '<div class="card"><h3>Осмотры буровых (чек-листы)</h3>';
+  if (!a) h += '<div class="note">Данные осмотров не получены.</div>';
+  else {
+    const be = (a.byEquipment || []).filter(x => /^DR/i.test(x.equipmentId)).sort((x, y) => rigNo(x.equipmentId).localeCompare(rigNo(y.equipmentId)));
+    h += '<div class="note">За последние ' + esc(CSTATS.days) + " дн. от сегодня.</div>";
+    h += '<div class="scroll"><table><tr><th>Станок</th><th class="r">Осмотров</th><th class="r">Неисправностей</th><th>Последний осмотр</th><th>Кто</th><th class="r">Замечаний в последнем</th></tr>' +
+      (be.length ? be.map(x => "<tr><td><b>" + esc(x.equipmentId) + "</b></td><td class='r'>" + fmt(x.osmotrs) + "</td><td class='r'>" + fmt(x.defects) + "</td><td>" + esc(x.lastDate ? new Date(x.lastDate).toLocaleString("ru-RU", { timeZone: CFG.TZ, day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "") + "</td><td>" + esc(x.lastEmpName) + "</td><td class='r'>" + (num(x.lastDefects) ? '<span class="tag r">' + fmt(x.lastDefects) + "</span>" : "0") + "</td></tr>").join("") : '<tr><td colspan="6" style="color:#64748B">Осмотров нет</td></tr>') + "</table></div>";
+    const od = (a.openDefects || []).filter(x => /^DR/i.test(x.equipmentId));
+    h += '<h3 style="margin-top:14px">Открытые замечания по буровым</h3>' + (od.length ? od.map(x => '<div class="note"><b>' + esc(x.equipmentId) + "</b>, " + esc(x.empName) + ": " + x.items.map(i => esc(i.itemText) + (i.comment ? " (" + esc(i.comment) + ")" : "")).join("; ") + "</div>").join("") : '<div class="note">Открытых замечаний по последним осмотрам нет.</div>');
+    const ops = (a.byOperator || []).filter(o => (o.equipmentList || []).length && o.equipmentList.every(e => /^DR/i.test(e.equipmentId)));
+    h += '<h3 style="margin-top:14px">Осмотры по операторам (только буровые)</h3><div class="scroll"><table><tr><th>Оператор</th><th>Станки</th><th class="r">Осмотров</th><th class="r">Неисправностей</th><th class="r">Дней</th></tr>' +
+      (ops.length ? ops.map(o => "<tr><td>" + esc(o.empName) + "</td><td>" + esc(o.equipmentList.map(e => e.equipmentId).join(", ")) + "</td><td class='r'>" + fmt(o.osmotrs) + "</td><td class='r'>" + fmt(o.defects) + "</td><td class='r'>" + fmt(o.daysCount) + "</td></tr>").join("") : '<tr><td colspan="5" style="color:#64748B">Нет данных</td></tr>') + "</table></div>";
+  }
+  h += '<div style="margin-top:10px"><button class="btn" id="btnCrewRefresh">Обновить состав и осмотры</button></div></div>';
+  $("v-crew").innerHTML = h;
+  $("btnCrewRefresh").onclick = () => { CREW = null; renderCrew(); };
+  $("v-crew").querySelectorAll("[data-dism]").forEach(b => b.onclick = () => { dismissArm = b.dataset.dism; renderCrew(); });
+  $("v-crew").querySelectorAll("[data-dismno]").forEach(b => b.onclick = () => { dismissArm = ""; renderCrew(); });
+  $("v-crew").querySelectorAll("[data-dismok]").forEach(b => b.onclick = async () => {
+    const date = $("dismDate").value; if (!date) return; b.disabled = true;
+    try {
+      // тот же экшен, которым пользуется master.html (updateShiftAssignment): статус «увольняется» и дата
+      const r = await fetch(CFG.SHEET_URL, { method: "POST", body: JSON.stringify({ action: "updateShiftAssignment", row: Number(b.dataset.dismok), status: "увольняется", dismissDate: date }) }).then(x => x.json());
+      if (!r.ok) throw new Error(r.error || "ошибка");
+      dismissArm = ""; CREW = null; msg("Отмечено: увольняется с " + ddmmyyyy(date) + ". Изменение видно и в панели горного мастера."); renderCrew();
+    } catch (e) { msg("Не удалось отметить: " + e.message, "err"); b.disabled = false; }
+  });
 }
 
 // ═════════ Архив ═════════
