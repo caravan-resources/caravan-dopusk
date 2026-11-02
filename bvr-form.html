@@ -157,6 +157,7 @@ a.back { font-size:13px; color:var(--gray); text-decoration:none; display:inline
   </div>
 </div>
 
+<script src="outbox.js"></script>
 <script>
 const CFG = {
   SHEET_URL: "https://script.google.com/macros/s/AKfycbwhdMV20k8US2BXUz1Xk2XCXE9MEwpHpQaadTF9xEfzbU1--dHL-Zuj06K2qXW-rFtKGw/exec",
@@ -233,22 +234,47 @@ function payloadOf(s) {
   };
 }
 
+async function loadCached(url, key, map) {
+  const k = "operbaza.cache." + key;
+  let cached = null;
+  try { cached = JSON.parse(localStorage.getItem(k) || "null"); } catch (e) {}
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), cached ? 7000 : 30000);
+  try {
+    const data = await (await fetch(url, { signal: ctrl.signal })).json();
+    if (!Array.isArray(data)) throw new Error("ответ сервера не распознан");
+    const val = map ? data.map(map) : data;
+    try { localStorage.setItem(k, JSON.stringify(val)); } catch (e) {}
+    return val;
+  } catch (e) { if (cached) return cached; throw e; }
+  finally { clearTimeout(t); }
+}
 async function post(body) {
   const res = await fetch(CFG.SHEET_URL, { method: "POST", body: JSON.stringify(body) });
   return res.json();
 }
 
-async function flushQueue() {
-  let q = getQueue(); if (!q.length) { showNet(""); return; }
-  const rest = [];
-  for (const item of q) {
-    try {
-      const r = await post(Object.assign({ action: "submitDrillShift" }, item));
-      if (!r.ok) rest.push(item);          // сервер отклонил — оставляем, чтобы не потерять
-    } catch (e) { rest.push(item); }
+// Очередь без связи: общий модуль outbox.js (IndexedDB). Смена, не ушедшая из-за обрыва связи,
+// отправится сама при появлении связи (страница открыта) или через Background Sync (Chrome на Android).
+// Повторная отправка безопасна: сервер сверяет clientId.
+async function migrateLegacyQueue() {
+  const q = getQueue(); if (!q.length) return;
+  for (const pl of q) {
+    try { await OB.add({ id: pl.clientId || uid(), createdAt: Date.now(), body: Object.assign({ action: "submitDrillShift" }, pl), label: "Смена " + (pl.equipmentId || ""), after: null }); } catch (e) { return; }
   }
-  setQueue(rest);
-  showNet(rest.length ? "Не отправлено смен: " + rest.length + ". Отправятся автоматически, когда появится связь." : "");
+  setQueue([]);
+}
+function registerSync() { try { navigator.serviceWorker.ready.then(reg => reg.sync && reg.sync.register("operbaza-outbox")).catch(() => {}); } catch (e) {} }
+let flushing = false;
+async function flushQueue() {
+  if (flushing) return; flushing = true;
+  try {
+    await migrateLegacyQueue();
+    await OB.flush(post);
+    const left = (await OB.all()).filter(i => /submitDrillShift/.test(i.body && i.body.action));
+    showNet(left.length ? "Не отправлено смен: " + left.length + ". Отправятся автоматически, когда появится связь." : "");
+  } catch (e) { /* IndexedDB недоступна */ }
+  flushing = false;
 }
 function showNet(t) { const b = $("netBox"); b.textContent = t; b.style.display = t ? "block" : "none"; }
 
@@ -479,10 +505,12 @@ $("submitBtn").onclick = async () => {
     finish(EDIT_ID ? "Правка сохранена" : "Смена сдана", summary);
   } catch (err) {
     if (EDIT_ID) { eb.textContent = "Нет связи. Правка не сохранена, повторите."; eb.style.display = "block"; btn.disabled = false; btn.textContent = "Сохранить правку"; return; }
-    const q = getQueue(); q.push(pl); setQueue(q);
+    try { await OB.add({ id: pl.clientId, createdAt: Date.now(), body: Object.assign({ action: "submitDrillShift" }, pl), label: "Смена " + EQ_ID, after: null }); }
+    catch (e2) { eb.textContent = "Нет связи, а сохранить смену на телефоне не удалось. Не закрывайте страницу и повторите отправку позже."; eb.style.display = "block"; btn.disabled = false; btn.textContent = "Сдать смену"; return; }
+    registerSync();
     try { localStorage.removeItem(K_DRAFT); } catch (e) {}
-    finish("Смена сохранена на телефоне", summary + ". Связи нет — смена отправится сама, когда она появится. Не закрывайте и не очищайте браузер.");
-    showNet("Не отправлено смен: " + q.length);
+    finish("Смена сохранена на телефоне", summary + ". Связи нет: смена отправится сама, как только связь появится. Не очищайте данные браузера; если закроете страницу, откройте её снова в зоне связи.");
+    showNet("Есть смена, не отправленная на сервер");
   }
 };
 
@@ -516,8 +544,11 @@ async function init() {
   $("backLink").href = EDIT_ID ? "bvr-panel.html" : "checklist.html?eq=" + encodeURIComponent(EQ_ID);
   if (EDIT_ID) { $("submitBtn").textContent = "Сохранить правку"; $("hdrSub").textContent = "Правка сданной смены"; $("bar").style.display = "block"; }
   window.addEventListener("online", flushQueue);
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") flushQueue(); });
+  setInterval(flushQueue, 45000);
+  if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
   try {
-    const reqs = [fetch(CFG.SHEET_URL + "?action=getEquipment").then(r => r.json())];
+    const reqs = [loadCached(CFG.SHEET_URL + "?action=getEquipment", "equipment")];
     if (EDIT_ID) reqs.push(fetch(CFG.SHEET_URL + "?action=getDrillShifts&shiftId=" + encodeURIComponent(EDIT_ID)).then(r => r.json()));
     const res = await Promise.all(reqs);
     equipment = (res[0] || []).find(e => String(e.equipmentId) === EQ_ID);
@@ -537,9 +568,9 @@ async function init() {
       if (dr) S = dr; else applyDefaults();
     }
     renderAll();
-    fetch(CFG.SHEET_URL + "?action=list&site=" + encodeURIComponent(equipment.site || "")).then(r => r.json())
-      .then(emp => { EMPLOYEES = (emp || []).map(e => ({ id: e.id, name: e.name, position: e.position })); }).catch(() => {});
-    fetch(CFG.SHEET_URL + "?action=getShiftAssignments&site=" + encodeURIComponent(equipment.site || "")).then(r => r.json())
+    loadCached(CFG.SHEET_URL + "?action=list&site=" + encodeURIComponent(equipment.site || ""), "employees." + (equipment.site || ""), e => ({ id: e.id, name: e.name, position: e.position }))
+      .then(emp => { EMPLOYEES = emp || []; }).catch(() => {});
+    loadCached(CFG.SHEET_URL + "?action=getShiftAssignments&site=" + encodeURIComponent(equipment.site || ""), "roster." + (equipment.site || ""))
       .then(rows => { ROSTER = Array.isArray(rows) ? rows : []; if (S.emp && goneSet()[nameKey(S.emp.name)]) S.emp = null; if (!S.emp) renderEmp(); }).catch(() => {});
     flushQueue();
   } catch (e) {

@@ -125,6 +125,8 @@ input:focus, select:focus, textarea:focus { border-color:var(--gold); }
     <h1 id="pageTitle">Чек-лист осмотра</h1>
     <p id="pageSubtitle">Caravan Resources</p>
   </div>
+  <div id="outboxBanner" style="display:none;margin:0 0 12px;padding:10px 12px;border-radius:10px;background:#FFFBEB;border:1.5px solid #B45309;color:#B45309;font-size:13px;font-weight:700"></div>
+  <div id="offlineNote" style="display:none;margin:0 0 12px;padding:8px 12px;border-radius:10px;background:#EFF6FF;color:#1D4ED8;font-size:12px;font-weight:700">Нет связи: открыто из памяти телефона. Заполненное отправится само, когда связь появится.</div>
 
   <div id="screenLoading" class="active">
     <div class="card" style="text-align:center;color:var(--gray)">Загрузка...</div>
@@ -169,6 +171,10 @@ input:focus, select:focus, textarea:focus { border-color:var(--gold); }
     <div id="fuelSelectedBoxWrap"></div>
     <div class="card">
       <div class="card-title" id="fuelEquipmentTitle"></div>
+      <div style="display:flex;gap:8px">
+        <div style="flex:1"><label class="label" style="font-size:12px;font-weight:700;color:var(--gray);margin-bottom:6px;display:block">Дата заправки</label><input type="date" id="fuelDate"></div>
+        <div style="flex:1"><label class="label" style="font-size:12px;font-weight:700;color:var(--gray);margin-bottom:6px;display:block">Время заправки</label><input type="time" id="fuelTime"></div>
+      </div>
       <label class="label" style="font-size:12px;font-weight:700;color:var(--gray);margin-bottom:6px;display:block">Количество топлива (литры)</label>
       <input type="number" id="fuelAmount" min="0" step="1" placeholder="Например: 150">
     </div>
@@ -250,6 +256,7 @@ input:focus, select:focus, textarea:focus { border-color:var(--gold); }
   </div>
 </div>
 
+<script src="outbox.js"></script>
 <script>
 const CFG = {
   SHEET_URL: "https://script.google.com/macros/s/AKfycbwhdMV20k8US2BXUz1Xk2XCXE9MEwpHpQaadTF9xEfzbU1--dHL-Zuj06K2qXW-rFtKGw/exec",
@@ -282,6 +289,93 @@ function initials(name) {
   return String(name||"").trim().split(/\s+/).slice(0,2).map(w=>w[0]||"").join("").toUpperCase();
 }
 
+// ══════════════════════════════════════════════════════════
+// РАБОТА БЕЗ СВЯЗИ. Не везде в карьере есть связь: заполненный осмотр, горячая пересменка
+// и заправка при ошибке сети сохраняются на телефоне (IndexedDB, outbox.js) и уходят на сервер
+// сами, как только связь появится (страница открыта, либо Background Sync на Android).
+// Время осмотра и заправки записывается то, что было на телефоне в момент заполнения, а не момент
+// доставки. Повторная отправка не создаёт дубль: сервер проверяет clientId.
+// ══════════════════════════════════════════════════════════
+let OFFLINE_DATA = false;
+async function loadCached(url, key, map) {
+  const k = "operbaza.cache." + key;
+  let cached = null;
+  try { cached = JSON.parse(localStorage.getItem(k) || "null"); } catch (e) {}
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), cached ? 7000 : 30000);   // есть копия: слабую связь не ждём долго
+  try {
+    const res = await fetch(url, { signal: ctrl.signal });
+    const data = await res.json();
+    if (!Array.isArray(data)) throw new Error("ответ сервера не распознан");
+    const val = map ? data.map(map) : data;
+    try { localStorage.setItem(k, JSON.stringify(val)); } catch (e) {}
+    return val;
+  } catch (e) {
+    if (cached) { OFFLINE_DATA = true; return cached; }
+    throw e;
+  } finally { clearTimeout(t); }
+}
+
+function newClientId() { return "c" + Date.now().toString(36) + Math.random().toString(36).slice(2, 10); }
+
+async function postRaw(body, timeoutMs) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs || 25000);
+  try {
+    const res = await fetch(CFG.SHEET_URL, { method: "POST", body: JSON.stringify(body), signal: ctrl.signal });
+    return await res.json();          // не JSON (страница провайдера, обрыв) бросит исключение = «нет связи»
+  } finally { clearTimeout(t); }
+}
+
+function registerSync() {
+  try { navigator.serviceWorker.ready.then(reg => reg.sync && reg.sync.register("operbaza-outbox")).catch(() => {}); } catch (e) {}
+}
+
+// Отправить сразу; если связи нет, положить в очередь на телефоне. Ответ сервера «отклонено» очередью не маскируется.
+async function sendOrQueue(body, label, after) {
+  try {
+    const r = await postRaw(body);
+    if (r && r.ok) return { ok: true, data: r };
+    return { ok: false, error: (r && r.error) || "неизвестная" };
+  } catch (e) {
+    try { await OB.add({ id: body.clientId, createdAt: Date.now(), body: body, label: label, after: after || null }); }
+    catch (e2) { return { ok: false, error: "нет связи, а сохранить на телефоне не удалось. Не закрывайте страницу и повторите отправку позже." }; }
+    registerSync(); refreshOutbox();
+    return { ok: true, queued: true };
+  }
+}
+const QUEUED_TEXT = "Нет связи. Запись сохранена на телефоне и отправится сама, как только связь появится. Не очищайте данные браузера; если закроете страницу, откройте её снова в зоне связи.";
+
+async function refreshOutbox() {
+  const b = document.getElementById("outboxBanner"); if (!b) return;
+  let items = []; try { items = await OB.all(); } catch (e) {}
+  if (!items.length) { b.style.display = "none"; return; }
+  const bad = items.filter(i => (i.attempts || 0) >= 2).length;
+  b.style.display = "block";
+  b.innerHTML = "Не отправлено записей: " + items.length + ". Отправятся сами, когда появится связь." +
+    (bad ? " Сервер отклонил: " + bad + ", сообщите инструктору." : "") +
+    ' <a href="#" onclick="flushOutbox(); return false;" style="color:#B45309;text-decoration:underline">Отправить сейчас</a>';
+}
+
+let flushing = false;
+async function flushOutbox() {
+  if (flushing) return; flushing = true;
+  try {
+    await OB.flush(postRaw, async (it) => {
+      // Статус техники «В работе» ставится по серверному времени смены, поэтому только для свежей записи
+      if (it.after && Date.now() - it.createdAt < 30 * 60 * 1000) { try { await postRaw({ action: "setEquipmentStatus", equipmentId: it.after.equipmentId, status: it.after.status }); } catch (e) {} }
+    });
+  } catch (e) { /* IndexedDB недоступна: очередь пуста */ }
+  flushing = false; refreshOutbox();
+}
+
+function almatyNow() {
+  const p = {};
+  new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Almaty", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
+    .formatToParts(new Date()).forEach(x => { p[x.type] = x.value; });
+  return { date: p.year + "-" + p.month + "-" + p.day, time: p.hour + ":" + p.minute };
+}
+
 async function init() {
   const params = new URLSearchParams(location.search);
   const equipmentId = params.get("eq");
@@ -292,11 +386,14 @@ async function init() {
   }
 
   try {
+    // Справочники (техника, шаблоны, сотрудники) запоминаются на телефоне: после первого открытия
+    // со связью форма открывается и без неё. Со связью всегда берутся свежие данные.
     const [eqRes, tplRes, empRes] = await Promise.all([
-      fetch(`${CFG.SHEET_URL}?action=getEquipment`).then(r=>r.json()),
-      fetch(`${CFG.SHEET_URL}?action=getChecklistTemplates`).then(r=>r.json()),
-      fetch(`${CFG.SHEET_URL}?action=list`).then(r=>r.json()),
+      loadCached(`${CFG.SHEET_URL}?action=getEquipment`, "equipment"),
+      loadCached(`${CFG.SHEET_URL}?action=getChecklistTemplates`, "templates"),
+      loadCached(`${CFG.SHEET_URL}?action=list`, "employees", e => ({ id: e.id, name: e.name, position: e.position })),
     ]);
+    if (OFFLINE_DATA) document.getElementById("offlineNote").style.display = "block";
 
     equipment = (eqRes||[]).find(e => String(e.equipmentId) === String(equipmentId));
     if (!equipment) {
@@ -453,6 +550,9 @@ function showFuelForm() {
   `;
   document.getElementById("fuelEquipmentTitle").textContent = `${equipment.equipmentId} — ${equipment.model}`;
   document.getElementById("fuelAmount").value = "";
+  const nowA = almatyNow();
+  document.getElementById("fuelDate").value = nowA.date;     // по умолчанию сейчас; водитель может указать фактическое время
+  document.getElementById("fuelTime").value = nowA.time;
   document.getElementById("fuelHint").textContent = "";
   showScreen("FuelForm");
 }
@@ -466,35 +566,40 @@ async function submitFuel() {
     return;
   }
 
+  const fd = document.getElementById("fuelDate").value, ft = document.getElementById("fuelTime").value;
+  if (!fd || !ft) {
+    hint.style.color = "var(--red)";
+    hint.textContent = "Укажите дату и время заправки";
+    return;
+  }
+  const at = Date.parse(fd + "T" + ft + ":00+05:00");
+  if (at > Date.now() + 10 * 60 * 1000) {
+    hint.style.color = "var(--red)";
+    hint.textContent = "Время заправки в будущем: проверьте дату и время";
+    return;
+  }
+  if (at < Date.now() - 30 * 24 * 3600 * 1000) {
+    hint.style.color = "var(--red)";
+    hint.textContent = "Дата заправки старше 30 дней: проверьте дату";
+    return;
+  }
+
   const btn = document.getElementById("fuelSubmitBtn");
   btn.disabled = true;
   btn.textContent = "Отправка...";
 
-  try {
-    const res = await fetch(CFG.SHEET_URL, {
-      method: "POST",
-      body: JSON.stringify({
-        action: "submitFuelRecord",
-        equipmentId: equipment.equipmentId,
-        empId: selected.id,
-        empName: selected.name,
-        amountLiters: amount,
-      })
-    });
-    const data = await res.json();
-    if (data.ok) {
-      document.getElementById("successTitle").textContent = "Заправка записана";
-      document.getElementById("successSub").textContent = `${amount} л добавлено в ${equipment.equipmentId}.`;
-      showScreen("Success");
-    } else {
-      hint.style.color = "var(--red)";
-      hint.textContent = "Ошибка: " + (data.error||"неизвестная");
-      btn.disabled = false;
-      btn.textContent = "Записать заправку";
-    }
-  } catch(e) {
+  const out = await sendOrQueue({
+    action: "submitFuelRecord", clientId: newClientId(), fuelAt: fd + "T" + ft,
+    equipmentId: equipment.equipmentId, empId: selected.id, empName: selected.name, amountLiters: amount,
+  }, "Заправка " + equipment.equipmentId);
+  if (out.ok) {
+    const when = fd.slice(8, 10) + "." + fd.slice(5, 7) + "." + fd.slice(0, 4) + " " + ft;
+    document.getElementById("successTitle").textContent = out.queued ? "Заправка сохранена на телефоне" : "Заправка записана";
+    document.getElementById("successSub").textContent = `${amount} л, ${equipment.equipmentId}, ${when}. ` + (out.queued ? QUEUED_TEXT : "");
+    showScreen("Success");
+  } else {
     hint.style.color = "var(--red)";
-    hint.textContent = "Ошибка сети. Проверьте интернет.";
+    hint.textContent = "Ошибка: " + out.error;
     btn.disabled = false;
     btn.textContent = "Записать заправку";
   }
@@ -641,42 +746,28 @@ async function submitChecklist() {
   btn.disabled = true;
   btn.textContent = "Отправка...";
 
-  try {
-    const res = await fetch(CFG.SHEET_URL, {
-      method: "POST",
-      body: JSON.stringify({
-        action: "submitChecklistRecord",
-        equipmentId: equipment.equipmentId,
-        templateId: template.id,
-        empId: selected.id,
-        empName: selected.name,
-        items,
-      })
-    });
-    const data = await res.json();
-    if (data.ok) {
-      document.getElementById("successTitle").textContent = isHandover ? "Горячая пересменка зафиксирована" : "Чек-лист отправлен";
-      document.getElementById("successSub").textContent = isHandover ? "Спасибо! Рейсы с этого момента будут засчитаны вам." : "Спасибо! Осмотр зафиксирован.";
-      showScreen("Success");
-      // Журнал бурения подставит этого оператора сам (bvr-form.html читает bvr.lastEmp)
-      if (/Буров/i.test(equipment.type || "")) { try { localStorage.setItem("bvr.lastEmp", JSON.stringify({ id: selected.id, name: selected.name })); } catch(e) {} }
-      // GPS-трекер смены — только после осмотра (не после заправки), запускаем
-      // независимо от статуса техники ниже, best-effort, ничего не блокирует.
-      startShiftGpsTracker(equipment.equipmentId);
-      localStorage.setItem("operbaza_current_shift_equipment", equipment.equipmentId);
-      // Статус техники "В работе" — фоном, не блокируя экран успеха. Если
-      // активная вахта участка не задана (unavailable) или запрос не дошёл —
-      // молча пропускаем, это вторичное действие, не должно мешать основному.
-      setEquipmentStatusCall("В работе").catch(() => {});
-    } else {
-      hint.style.color = "var(--red)";
-      hint.textContent = "Ошибка: " + (data.error||"неизвестная");
-      btn.disabled = false;
-      btn.textContent = "Отправить чек-лист";
-    }
-  } catch(e) {
+  // performedAt — когда осмотр заполнен на телефоне (важно, если отправка уйдёт позже, из очереди)
+  const out = await sendOrQueue({
+    action: "submitChecklistRecord", clientId: newClientId(), performedAt: new Date().toISOString(),
+    equipmentId: equipment.equipmentId, templateId: template.id, empId: selected.id, empName: selected.name, items,
+  }, (isHandover ? "Пересменка " : "Осмотр ") + equipment.equipmentId, { status: "В работе", equipmentId: equipment.equipmentId });
+  if (out.ok) {
+    const q = !!out.queued;
+    document.getElementById("successTitle").textContent = q ? "Сохранено на телефоне" : (isHandover ? "Горячая пересменка зафиксирована" : "Чек-лист отправлен");
+    document.getElementById("successSub").textContent = q ? QUEUED_TEXT : (isHandover ? "Спасибо! Рейсы с этого момента будут засчитаны вам." : "Спасибо! Осмотр зафиксирован.");
+    showScreen("Success");
+    // Журнал бурения подставит этого оператора сам (bvr-form.html читает bvr.lastEmp)
+    if (/Буров/i.test(equipment.type || "")) { try { localStorage.setItem("bvr.lastEmp", JSON.stringify({ id: selected.id, name: selected.name })); } catch(e) {} }
+    // GPS-трекер смены — только после осмотра (не после заправки), запускаем
+    // независимо от статуса техники ниже, best-effort, ничего не блокирует.
+    startShiftGpsTracker(equipment.equipmentId);
+    localStorage.setItem("operbaza_current_shift_equipment", equipment.equipmentId);
+    // Статус техники "В работе" — фоном, не блокируя экран успеха. Если связи не было, статус
+    // поставится при отправке из очереди (если с осмотра прошло не больше 30 минут).
+    if (!q) setEquipmentStatusCall("В работе").catch(() => {});
+  } else {
     hint.style.color = "var(--red)";
-    hint.textContent = "Ошибка сети. Проверьте интернет.";
+    hint.textContent = "Ошибка: " + out.error;
     btn.disabled = false;
     btn.textContent = "Отправить чек-лист";
   }
@@ -880,6 +971,11 @@ function gpsResumeIfActive() {
   }
 }
 
+window.addEventListener("online", () => flushOutbox());
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") flushOutbox(); });
+setInterval(() => flushOutbox(), 45000);
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+refreshOutbox(); flushOutbox();
 init();
 </script>
 <div id="gpsTrackerBadge">
