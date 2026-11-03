@@ -4806,6 +4806,95 @@ function avgShiftFuelRate(equipmentId, start, end) {
   return { avg: +avg.toFixed(2), days: pairs.length };
 }
 
+// ══════════════════════════════════════════════════════
+// 03.11.2026: РАСХОД Л/Ч ПО ТОПЛИВНОМУ БАЛАНСУ МЕЖДУ ОСМОТРАМИ
+// (для всей техники; сколько раз за смену заправляют — не важно)
+// ──────────────────────────────────────────────────────
+// Опорная точка — чек-лист, в котором есть И остаток топлива на начало смены,
+// И моточасы (оба снимаются в один момент, интерполяция не нужна).
+// Между двумя соседними опорными точками:
+//   израсходовано = остаток_до + все заправки в промежутке − остаток_после
+//   часы          = моточасы_после − моточасы_до
+//   л/ч           = израсходовано / часы
+// Допущение «заправили до полного бака» не нужно. Заправки в промежутке
+// считаем по времени записи: (осмотр_до; осмотр_после]. Итог за период =
+// сумма израсходованного / сумма часов — по цепочке опорных точек это
+// «остаток в начале − остаток в конце + заправки» за все часы, поэтому
+// заправка, записанная чуть раньше/позже осмотра, на итоге не сказывается.
+// Единицы остатка в записи не хранятся (только подпись поля): считаем, что это
+// литры; значения шаблонов в % сюда попасть не должны.
+// Интервал пропускается: между опорными точками > REFUEL_MAX_GAP_H (скорее
+// всего пропущена запись), часов < REFUEL_MIN_HOURS или моточасы идут вспять,
+// израсходовано ≤ 0 (ошибка ввода остатка или незаписанная заправка).
+// ══════════════════════════════════════════════════════
+const REFUEL_MIN_HOURS = 1;
+const REFUEL_MAX_GAP_H = 72;
+const FUEL_LEVEL_LABEL_RE = /топлив/i;
+
+function fuelLevelOfRecord(rec) {
+  for (const it of (rec.items||[])) {
+    if (it.itemText === "Моточасы" || it.itemText === "Пробег (км)") continue;
+    if (!FUEL_LEVEL_LABEL_RE.test(String(it.itemText||""))) continue;
+    if (it.status === "" || it.status == null) continue;
+    const v = Number(it.status);
+    if (!isNaN(v)) return v;   // "ok"/"defect" дают NaN и пропускаются
+  }
+  return null;
+}
+
+// Осмотры с остатком топлива и моточасами одновременно, по возрастанию даты.
+function balanceAnchors(equipmentId) {
+  const out = []; let withLevel = 0, withHours = 0;
+  (DATA.checklistRecords||[]).forEach(rec => {
+    if (String(rec.equipmentId) !== String(equipmentId)) return;
+    const d = parseRecordDate(rec.date); if (!d) return;
+    const level = fuelLevelOfRecord(rec);
+    const hItem = (rec.items||[]).find(it => it.itemText === "Моточасы");
+    const hours = hItem && hItem.status !== "" && hItem.status != null ? Number(hItem.status) : NaN;
+    if (level != null) withLevel++;
+    if (!isNaN(hours)) withHours++;
+    if (level != null && !isNaN(hours)) out.push({ date: d, level, hours });
+  });
+  out.sort((a,b) => a.date - b.date);
+  out.withLevel = withLevel; out.withHours = withHours;
+  return out;
+}
+
+function refuelIntervals(equipmentId, start, end) {
+  const anchors = balanceAnchors(equipmentId);
+  const fuel = (DATA.fuel||[])
+    .filter(f => String(f.equipmentId)===String(equipmentId))
+    .map(f => ({ date: parseRecordDate(f.date), liters: Number(f.amountLiters)||0 }))
+    .filter(f => f.date);
+  const out = { intervals: [], skipped: { long: 0, short: 0, negative: 0 },
+    anchors: anchors.length, withLevel: anchors.withLevel, withHours: anchors.withHours,
+    burned: 0, hours: 0, refueled: 0, rate: null };
+  for (let i = 1; i < anchors.length; i++) {
+    const a = anchors[i-1], b = anchors[i];
+    if (start && b.date < start) continue;
+    if (end && b.date >= end) continue;
+    if ((b.date - a.date) / 3600000 > REFUEL_MAX_GAP_H) { out.skipped.long++; continue; }
+    const hours = b.hours - a.hours;
+    if (hours < REFUEL_MIN_HOURS) { out.skipped.short++; continue; }
+    const refueled = fuel.filter(f => f.date > a.date && f.date <= b.date).reduce((s,f)=>s+f.liters,0);
+    const burned = a.level + refueled - b.level;
+    if (burned <= 0) { out.skipped.negative++; continue; }
+    out.intervals.push({ from: a.date, to: b.date, level0: a.level, level1: b.level, refueled,
+      burned: +burned.toFixed(1), hours: +hours.toFixed(1), rate: +(burned / hours).toFixed(1) });
+    out.burned += burned; out.hours += hours; out.refueled += refueled;
+  }
+  if (out.hours > 0) out.rate = +(out.burned / out.hours).toFixed(1);
+  out.burned = +out.burned.toFixed(1); out.hours = +out.hours.toFixed(1);
+  out.intervals.sort((a,b) => b.to - a.to);
+  return out;
+}
+
+// Краткий результат для списков: объект или null, если л/ч посчитать нельзя
+function refuelRateLabel(equipmentId, start, end) {
+  const r = refuelIntervals(equipmentId, start, end);
+  return r.rate == null ? null : r;
+}
+
 function setFuelPeriod(site, p) {
   FUEL_PERIOD[site] = p;
   renderFuelAnalytics(site);
@@ -4866,13 +4955,13 @@ function renderFuelAnalytics(site) {
       byEqEl.innerHTML = rows.map(row => {
         const eq = (DATA.equipment||[]).find(e => String(e.equipmentId)===String(row.id));
         const label = eq ? `${eq.equipmentId} — ${eq.model}` : row.id;
-        const rate = isCrawlerEquipment(row.id) ? avgShiftFuelRate(row.id, start, null) : null;
+        const rate = refuelRateLabel(row.id, start, null);
         return `
           <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border);font-size:13px;cursor:pointer"
             onclick="selectFuelHistoryEquipment('${site}','${row.id}')" title="Открыть историю по этой машине">
             <div>
               <div style="font-weight:700;color:var(--navy)">${label}</div>
-              <div style="font-size:11px;color:var(--gray)">${row.count} заправк${row.count===1?'а':row.count<5?'и':'и'}${rate ? ` · ~${rate.avg} л/ч (${rate.days} см.)` : ""}</div>
+              <div style="font-size:11px;color:var(--gray)">${row.count} заправк${row.count===1?'а':row.count<5?'и':'и'}${rate ? ` · ${rate.rate} л/ч (${rate.intervals.length} инт.)` : ""}</div>
             </div>
             <span style="font-weight:800;color:var(--navy2)">${row.liters.toLocaleString("ru-RU")} л</span>
           </div>
@@ -4946,10 +5035,10 @@ function renderFuelAnalytics(site) {
 // РАСХОД ПО ТИПУ ТЕХНИКИ — фильтр по типу + модели, с произвольным периодом
 // (кнопки Сутки/Неделя/Месяц/Всё время ИЛИ свой диапазон дат "с — по").
 // Для техники из CRAWLER_FUEL_TYPES (экскаваторы/бульдозеры/буровые/самосвалы) —
-// л/ч тем же методом (dayShiftFuelPairs). Для остальных типов — только
-// литры/заправки, без л/ч: объективного метода без данных хронометража сейчас
-// нет (решение 29.08.2026 — не считать л/ч через дельту моточасов, это уже
-// признано ненадёжным).
+// л/ч — топливный баланс между осмотрами с учётом моточасов (refuelIntervals, для любого
+// типа техники; решение Ивана 03.11.2026 — ранее, 29.08.2026, дельта моточасов
+// считалась ненадёжной и не применялась). Метод dayShiftFuelPairs оставлен в
+// коде, но в отчётах больше не используется.
 // ══════════════════════════════════════════════════════
 let FUEL_TYPE_FILTER = {
   "Алмалы":  { type: "", model: "", mode: "day", customFrom: "", customTo: "" },
@@ -5052,7 +5141,7 @@ function renderFuelTypePanel(site) {
     return;
   }
 
-  const crawler = CRAWLER_FUEL_TYPES.indexOf(st.type) >= 0;
+  const metersReady = FULL_HISTORY_LOADED;
 
   const rows = eqList.map(eq => {
     const recs = (DATA.fuel||[]).filter(f => String(f.equipmentId)===String(eq.equipmentId)).filter(f => {
@@ -5060,7 +5149,7 @@ function renderFuelTypePanel(site) {
       return d && (!start || d >= start) && (!end || d < end);
     });
     const liters = recs.reduce((s,f)=>s+(Number(f.amountLiters)||0),0);
-    const rate = crawler ? avgShiftFuelRate(eq.equipmentId, start, end) : null;
+    const rate = metersReady ? refuelIntervals(eq.equipmentId, start, end) : null;
     return { eq, count: recs.length, liters, rate };
   });
 
@@ -5072,20 +5161,25 @@ function renderFuelTypePanel(site) {
   resultEl.innerHTML = `
     <div style="font-size:12px;color:var(--gray);margin-bottom:10px">
       Период: <b>${periodNote}</b> · ${eqList.length} ед. техники · ${totalCount} заправок · ${totalLiters.toLocaleString("ru-RU")} л всего
-      ${!crawler ? `<div style="color:var(--gold-dark,#a15c00);margin-top:4px">⚠️ Для типа «${st.type}» расход л/ч не считается — нет объективного метода без данных хронометража (заправка не 2 раза за дневную смену).</div>` : ""}
+      ${!metersReady ? `<div style="margin-top:6px"><button class="btn btn-gold" style="width:auto;padding:7px 12px;font-size:12px" onclick="loadFullHistory(this)">⏱ Загрузить журнал осмотров для расчёта л/ч</button> <span style="color:var(--gray)">остаток топлива и моточасы берутся из осмотров</span></div>` : ""}
     </div>
     <div class="tbl-wrap">
       <table style="font-size:13px">
-        <thead><tr><th>Техника</th><th>Заправок</th><th>Литров</th>${crawler ? "<th>л/ч</th>" : ""}</tr></thead>
+        <thead><tr><th>Техника</th><th>Заправок</th><th>Заправлено, л</th><th>Израсходовано, л</th><th>Моточасов</th><th>л/ч</th></tr></thead>
         <tbody>${rows.map(r => `
           <tr style="cursor:pointer" onclick="selectFuelHistoryEquipment('${site}','${r.eq.equipmentId}')" title="Открыть историю по этой машине">
             <td><b>${r.eq.equipmentId}</b> — ${r.eq.model||""}</td>
             <td>${r.count}</td>
             <td>${r.liters.toLocaleString("ru-RU")}</td>
-            ${crawler ? `<td>${r.rate ? `<b>${r.rate.avg}</b> <span style="color:var(--gray);font-size:11px">(${r.rate.days} см.)</span>` : "—"}</td>` : ""}
+            <td>${r.rate && r.rate.rate != null ? r.rate.burned.toLocaleString("ru-RU") : "—"}</td>
+            <td>${r.rate && r.rate.rate != null ? r.rate.hours : "—"}</td>
+            <td title="${r.rate ? `Опорных осмотров (остаток топлива + моточасы): ${r.rate.anchors} из них остаток указан в ${r.rate.withLevel}, моточасы в ${r.rate.withHours}. Пропущено интервалов: слишком длинный ${r.rate.skipped.long}, короче 1 мч ${r.rate.skipped.short}, расход ≤ 0 ${r.rate.skipped.negative}` : ""}">${r.rate && r.rate.rate != null ? `<b>${r.rate.rate}</b> <span style="color:var(--gray);font-size:11px">(${r.rate.intervals.length} инт.)</span>` : (r.rate ? (r.rate.anchors < 2 ? `<span style="color:var(--gray);font-size:11px">нет остатка+моточасов</span>` : "—") : "")}</td>
           </tr>
         `).join("")}</tbody>
       </table>
+    </div>
+    <div style="font-size:11px;color:var(--gray);margin-top:8px">
+      л/ч = израсходовано ÷ моточасы между соседними осмотрами, где указаны остаток топлива и моточасы. Израсходовано = остаток в начале + все заправки между осмотрами − остаток в конце (допущение «до полного бака» не нужно). «—» — нет пары осмотров с остатком и моточасами за период, либо интервал длиннее 72 ч, короче 1 мч или с расходом ≤ 0.
     </div>
   `;
 }
@@ -5165,59 +5259,54 @@ function renderFuelEquipmentHistory(site) {
   }
   const total = list.reduce((s,f)=>s+(Number(f.amountLiters)||0),0);
 
-  // Расход л/ч — только для техники из CRAWLER_FUEL_TYPES, синхронизирован с переключателем
-  // периода наверху вкладки (Сутки/Неделя/Месяц/Всё время), чтобы это число
-  // совпадало со сводкой в списке «По технике» — раньше здесь всегда считалось
-  // «за всё время», независимо от периода, и цифры расходились.
+  // Расход л/ч «от заправки до заправки» с учётом моточасов — для любой техники,
+  // синхронизирован с переключателем периода наверху вкладки (Сутки/Неделя/Месяц/Всё время).
   let rateBlock = "";
-  if (isCrawlerEquipment(equipmentId)) {
+  {
     const period = FUEL_PERIOD[site];
     const periodLabels = { day: "сутки", week: "неделю", month: "месяц", all: "всё время" };
     const periodLabel = periodLabels[period] || "выбранный период";
     const start = fuelPeriodStart(period);
-    let pairs = dayShiftFuelPairs(equipmentId, start, null);
-    // Фолбэк: если в выбранном периоде подходящих дней нет, но они есть в
-    // принципе за всё время — показываем их, но ЧЕСТНО помечаем, что это не
-    // за выбранный период (чтобы число не терялось молча, но и не выдавалось
-    // за то, чем оно не является).
-    let fallbackUsed = false;
-    if (!pairs.length && period !== "all") {
-      const allPairs = dayShiftFuelPairs(equipmentId, null, null);
-      if (allPairs.length) { pairs = allPairs; fallbackUsed = true; }
-    }
-    const fmtDay = d => `${String(d.getDate()).padStart(2,"0")}.${String(d.getMonth()+1).padStart(2,"0")}.${d.getFullYear()}`;
-    const fmtTime = d => `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
-    if (pairs.length) {
-      const avgAll = +(pairs.reduce((s,p)=>s+p.rate,0) / pairs.length).toFixed(2);
-      const headerText = fallbackUsed
-        ? `⚠️ За ${periodLabel} подходящих дней нет — показан расход за всё время (последняя пара: ${fmtDay(pairs[0].date)}): <span style="color:var(--navy)">${avgAll} л/ч</span> по ${pairs.length} см.`
-        : `⛽➜⏱ Расход по сменам (утро+вечер) — в среднем <span style="color:var(--navy)">${avgAll} л/ч</span> по ${pairs.length} см. за ${periodLabel}`;
-      rateBlock = `
-        <div style="font-size:13px;font-weight:700;color:${fallbackUsed ? "var(--gold-dark, #a15c00)" : "var(--navy2)"};margin:14px 0 8px">
-          ${headerText}
-        </div>
-        <div class="tbl-wrap" style="margin-bottom:14px">
-          <table style="font-size:13px">
-            <thead><tr><th>День</th><th>Утро</th><th>Вечер</th><th>Часов</th><th>Расход</th><th>л/ч</th></tr></thead>
-            <tbody>${pairs.map(p => `<tr>
-              <td>${fmtDay(p.date)}</td>
-              <td>${fmtTime(p.startTime)} · ${p.startLiters} л</td>
-              <td>${fmtTime(p.endTime)} · ${p.endLiters} л</td>
-              <td>${p.hours}</td>
-              <td>${p.endLiters} л</td>
-              <td><b>${p.rate}</b></td>
-            </tr>`).join("")}</tbody>
-          </table>
-        </div>
-        <div style="font-size:11px;color:var(--gray);margin-bottom:8px">
-          Расход = объём вечерней заправки (бак снова полный) ÷ часы между заправками. Дни с заправкой не 2 раза за смену сюда не попадают.
-          ${fallbackUsed ? "Ниже — данные за всё время, а не за выбранный период (в нём таких дней не нашлось)." : "Период — как в переключателе Сутки/Неделя/Месяц/Всё время наверху вкладки."}
-        </div>
-      `;
-    } else {
+    if (!FULL_HISTORY_LOADED) {
       rateBlock = `<div style="font-size:12px;color:var(--gray);margin:14px 0 8px">
-        Расход л/ч считается по дням с ровно двумя дневными заправками (утро+вечер). За ${periodLabel} таких дней нет.
+        Для расчёта л/ч нужны остаток топлива и моточасы из журнала осмотров.
+        <button class="btn btn-gold" style="width:auto;padding:7px 12px;font-size:12px;margin-left:6px" onclick="loadFullHistory(this)">⏱ Загрузить журнал осмотров</button>
       </div>`;
+    } else {
+      const r = refuelIntervals(equipmentId, start, null);
+      const fmtDT = d => `${String(d.getDate()).padStart(2,"0")}.${String(d.getMonth()+1).padStart(2,"0")} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
+      const sk = r.skipped, skTotal = sk.long + sk.short + sk.negative;
+      const skText = skTotal ? `Пропущено интервалов: ${skTotal} (длиннее ${REFUEL_MAX_GAP_H} ч — ${sk.long}, короче ${REFUEL_MIN_HOURS} мч — ${sk.short}, расход ≤ 0 — ${sk.negative}).` : "";
+      const coverage = `Осмотров с остатком топлива: ${r.withLevel}, с моточасами: ${r.withHours}, с обоими: ${r.anchors}.`;
+      if (r.rate != null) {
+        rateBlock = `
+          <div style="font-size:13px;font-weight:700;color:var(--navy2);margin:14px 0 8px">
+            ⛽➜⏱ Расход по балансу между осмотрами — <span style="color:var(--navy)">${r.rate} л/ч</span> за ${periodLabel}
+            <span style="font-weight:400;color:var(--gray)">(${r.burned.toLocaleString("ru-RU")} л за ${r.hours} мч, ${r.intervals.length} инт.)</span>
+          </div>
+          <div class="tbl-wrap" style="margin-bottom:14px">
+            <table style="font-size:13px">
+              <thead><tr><th>С осмотра</th><th>По осмотр</th><th>Остаток в начале, л</th><th>Заправлено, л</th><th>Остаток в конце, л</th><th>Израсходовано, л</th><th>Моточасов</th><th>л/ч</th></tr></thead>
+              <tbody>${r.intervals.map(i => `<tr>
+                <td>${fmtDT(i.from)}</td>
+                <td>${fmtDT(i.to)}</td>
+                <td>${i.level0}</td>
+                <td>${i.refueled}</td>
+                <td>${i.level1}</td>
+                <td>${i.burned}</td>
+                <td>${i.hours}</td>
+                <td><b>${i.rate}</b></td>
+              </tr>`).join("")}</tbody>
+            </table>
+          </div>
+          <div style="font-size:11px;color:var(--gray);margin-bottom:8px">
+            Израсходовано = остаток в начале + заправки между осмотрами − остаток в конце. Моточасы и остаток берутся из одного и того же осмотра. ${coverage} ${skText}
+          </div>`;
+      } else {
+        rateBlock = `<div style="font-size:12px;color:var(--gray);margin:14px 0 8px">
+          За ${periodLabel} л/ч посчитать нельзя: нужны минимум два осмотра подряд, где указаны и остаток топлива, и моточасы. ${coverage} ${skText}
+        </div>`;
+      }
     }
   }
 
@@ -5261,20 +5350,19 @@ function fuelRowsToExcel(rows, filename, sheetName) {
   XLSX.writeFile(wb, filename);
 }
 
-// Второй лист "Расход по сменам" — только для техники из CRAWLER_FUEL_TYPES,
-// где заправка дважды за смену позволяет посчитать л/ч (см. dayShiftFuelPairs).
+// Второй лист «Расход по балансу» — л/ч по топливному балансу между осмотрами
+// (см. refuelIntervals), для любой техники.
 function addFuelRateSheet(wb, equipmentId) {
-  const pairs = dayShiftFuelPairs(equipmentId);
-  if (!pairs.length) return;
-  const fmtDay = d => `${String(d.getDate()).padStart(2,"0")}.${String(d.getMonth()+1).padStart(2,"0")}.${d.getFullYear()}`;
-  const fmtTime = d => `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
-  const aoa = [["День","Утро, время","Утро, л","Вечер, время","Вечер, л","Часов","Расход, л","л/ч"]];
-  pairs.forEach(p => aoa.push([
-    fmtDay(p.date), fmtTime(p.startTime), p.startLiters, fmtTime(p.endTime), p.endLiters, p.hours, p.endLiters, p.rate,
-  ]));
+  if (!FULL_HISTORY_LOADED) return; // журнал осмотров ещё не загружен — листа не будет
+  const r = refuelIntervals(equipmentId);
+  if (!r.intervals.length) return;
+  const fmtDT = d => `${String(d.getDate()).padStart(2,"0")}.${String(d.getMonth()+1).padStart(2,"0")}.${d.getFullYear()} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
+  const aoa = [["С осмотра","По осмотр","Остаток в начале, л","Заправлено, л","Остаток в конце, л","Израсходовано, л","Моточасов","л/ч"]];
+  r.intervals.forEach(i => aoa.push([fmtDT(i.from), fmtDT(i.to), i.level0, i.refueled, i.level1, i.burned, i.hours, i.rate]));
+  aoa.push(["Итого","","",r.refueled,"",r.burned,r.hours,r.rate]);
   const ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws["!cols"] = [{wch:12},{wch:10},{wch:8},{wch:10},{wch:8},{wch:8},{wch:10},{wch:8}];
-  XLSX.utils.book_append_sheet(wb, ws, "Расход по сменам");
+  ws["!cols"] = [{wch:18},{wch:18},{wch:12},{wch:12},{wch:12},{wch:14},{wch:10},{wch:8}];
+  XLSX.utils.book_append_sheet(wb, ws, "Расход по балансу");
 }
 
 function exportFuelExcel(site) {
@@ -5322,7 +5410,7 @@ function exportFuelEquipmentExcel(site) {
   ws["!cols"] = [{wch:18},{wch:12},{wch:22},{wch:22},{wch:8},{wch:10}];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Заправки");
-  if (isCrawlerEquipment(equipmentId)) addFuelRateSheet(wb, equipmentId);
+  addFuelRateSheet(wb, equipmentId);
   XLSX.writeFile(wb, `Заправки_${equipmentId}_${today()}.xlsx`);
 }
 
