@@ -173,6 +173,10 @@ td { padding:8px; border-bottom:1px solid var(--border); }
           <input type="date" id="fuelTypeToM" style="max-width:140px">
           <button class="btn btn-ghost" style="width:auto;padding:6px 10px;font-size:11px" onclick="applyFuelTypeCustomRangeM()">Применить</button>
         </div>
+        <div style="margin-bottom:10px">
+          <button class="btn-ghost" style="width:auto;padding:7px 12px;font-size:12px" onclick="exportShiftReportAllM(this)">⬇️ Выгрузить всё: все типы, все операторы (Excel)</button>
+          <span style="font-size:11px;color:var(--gray);margin-left:6px">за выбранный период, вся техника участка</span>
+        </div>
         <div id="fuelTypeFilterResultM"></div>
       </div>
 
@@ -1721,6 +1725,31 @@ function exportShiftReportExcelM() {
   const wb = XLSX.utils.book_new();
   if (!addShiftReportSheet(wb, rows, "MS Forms")) { alert("За выбранный период нет осмотров с данными по этой технике."); return; }
   XLSX.writeFile(wb, `Отчёт_по_сменам_${CURRENT_SITE}_${st.type}_${todayIso()}.xlsx`);
+}
+
+// Отчёт по сменам (формат MS Forms) по ВСЕЙ технике участка и всем операторам за период из панели
+// «Расход по типу техники» (фильтры типа и модели не применяются). Заправки и осмотры догружаются сами.
+async function exportShiftReportAllM(btn) {
+  if (typeof XLSX === "undefined") { alert("Библиотека Excel не загрузилась (нужен интернет) — попробуй ещё раз."); return; }
+  const st = FUEL_TYPE_FILTER_M;
+  const [start, end] = fuelTypeFilterRangeM();
+  if (st.mode === "custom" && (!start || !end)) { alert("Укажите обе даты диапазона и нажмите «Применить»."); return; }
+  const old = btn ? btn.textContent : "";
+  if (btn) { btn.disabled = true; btn.textContent = "⏳ Готовлю отчёт..."; }
+  try {
+    const okFuel = await ensureFuelDataCoverage(st.mode === "custom" ? 0 : st.mode);
+    const need = fuelChkNeededDays(st.mode);
+    while (FUEL_CHK.loading) await new Promise(r => setTimeout(r, 500));
+    await ensureFuelChecklists(need);
+    if (!okFuel || !fuelChkReady(need)) { alert("Не удалось загрузить данные — попробуйте ещё раз."); return; }
+    const ids = (DATA.equipment||[]).filter(e => (e.site||"").trim() === CURRENT_SITE).map(e => e.equipmentId);
+    const rows = shiftReportRows(ids, start, end);
+    const wb = XLSX.utils.book_new();
+    if (!addShiftReportSheet(wb, rows, "Все типы")) { alert("За выбранный период нет осмотров с данными."); return; }
+    XLSX.writeFile(wb, `Отчёт_по_сменам_${CURRENT_SITE}_все_типы_${todayIso()}.xlsx`);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = old; }
+  }
 }
 
 function daysLeft(v) {

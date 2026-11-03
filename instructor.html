@@ -658,6 +658,10 @@ tr:hover td { background:#FAFBFD; }
           <input type="date" id="fuelTypeToAlmaty" style="max-width:150px">
           <button class="btn btn-ghost" style="width:auto;padding:6px 12px;font-size:11px" onclick="applyFuelTypeCustomRange('Алмалы')">Применить</button>
         </div>
+        <div style="margin-bottom:10px">
+          <button class="btn btn-ghost" style="width:auto;padding:7px 12px;font-size:12px" onclick="exportShiftReportAll('Алмалы', this)">⬇️ Выгрузить всё: все типы, все операторы (Excel)</button>
+          <span style="font-size:11px;color:var(--gray);margin-left:6px">за выбранный выше период, вся техника участка</span>
+        </div>
         <div id="fuelTypeFilterResultAlmaty"></div>
       </div>
 
@@ -741,6 +745,10 @@ tr:hover td { background:#FAFBFD; }
           <span style="font-size:11px;color:var(--gray)">—</span>
           <input type="date" id="fuelTypeToAshyktas" style="max-width:150px">
           <button class="btn btn-ghost" style="width:auto;padding:6px 12px;font-size:11px" onclick="applyFuelTypeCustomRange('Ашыктас')">Применить</button>
+        </div>
+        <div style="margin-bottom:10px">
+          <button class="btn btn-ghost" style="width:auto;padding:7px 12px;font-size:12px" onclick="exportShiftReportAll('Ашыктас', this)">⬇️ Выгрузить всё: все типы, все операторы (Excel)</button>
+          <span style="font-size:11px;color:var(--gray);margin-left:6px">за выбранный выше период, вся техника участка</span>
         </div>
         <div id="fuelTypeFilterResultAshyktas"></div>
       </div>
@@ -5320,6 +5328,29 @@ function exportShiftReportExcel(site) {
   const wb = XLSX.utils.book_new();
   if (!addShiftReportSheet(wb, rows, "MS Forms")) { alert("За выбранный период нет осмотров с данными по этой технике."); return; }
   XLSX.writeFile(wb, `Отчёт_по_сменам_${site}_${st.type}_${today()}.xlsx`);
+}
+
+// Отчёт по сменам (формат MS Forms) по ВСЕЙ технике участка и всем операторам за период из панели
+// «Расход по типу техники» (фильтры типа и модели не применяются). Журнал осмотров догружается сам.
+async function exportShiftReportAll(site, btn) {
+  if (typeof XLSX === "undefined") { alert("Библиотека Excel не загрузилась (нужен интернет) — попробуй ещё раз."); return; }
+  const [start, end] = fuelTypeFilterRange(site);
+  if (FUEL_TYPE_FILTER[site].mode === "custom" && (!start || !end)) { alert("Укажите обе даты диапазона и нажмите «Применить»."); return; }
+  const old = btn ? btn.textContent : "";
+  if (btn) { btn.disabled = true; btn.textContent = "⏳ Готовлю отчёт..."; }
+  try {
+    if (!FULL_HISTORY_LOADED) {
+      const ok = await loadFullHistory(null);
+      if (!ok) { alert("Не удалось загрузить журнал осмотров — попробуйте ещё раз."); return; }
+    }
+    const ids = (DATA.equipment||[]).filter(e => (e.site||"").trim() === site).map(e => e.equipmentId);
+    const rows = shiftReportRows(ids, start, end);
+    const wb = XLSX.utils.book_new();
+    if (!addShiftReportSheet(wb, rows, "Все типы")) { alert("За выбранный период нет осмотров с данными."); return; }
+    XLSX.writeFile(wb, `Отчёт_по_сменам_${site}_все_типы_${today()}.xlsx`);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = old; }
+  }
 }
 
 function renderFuelRecordsList(site) {
