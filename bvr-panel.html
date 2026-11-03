@@ -193,7 +193,24 @@ function saveJrows() { try { localStorage.setItem("bvr.jrepl.v1", JSON.stringify
 function saveJrows2() { try { localStorage.setItem("bvr.jrows.v1", JSON.stringify(JROWS)); } catch (e) { msg("Журнал загружен, но не поместился в память браузера: после обновления страницы его нужно загрузить снова.", "err"); } }
 // Смены от буровиков + строки журнала, которых нет среди смен от буровиков (за выбранный период)
 function allShifts() { return mergeSys(SHIFTS, JROWS, $("fFrom").value, $("fTo").value); }
+// Повторная отправка той же смены: запись того же станка/даты/смены/машиниста, чьи номера скважин целиком входят в более позднюю запись — дубль, в счёт не берём
+let DUPS = [];
+function dedupSys(sys) {
+  const grp = {}, drop = {};
+  sys.forEach(s => { const k = s.equipmentId + "|" + s.date + "|" + s.smena + "|" + kpPk(s.empName); (grp[k] = grp[k] || []).push(s); });
+  Object.keys(grp).forEach(k => {
+    const g = grp[k]; if (g.length < 2) return;
+    g.forEach(a => {
+      const na = (a.holes || []).map(h => String(h.n)); if (!na.length) return;
+      const b = g.find(x => x !== a && !drop[x.shiftId] && String(x.createdAt || "") >= String(a.createdAt || "") && (x.createdAt !== a.createdAt || x.shiftId > a.shiftId) && na.every(n => (x.holes || []).some(h => String(h.n) === n)));
+      if (b) drop[a.shiftId] = b.shiftId;
+    });
+  });
+  DUPS = sys.filter(s => drop[s.shiftId]);
+  return sys.filter(s => !drop[s.shiftId]);
+}
 function mergeSys(sys, jrows, from, to) {
+  sys = dedupSys(sys);
   const have = {};
   sys.forEach(s => { have[s.equipmentId + "|" + s.date + "|" + s.smena] = 1; });
   const jr = jrows.filter(r => r.date >= from && r.date <= to && !have[r.rig + "|" + r.date + "|" + r.smena]).map(r => ({
@@ -466,7 +483,7 @@ function render() {
 // ═════════ Сводка ═════════
 function renderSum() {
   const list = filtered(), t = totals(list);
-  let h = '<div class="kpis">' +
+  let h = (DUPS.length ? '<div class="warnbox">Повторно отправленные смены не учтены (оставлена более полная запись): ' + DUPS.map(d => esc(d.equipmentId) + " " + ddmm(d.date) + (d.smena === 1 ? " ночь" : " день") + " · " + esc(d.empName) + " · " + fmt(num(d.metersDrilled), 1) + ' м').join("; ") + '. Запись-дубль остаётся в базе.</div>' : "") + '<div class="kpis">' +
     '<div class="kpi"><span>Смен в периоде</span><b>' + t.shifts + '</b></div>' +
     '<div class="kpi"><span>Обурено, п/м</span><b>' + fmt(t.mH, 1) + '</b><small>' + fmt(t.holes) + ' скв.</small></div>' +
     '<div class="kpi"><span>Перебур, п/м</span><b>' + fmt(t.mI, 1) + '</b><small>' + fmt(t.redrill) + ' скв. · ' + fmt(t.pctRe, 1) + ' % метров</small></div>' +
