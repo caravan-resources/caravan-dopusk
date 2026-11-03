@@ -1151,19 +1151,7 @@ const METER_TOLERANCE_H = 2;   // моточасы не могут выраст�
 // До 02.11.2026 время заправки и осмотров было временем отправки (связь в карьере плохая): данные считаем
 // приблизительно верными и показываем только явные завышения — запас шире, «расход ≤ 0» замечанием не считается.
 const METER_OLD_MARGIN_H = 12;
-const METER_FLOOR_H = 12;
-// Заправляют только днём (экскаваторы и станки — дважды, остальные — раз в смену). Запись с временем ночью
-// (19:00–06:00) — это время отправки при плохой связи: считаем её дневной заправкой того же дня (после 19:00)
-// или предыдущего дня (до 06:00), условно в 13:00. Исходное время в записи не меняется.
-const FUEL_DAY_FROM_H = 6, FUEL_DAY_TO_H = 19, FUEL_NOON_H = 13;
-function fuelEffDate(d) {
-  if (!d) return d;
-  const h = d.getHours();
-  if (h >= FUEL_DAY_FROM_H && h < FUEL_DAY_TO_H) return d;
-  const e = new Date(d.getFullYear(), d.getMonth(), d.getDate(), FUEL_NOON_H, 0, 0);
-  if (h < FUEL_DAY_FROM_H) e.setDate(e.getDate() - 1);
-  return e;
-}   // предел прироста моточасов не ниже длины смены: чек-лист мог уйти позже начала смены
+const METER_FLOOR_H = 12;   // предел прироста моточасов не ниже длины смены: чек-лист мог уйти позже начала смены
 const DUP_WINDOW_MIN = 30;   // повторная отправка осмотра с теми же показаниями не считается отдельным осмотром
 const RULES_STRICT_FROM_MS = Date.UTC(2026, 10, 1, 19, 0, 0);   // 02.11.2026 00:00 по Алматы
 const REFUEL_MAX_RATE = 300;   // л/ч выше — считаем ошибкой ввода (EX1200 ≈ 100–130, самосвалы ≈ 40–70)
@@ -1243,7 +1231,7 @@ function refuelIntervals(equipmentId, start, end) {
   const anchors = balanceAnchors(equipmentId);
   const fuel = (DATA.fuel||[])
     .filter(f => String(f.equipmentId)===String(equipmentId))
-    .map(f => ({ date: fuelEffDate(parseRecDateM(f.date)), liters: Number(f.amountLiters)||0 }))
+    .map(f => ({ date: parseRecDateM(f.date), liters: Number(f.amountLiters)||0 }))
     .filter(f => f.date);
   const out = { intervals: [], skipped: { long: 0, short: 0, negative: 0, negativeOld: 0, badMeter: 0, implausible: 0 },
     anchors: anchors.length, withLevel: anchors.withLevel, withHours: anchors.withHours,
@@ -1335,7 +1323,7 @@ function shiftReportRows(equipmentIds, start, end) {
       return !(q && q.emp === r.emp && q.level === r.level && q.mh === r.mh && q.odo === r.odo && (r.date - q.date) / 60000 <= DUP_WINDOW_MIN);
     });
     const fuel = (DATA.fuel||[]).filter(f => String(f.equipmentId) === id)
-      .map(f => ({ date: fuelEffDate(parseRecDateM(f.date)), liters: Number(f.amountLiters)||0 })).filter(f => f.date);
+      .map(f => ({ date: parseRecDateM(f.date), liters: Number(f.amountLiters)||0 })).filter(f => f.date);
     const eq = eqById[id] || {};
     for (let i = 0; i < list.length; i++) {
       const a = list[i], nx = list[i+1];
@@ -1877,7 +1865,7 @@ function openShiftFix(eq, atMs) {
   if (!row) { alert("Строка не найдена — обновите отчёт."); return; }
   const fmtDT = d => d ? d.toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—";
   const winEnd = row.nextAt ? row.nextAt.getTime() : row.at.getTime() + SHIFT_WINDOW_H * 3600000;
-  const fuel = (DATA.fuel || []).filter(f => String(f.equipmentId) === String(eq)).map(f => { const r = parseRecDateM(f.date); return { f, rec: r, d: fuelEffDate(r) }; })
+  const fuel = (DATA.fuel || []).filter(f => String(f.equipmentId) === String(eq)).map(f => ({ f, d: parseRecDateM(f.date) }))
     .filter(x => x.d && x.d.getTime() > row.at.getTime() && x.d.getTime() <= winEnd).sort((a, b) => a.d - b.d);
   const pad2 = n => String(n).padStart(2, "0");
   const addDate = `${row.at.getFullYear()}-${pad2(row.at.getMonth() + 1)}-${pad2(row.at.getDate())}`;
@@ -1904,7 +1892,7 @@ function openShiftFix(eq, atMs) {
     ${row.nextRecId ? block("Осмотр 2 (следующий)", row.nextRecId, row.mh1, row.level1, row.nextEmp, row.nextAt) : `<div style="font-size:12px;color:var(--gray);margin-bottom:8px">Следующего осмотра нет — править нечего.</div>`}
     ${fuel.length ? `<div style="font-size:12px;font-weight:700;margin:6px 0 4px">Заправки между осмотрами</div>${fuel.map(x => `
       <div style="font-size:12px;display:flex;gap:10px;align-items:center;margin-bottom:4px">
-        <span>${fmtDT(x.rec)}${x.rec && x.d && x.rec.getTime() !== x.d.getTime() ? " (в расчёте — днём)" : ""} · ${escapeHtml(x.f.empName || "—")}</span>
+        <span>${fmtDT(x.d)} · ${escapeHtml(x.f.empName || "—")}</span>
         <label>Литры ${inp("fixFl_" + x.f.recordId, x.f.amountLiters, "1")}</label>
       </div>`).join("")}` : ""}
     <div style="border:1px dashed var(--border);border-radius:8px;padding:8px 10px;margin-top:8px">
