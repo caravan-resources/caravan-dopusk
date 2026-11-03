@@ -177,8 +177,10 @@ input:focus, select:focus, textarea:focus { border-color:var(--gold); }
       </div>
       <label class="label" style="font-size:12px;font-weight:700;color:var(--gray);margin-bottom:6px;display:block">Количество топлива (литры)</label>
       <input type="number" id="fuelAmount" min="0" step="1" placeholder="Например: 150">
-      <label class="label" style="font-size:12px;font-weight:700;color:var(--gray);margin-bottom:6px;display:block">Моточасы на момент заправки (ч)</label>
+      <label class="label" style="font-size:12px;font-weight:700;color:var(--gray);margin-bottom:6px;display:block">Моточасы на момент заправки (ч) — обязательно</label>
       <input type="number" id="fuelHourMeter" min="0" step="0.1" placeholder="Например: 4820.5">
+      <div id="meterErrFuel" class="hint" style="color:var(--red);font-weight:700;display:none;margin-top:6px"></div>
+      <label id="meterOkFuelWrap" style="display:none;align-items:center;gap:8px;margin-top:6px;font-size:12px"><input type="checkbox" id="meterOkFuel" style="width:20px;height:20px"> Показание верное, проверил по счётчику</label>
       <div class="hint" style="margin-top:6px">Впишите по счётчику, если можете посмотреть сейчас. Нужны для расчёта расхода в литрах на моточас.</div>
     </div>
     <div id="fuelHint" class="hint" style="text-align:center"></div>
@@ -221,9 +223,11 @@ input:focus, select:focus, textarea:focus { border-color:var(--gold); }
 
     <div class="card" id="metersCard">
       <div class="card-title">Показания приборов</div>
-      <div class="hint">Впишите, если можете посмотреть сейчас. Не обязательно на каждой машине — но чем чаще, тем точнее будет анализ расхода топлива.</div>
+      <div class="hint" id="metersHint">Моточасы обязательны (кроме легковых и автобусов): впишите по счётчику. Пробег — по желанию. Впишите, если можете посмотреть сейчас. Не обязательно на каждой машине — но чем чаще, тем точнее будет анализ расхода топлива.</div>
       <label class="label" style="font-size:12px;font-weight:700;color:var(--gray);margin-bottom:6px;display:block">Моточасы (ч)</label>
       <input type="number" id="hourMeter" min="0" step="0.1" placeholder="Например: 4820.5">
+      <div id="meterErrInsp" class="hint" style="color:var(--red);font-weight:700;display:none;margin-top:6px"></div>
+      <label id="meterOkInspWrap" style="display:none;align-items:center;gap:8px;margin-top:6px;font-size:12px"><input type="checkbox" id="meterOkInsp" style="width:20px;height:20px"> Показание верное, проверил по счётчику</label>
       <label class="label" style="font-size:12px;font-weight:700;color:var(--gray);margin-bottom:6px;display:block">Пробег (км)</label>
       <input type="number" id="odometer" min="0" step="1" placeholder="Например: 128340">
     </div>
@@ -317,6 +321,82 @@ async function loadCached(url, key, map) {
     if (cached) { OFFLINE_DATA = true; return cached; }
     throw e;
   } finally { clearTimeout(t); }
+}
+
+// ═══════════════════════════════════════════════════════
+// МОТОЧАСЫ: обязательность и проверка при вводе (03.11.2026)
+// Берём последние показания машины с сервера (getLastMeter: осмотры и заправки). Введённое значение
+// меньше предыдущего или больше чем на METER_MAX_STEP_H — ошибка; отправить можно только с отметкой
+// «Показание верное» (например, пропущен осмотр или прошлая запись с опечаткой — её исправляет мастер).
+// Без связи проверка идёт по копии на телефоне (не старше 3 суток); копии нет — проверка пропускается.
+// ═══════════════════════════════════════════════════════
+const METER_MAX_STEP_H = 11;
+let LAST_METER = null;
+
+async function loadLastMeter() {
+  LAST_METER = null;
+  if (!equipment) return;
+  const key = "operbaza.lastMeter." + equipment.equipmentId;
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 8000);
+  try {
+    const res = await fetch(`${CFG.SHEET_URL}?action=getLastMeter&equipmentId=${encodeURIComponent(equipment.equipmentId)}`, { signal: ctrl.signal });
+    const j = await res.json();
+    if (j && j.ok && Array.isArray(j.readings)) {
+      LAST_METER = j.readings;
+      try { localStorage.setItem(key, JSON.stringify({ at: Date.now(), r: j.readings })); } catch (e) {}
+      return;
+    }
+  } catch (e) {} finally { clearTimeout(t); }
+  try {
+    const c = JSON.parse(localStorage.getItem(key) || "null");
+    if (c && Date.now() - c.at < 3 * 86400000) LAST_METER = c.r;
+  } catch (e) {}
+}
+
+function meterReference() {
+  const r = LAST_METER;
+  if (!r || !r.length) return null;
+  for (let i = 0; i < r.length; i++) {
+    const older = r[i + 1];
+    if (!older) return r[i];
+    const d = r[i].hours - older.hours;
+    if (d >= 0 && d <= 30) return r[i];   // последнее показание согласуется с предыдущим; иначе оно подозрительное
+  }
+  return r[0];
+}
+
+function isCarEquipment() { return /Легков|Автобус/i.test((equipment && equipment.type) || ""); }
+
+// Возвращает текст ошибки или "" (значение допустимо / проверять не с чем)
+function meterProblem(valStr) {
+  const val = Number(String(valStr).replace(",", "."));
+  if (valStr === "" || isNaN(val) || val < 0) return "Моточасы указаны неверно: проверьте число";
+  const ref = meterReference();
+  if (!ref) return "";
+  const when = new Date(ref.t).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+  const prev = `было ${ref.hours} (${when}, ${ref.source})`;
+  const d = val - ref.hours;
+  if (d < 0) return `Моточасы меньше предыдущих: ${prev}, введено ${val}. Проверьте показание счётчика.`;
+  if (d > METER_MAX_STEP_H) return `Моточасы выросли на ${Math.round(d * 10) / 10} ч — больше ${METER_MAX_STEP_H} ч с прошлого показания: ${prev}, введено ${val}. Проверьте показание счётчика.`;
+  return "";
+}
+
+// Общая проверка поля моточасов перед отправкой. Возвращает {ok, confirmedNote}
+function meterGate(valStr, errId, wrapId, okId) {
+  const errEl = document.getElementById(errId), wrap = document.getElementById(wrapId), ok = document.getElementById(okId);
+  const show = (msg, needConfirm) => { errEl.textContent = msg; errEl.style.display = msg ? "block" : "none"; wrap.style.display = needConfirm ? "flex" : "none"; };
+  if (valStr === "") {
+    if (isCarEquipment()) { show("", false); return { ok: true, confirmedNote: "" }; }
+    show("Укажите моточасы по счётчику — поле обязательное.", false);
+    return { ok: false };
+  }
+  const problem = meterProblem(valStr);
+  if (!problem) { show("", false); return { ok: true, confirmedNote: "" }; }
+  if (/указаны неверно/.test(problem)) { show(problem, false); return { ok: false }; }
+  if (ok.checked) { show(problem, true); return { ok: true, confirmedNote: "подтверждено вручную: " + problem }; }
+  show(problem, true);
+  return { ok: false };
 }
 
 function newClientId() { return "c" + Date.now().toString(36) + Math.random().toString(36).slice(2, 10); }
@@ -422,6 +502,7 @@ async function init() {
     document.getElementById("bvrBtn").style.display = isDrillRig ? "block" : "none";
     document.getElementById("bvrBtnDone").style.display = isDrillRig ? "block" : "none";
 
+    loadLastMeter();   // последние моточасы машины — для проверки ввода (без ожидания)
     gpsResumeIfActive();
     showScreen("Hub");
   } catch(e) {
@@ -554,6 +635,9 @@ function showFuelForm() {
   document.getElementById("fuelEquipmentTitle").textContent = `${equipment.equipmentId} — ${equipment.model}`;
   document.getElementById("fuelAmount").value = "";
   document.getElementById("fuelHourMeter").value = "";
+  document.getElementById("meterErrFuel").style.display = "none";
+  document.getElementById("meterOkFuelWrap").style.display = "none";
+  document.getElementById("meterOkFuel").checked = false;
   const nowA = almatyNow();
   document.getElementById("fuelDate").value = nowA.date;     // по умолчанию сейчас; водитель может указать фактическое время
   document.getElementById("fuelTime").value = nowA.time;
@@ -571,9 +655,10 @@ async function submitFuel() {
   }
 
   const fuelHm = document.getElementById("fuelHourMeter").value;
-  if (fuelHm !== "" && (isNaN(Number(fuelHm)) || Number(fuelHm) < 0)) {
+  const meterGateFuel = meterGate(fuelHm, "meterErrFuel", "meterOkFuelWrap", "meterOkFuel");
+  if (!meterGateFuel.ok) {
     hint.style.color = "var(--red)";
-    hint.textContent = "Моточасы указаны неверно: проверьте число или оставьте поле пустым";
+    hint.textContent = "Проверьте моточасы — см. сообщение под полем";
     return;
   }
 
@@ -648,6 +733,9 @@ function showForm() {
   }
   toggleHandover(isHot); // в горячей пересменке топливо не вносится
   document.getElementById("hourMeter").value = "";
+  document.getElementById("meterErrInsp").style.display = "none";
+  document.getElementById("meterOkInspWrap").style.display = "none";
+  document.getElementById("meterOkInsp").checked = false;
   document.getElementById("odometer").value = "";
 
   itemStates = {};
@@ -728,6 +816,16 @@ async function submitChecklist() {
     return;
   }
 
+  const hourMeterRaw = document.getElementById("hourMeter").value;
+  const meterGateInsp = meterGate(hourMeterRaw, "meterErrInsp", "meterOkInspWrap", "meterOkInsp");
+  if (!meterGateInsp.ok) {
+    hint.style.color = "var(--red)";
+    hint.textContent = "Проверьте моточасы — см. сообщение в блоке «Показания приборов»";
+    const mc = document.getElementById("metersCard");
+    if (mc && mc.scrollIntoView) mc.scrollIntoView({ behavior: "smooth", block: "center" });
+    return;
+  }
+
   const items = Object.values(itemStates).map(v => ({
     section: v.section, itemText: v.itemText, status: v.status, comment: v.comment,
   }));
@@ -752,7 +850,7 @@ async function submitChecklist() {
   }
 
   const hourMeterVal = document.getElementById("hourMeter").value;
-  if (hourMeterVal) items.push({ section: "Общее", itemText: "Моточасы", status: hourMeterVal, comment: "" });
+  if (hourMeterVal) items.push({ section: "Общее", itemText: "Моточасы", status: hourMeterVal, comment: meterGateInsp.confirmedNote || "" });
 
   const odometerVal = document.getElementById("odometer").value;
   if (odometerVal) items.push({ section: "Общее", itemText: "Пробег (км)", status: odometerVal, comment: "" });

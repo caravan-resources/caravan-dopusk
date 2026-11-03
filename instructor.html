@@ -4902,6 +4902,17 @@ function refuelIntervals(equipmentId, start, end) {
   return out;
 }
 
+// Видимые замечания по технике: что отброшено при расчёте л/ч за период (для колонки «Замечания»)
+function skipNoteText(rate) {
+  if (!rate) return "";
+  const k = rate.skipped, parts = [];
+  if (k.badMeter) parts.push("моточасы неверны: " + k.badMeter);
+  if (k.negative) parts.push("расход ≤ 0: " + k.negative);
+  if (k.implausible) parts.push("л/ч выше " + REFUEL_MAX_RATE + ": " + k.implausible);
+  if (k.long) parts.push("пропуск осмотров > " + REFUEL_MAX_GAP_H + " ч: " + k.long);
+  return parts.join("; ");
+}
+
 // Краткий результат для списков: объект или null, если л/ч посчитать нельзя
 function refuelRateLabel(equipmentId, start, end) {
   const r = refuelIntervals(equipmentId, start, end);
@@ -4960,7 +4971,7 @@ function shiftReportRows(equipmentIds, start, end) {
     if (!wanted.has(id)) return;
     const d = parseRecordDate(rec.date); if (!d) return;
     (pts[id] = pts[id] || []).push({
-      date: d, emp: rec.empName || "",
+      date: d, emp: rec.empName || "", rid: rec.recordId || "",
       level: fuelLevelOfRecord(rec), mh: chkNumItem(rec, "Моточасы"), odo: chkNumItem(rec, "Пробег (км)"),
     });
   });
@@ -4995,7 +5006,8 @@ function shiftReportRows(equipmentIds, start, end) {
       let rate = (!isCar && burned != null && burned > 0 && hours != null && hours >= REFUEL_MIN_HOURS) ? +(burned / hours).toFixed(1) : null;
       if (rate != null && rate > REFUEL_MAX_RATE) { notes.push("л/ч выше " + REFUEL_MAX_RATE + " — проверьте ввод"); rate = null; }
       rows.push({ site: (eq.site||"").trim(), date: shiftDateOf(a.date), shift: shiftLabelOf(a.date), emp: a.emp,
-        type: eq.type || "", id, mh0: a.mh, mh1, odo0: a.odo, odo1, level0: a.level, refueled, hours, burned, rate, note: notes.join("; "), at: a.date });
+        type: eq.type || "", id, mh0: a.mh, mh1, odo0: a.odo, odo1, level0: a.level, refueled, hours, burned, rate, note: notes.join("; "), at: a.date,
+        recId: a.rid, nextRecId: hasNext ? nx.rid : "", nextAt: hasNext ? nx.date : null, nextEmp: hasNext ? nx.emp : "", level1: hasNext ? nx.level : null });
     }
   });
   return rows;
@@ -5014,16 +5026,16 @@ function shiftReportAoa(rows) {
   ]));
 }
 
-function shiftReportTableHtml(rows, limit) {
+function shiftReportTableHtml(rows, limit, withFix) {
   const fmt = d => `${String(d.getDate()).padStart(2,"0")}.${String(d.getMonth()+1).padStart(2,"0")}.${d.getFullYear()}`;
   const v = x => x == null ? "" : x;
   const sorted = shiftReportSort(rows, true), shown = sorted.slice(0, limit || 200);
   return `<div class="tbl-wrap" style="margin-bottom:8px"><table style="font-size:12px">
-      <thead><tr>${SHIFT_REPORT_HEAD.map(h => `<th>${h}</th>`).join("")}</tr></thead>
+      <thead><tr>${SHIFT_REPORT_HEAD.map(h => `<th>${h}</th>`).join("")}${withFix ? "<th></th>" : ""}</tr></thead>
       <tbody>${shown.map(r => `<tr>
         <td>${r.site}</td><td>${fmt(r.date)}</td><td>${r.shift}</td><td>${escapeHtml(r.emp)}</td><td>${r.type}</td><td><b>${r.id}</b></td>
         <td>${v(r.mh0)}</td><td>${v(r.mh1)}</td><td>${v(r.odo0)}</td><td>${v(r.odo1)}</td><td>${v(r.level0)}</td>
-        <td>${r.refueled}</td><td>${v(r.hours)}</td><td>${v(r.burned)}</td><td><b>${v(r.rate)}</b></td><td style="color:var(--red);font-size:11px">${escapeHtml(r.note || "")}</td>
+        <td>${r.refueled}</td><td>${v(r.hours)}</td><td>${v(r.burned)}</td><td><b>${v(r.rate)}</b></td><td style="color:var(--red);font-size:11px">${escapeHtml(r.note || "")}</td>${withFix ? `<td><button class="btn-ghost" style="width:auto;padding:4px 8px;font-size:11px" onclick="openShiftFix('${r.id}', ${r.at.getTime()})">Исправить</button></td>` : ""}
       </tr>`).join("")}</tbody></table></div>
     ${sorted.length > shown.length ? `<div style="font-size:11px;color:var(--gray);margin-bottom:8px">Показаны последние ${shown.length} из ${sorted.length} строк — полный отчёт в Excel.</div>` : ""}
     <div style="font-size:11px;color:var(--gray);margin-bottom:8px">Конец смены — по следующему осмотру этой машины (не позже ${SHIFT_END_MAX_GAP_H} ч). Остаток топлива на конец смены не выводится: он равен остатку на начало следующей смены. Пустая ячейка — значение не указано или нет следующего осмотра.</div>`;
@@ -5307,7 +5319,7 @@ function renderFuelTypePanel(site) {
     </div>
     <div class="tbl-wrap">
       <table style="font-size:13px">
-        <thead><tr><th>Техника</th><th>Заправок</th><th>Заправлено, л</th><th>Израсходовано, л</th><th>Моточасов</th><th>л/ч</th></tr></thead>
+        <thead><tr><th>Техника</th><th>Заправок</th><th>Заправлено, л</th><th>Израсходовано, л</th><th>Моточасов</th><th>л/ч</th><th>Замечания</th></tr></thead>
         <tbody>${rows.map(r => `
           <tr style="cursor:pointer" onclick="selectFuelHistoryEquipment('${site}','${r.eq.equipmentId}')" title="Открыть историю по этой машине">
             <td><b>${r.eq.equipmentId}</b> — ${r.eq.model||""}</td>
@@ -5316,6 +5328,7 @@ function renderFuelTypePanel(site) {
             <td>${r.rate && r.rate.rate != null ? r.rate.burned.toLocaleString("ru-RU") : "—"}</td>
             <td>${r.rate && r.rate.rate != null ? r.rate.hours : "—"}</td>
             <td title="${r.rate ? `Опорных осмотров (остаток топлива + моточасы): ${r.rate.anchors} из них остаток указан в ${r.rate.withLevel}, моточасы в ${r.rate.withHours}. Пропущено интервалов: слишком длинный ${r.rate.skipped.long}, короче 1 мч ${r.rate.skipped.short}, расход ≤ 0 ${r.rate.skipped.negative}, моточасы неверны ${r.rate.skipped.badMeter}, л/ч выше ${REFUEL_MAX_RATE} ${r.rate.skipped.implausible}` : ""}">${r.rate && r.rate.rate != null ? `<b>${r.rate.rate}</b> <span style="color:var(--gray);font-size:11px">(${r.rate.intervals.length} инт.)</span>` : (r.rate ? (r.rate.anchors < 2 ? `<span style="color:var(--gray);font-size:11px">нет остатка+моточасов</span>` : "—") : "")}</td>
+            <td style="color:var(--red);font-size:11px">${skipNoteText(r.rate)}</td>
           </tr>
         `).join("")}</tbody>
       </table>
@@ -5836,12 +5849,27 @@ function isEquipmentUpdatedToday(equipmentId) {
   return !!(fuelToday || chkToday);
 }
 
+// Показания из осмотра: моточасы, остаток топлива, пробег (значения лежат в items с числовым status)
+function chkMeterInfo(rec) {
+  const items = (rec && rec.items) || [];
+  const num = t => { const it = items.find(i => i.itemText === t); if (!it || it.status === "" || it.status == null) return null; const n = Number(it.status); return isNaN(n) ? null : n; };
+  let level = null;
+  for (const it of items) {
+    if (it.itemText === "Моточасы" || it.itemText === "Пробег (км)") continue;
+    if (!/топлив/i.test(it.itemText || "") || it.status === "" || it.status == null) continue;
+    const n = Number(it.status);
+    if (!isNaN(n)) { level = n; break; }
+  }
+  const mhItem = items.find(i => i.itemText === "Моточасы");
+  return { mh: num("Моточасы"), odo: num("Пробег (км)"), level, mhNote: (mhItem && mhItem.comment) || "" };
+}
+
 function equipmentFuelChecklistLines(equipmentId) {
   const lastFuel = lastFuelOf(equipmentId);
   const lastChk  = lastChecklistOf(equipmentId);
 
   const fuelLine = lastFuel
-    ? `⛽ ${fmtRecordDateTime(lastFuel.date)} · ${lastFuel.amountLiters}л · <span style="color:var(--navy)">${escapeHtml(lastFuel.empName||"—")}</span>`
+    ? `⛽ ${fmtRecordDateTime(lastFuel.date)} · ${lastFuel.amountLiters}л${lastFuel.hourMeter !== undefined && lastFuel.hourMeter !== "" ? ` · <b>${lastFuel.hourMeter} мч</b>` : ""} · <span style="color:var(--navy)">${escapeHtml(lastFuel.empName||"—")}</span>`
     : `⛽ заправок не было`;
 
   let chkLine, chkColor = "var(--gray)";
@@ -5850,7 +5878,9 @@ function equipmentFuelChecklistLines(equipmentId) {
       ? lastChk.defectCount > 0
       : (lastChk.items||[]).some(it => it.status === "defect");
     chkColor = hasDefect ? "var(--red)" : "var(--gray)";
-    chkLine = `📋 ${fmtRecordDateTime(lastChk.date)} · <span style="color:var(--navy)">${escapeHtml(lastChk.empName||"—")}</span> ${hasDefect?"⚠":"✓"}`;
+    const mi = chkMeterInfo(lastChk);
+    const miText = (mi.mh != null ? ` · <b>${mi.mh} мч</b>` : "") + (mi.level != null ? ` · ост. ${mi.level} л` : "");
+    chkLine = `📋 ${fmtRecordDateTime(lastChk.date)}${miText} · <span style="color:var(--navy)">${escapeHtml(lastChk.empName||"—")}</span> ${hasDefect?"⚠":"✓"}`;
   } else {
     chkLine = `📋 осмотров не было`;
   }
@@ -6673,7 +6703,7 @@ function renderEquipmentDayDetail(data) {
     html += `<div style="font-weight:700;font-size:12px;color:var(--navy);margin-bottom:4px">⛽ Заправки (${fuel.length})</div>`;
     html += fuel.map(f => `
       <div style="font-size:12px;padding:5px 0;border-bottom:1px solid var(--border)">
-        ${fmtRecordDateTime(f.date)} · <b>${f.amountLiters}л</b> · ${escapeHtml(f.empName||"—")}
+        ${fmtRecordDateTime(f.date)} · <b>${f.amountLiters}л</b>${f.hourMeter !== undefined && f.hourMeter !== "" && f.hourMeter != null ? ` · <b>${f.hourMeter} мч</b>` : ` · <span style="color:var(--gray)">моточасы не указаны</span>`} · ${escapeHtml(f.empName||"—")}
       </div>`).join("");
   }
 
@@ -6698,6 +6728,7 @@ function renderEquipmentDayDetail(data) {
           <b>${fmtRecordDateTime(rec.date)}</b>
           <span style="color:var(--gray)">${escapeHtml(rec.empName||"—")}</span>
         </div>
+        ${(() => { const mi = chkMeterInfo(rec); return `<div style="font-size:12px;margin-bottom:4px"><b>Моточасы:</b> ${mi.mh != null ? mi.mh : `<span style="color:var(--red)">не указаны</span>`} · <b>Остаток топлива:</b> ${mi.level != null ? mi.level + " л" : `<span style="color:var(--red)">не указан</span>`}${mi.odo != null ? ` · <b>Пробег:</b> ${mi.odo}` : ""}${mi.mhNote ? `<div style="color:var(--red);font-size:11px">${escapeHtml(mi.mhNote)}</div>` : ""}</div>`; })()}
         ${defects.length
           ? `<div style="color:var(--red);font-size:11px;font-weight:700;margin-bottom:4px">⚠ Неисправностей: ${defects.length}</div>`
           : `<div style="color:var(--green,#2E7D32);font-size:11px;font-weight:700;margin-bottom:4px">✓ Без замечаний</div>`}
