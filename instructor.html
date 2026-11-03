@@ -1682,9 +1682,20 @@ async function statsForRange(from, to) {
 // Подгрузка журнала осмотров по требованию — при входе не грузится, чтобы
 // не тащить мегабайты. Нужен для отчётов и просмотра конкретных осмотров.
 let FULL_HISTORY_LOADED = false;
+let FULL_HISTORY_LOADING = false;   // идёт загрузка (не запускать вторую)
+let FULL_HISTORY_PROMISE = null;
+let FULL_HISTORY_FAILED = false;    // автозагрузка не удалась — повторно сама не стартует, только по кнопке
 
 async function loadFullHistory(btn) {
   if (FULL_HISTORY_LOADED) return true;
+  if (FULL_HISTORY_LOADING) return FULL_HISTORY_PROMISE;   // идёт загрузка — ждём её результат, а не запускаем вторую
+  if (btn) FULL_HISTORY_FAILED = false;
+  FULL_HISTORY_LOADING = true;
+  FULL_HISTORY_PROMISE = loadFullHistoryRun(btn);
+  return FULL_HISTORY_PROMISE;
+}
+
+async function loadFullHistoryRun(btn) {
   const old = btn ? btn.textContent : "";
   if (btn) { btn.disabled = true; btn.textContent = "⏳ Загружаю журнал осмотров..."; }
   try {
@@ -1693,13 +1704,16 @@ async function loadFullHistory(btn) {
     if (Array.isArray(d) && d.length) {
       DATA.checklistRecords = d;
       FULL_HISTORY_LOADED = true;
+      FULL_HISTORY_LOADING = false;
       renderAll();
       if (btn) btn.textContent = `✓ Загружено ${d.length} осмотров`;
       return true;
     }
+    FULL_HISTORY_LOADING = false; FULL_HISTORY_FAILED = true;
     if (btn) { btn.disabled = false; btn.textContent = old; }
     return false;
   } catch(e) {
+    FULL_HISTORY_LOADING = false; FULL_HISTORY_FAILED = true;
     if (btn) { btn.disabled = false; btn.textContent = old; }
     console.error("Журнал осмотров:", e);
     return false;
@@ -5318,6 +5332,8 @@ function renderFuelTypePanel(site) {
   }
 
   const metersReady = FULL_HISTORY_LOADED;
+  // осмотры нужны для л/ч — грузим сами при открытии отчёта (один раз; при сбое — кнопка)
+  if (!metersReady && !FULL_HISTORY_LOADING && !FULL_HISTORY_FAILED) setTimeout(() => loadFullHistory(), 0);
 
   const rows = eqList.map(eq => {
     const recs = (DATA.fuel||[]).filter(f => String(f.equipmentId)===String(eq.equipmentId)).filter(f => {
@@ -5337,7 +5353,8 @@ function renderFuelTypePanel(site) {
   resultEl.innerHTML = `
     <div style="font-size:12px;color:var(--gray);margin-bottom:10px">
       Период: <b>${periodNote}</b> · ${eqList.length} ед. техники · ${totalCount} заправок · ${totalLiters.toLocaleString("ru-RU")} л всего
-      ${!metersReady ? `<div style="margin-top:6px"><button class="btn btn-gold" style="width:auto;padding:7px 12px;font-size:12px" onclick="loadFullHistory(this)">⏱ Загрузить журнал осмотров для расчёта л/ч</button> <span style="color:var(--gray)">остаток топлива и моточасы берутся из осмотров</span></div>` : ""}
+      ${!metersReady && (FULL_HISTORY_LOADING || (!FULL_HISTORY_FAILED)) ? `<div style="margin-top:6px;color:var(--gray)">⏳ Загружаю осмотры для расчёта л/ч... (может занять до минуты)</div>` : ""}
+      ${!metersReady && FULL_HISTORY_FAILED ? `<div style="margin-top:6px"><button class="btn btn-gold" style="width:auto;padding:7px 12px;font-size:12px" onclick="loadFullHistory(this)">⏱ Загрузить журнал осмотров для расчёта л/ч</button> <span style="color:var(--gray)">автозагрузка не удалась; остаток топлива и моточасы берутся из осмотров</span></div>` : ""}
     </div>
     <div class="tbl-wrap">
       <table style="font-size:13px">
