@@ -136,6 +136,7 @@ a.back { font-size:13px; color:var(--gray); text-decoration:none; display:inline
     <div class="card ok-box">
       <div class="ok-t" id="okT">Смена сдана</div>
       <div class="ok-s" id="okS"></div>
+      <button class="btn btn-gold" id="okMore" style="margin-bottom:8px;display:none">Дописать в эту смену</button>
       <button class="btn btn-gold" id="okNew" style="margin-bottom:8px">Новая смена</button>
       <button class="btn btn-ghost" id="okBack">К технике</button>
     </div>
@@ -491,20 +492,49 @@ function validate() {
   return e;
 }
 
+// Смена уже сдана раньше (повторный вход после обрыва связи, дописывание): ищем запись того же станка/даты/смены/машиниста
+async function findSameShift(pl) {
+  const ctrl = new AbortController(), t = setTimeout(() => ctrl.abort(), 6000);
+  try {
+    const data = await (await fetch(CFG.SHEET_URL + "?action=getDrillShifts&from=" + pl.date + "&to=" + pl.date, { signal: ctrl.signal })).json();
+    if (!Array.isArray(data)) return null;
+    const k = nameKey(pl.empName);
+    const list = data.filter(x => String(x.equipmentId) === EQ_ID && Number(x.smena) === Number(pl.smena) && nameKey(x.empName) === k).sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
+    return list[0] || null;
+  } finally { clearTimeout(t); }
+}
+// Новые данные поверх сданной записи: скважины с тем же номером заменяются, остальные добавляются; простои и замены без повторов
+function mergeInto(old, pl) {
+  const hs = (old.holes || []).map(h => ({ n: h.n, depth: num(h.depth), minutes: num(h.minutes), redrill: !!h.redrill, replacesHole: h.replacesHole || "", block: h.block || "", note: h.note || "" }));
+  pl.holes.forEach(h => { const i = hs.findIndex(x => String(x.n) === String(h.n)); if (i >= 0) hs[i] = h; else hs.push(h); });
+  const dk = d => [d.reason, d.from || "", d.to || "", num(d.minutes)].join("|"), seenD = {}, dts = [];
+  (old.downtimes || []).concat(pl.downtimes).forEach(d => { if (!seenD[dk(d)]) { seenD[dk(d)] = 1; dts.push({ reason: d.reason, minutes: num(d.minutes), from: d.from || "", to: d.to || "", note: d.note || "" }); } });
+  const rk = r => [r.tool, r.atHole || "", r.model || ""].join("|"), seenR = {}, rps = [];
+  (old.replacements || []).concat(pl.replacements).forEach(r => { if (!seenR[rk(r)]) { seenR[rk(r)] = 1; rps.push({ tool: r.tool, model: r.model || "", atHole: r.atHole || "", note: r.note || "" }); } });
+  const bl = Array.from(new Set((old.blockList || []).concat(pl.blocks)));
+  return Object.assign({}, pl, { clientId: old.clientId || pl.clientId, holes: hs, downtimes: dts, replacements: rps, blocks: bl, note: pl.note || old.note || "" });
+}
+
 $("submitBtn").onclick = async () => {
   const errs = validate(), eb = $("subErr");
   if (errs.length) { eb.textContent = errs.join(". "); eb.style.display = "block"; return; }
   eb.style.display = "none";
   const btn = $("submitBtn"); btn.disabled = true; btn.textContent = "Отправка...";
-  const pl = payloadOf(S), c = calc(S);
+  let pl = payloadOf(S), c = calc(S), target = null;
+  if (!EDIT_ID) {
+    try { target = await findSameShift(pl); } catch (e) { target = null; }
+    if (target && confirm("Эта смена уже сдана: " + (target.holes || []).length + " скв., " + fmt(num(target.metersDrilled) + num(target.metersRedrill), 1) + " м.\n\nОК — дописать в неё (скважины с тем же номером заменятся, новые добавятся).\nОтмена — отправить отдельной записью.")) { pl = mergeInto(target, pl); c = calc({ holes: pl.holes, downtimes: pl.downtimes, replacements: pl.replacements }); } else target = null;
+  }
   const summary = c.holes + " скв., " + fmt(c.meters, 1) + " м" + (c.redrill ? ", перебур " + c.redrill + " (" + fmt(c.metersRedrill, 1) + " м)" : "") + ", бурение " + hm(c.minutes);
   try {
-    const r = EDIT_ID ? await post(Object.assign({ action: "updateDrillShift", shiftId: EDIT_ID }, pl)) : await post(Object.assign({ action: "submitDrillShift" }, pl));
+    const r = (EDIT_ID || target) ? await post(Object.assign({ action: "updateDrillShift", shiftId: EDIT_ID || target.shiftId }, pl)) : await post(Object.assign({ action: "submitDrillShift" }, pl));
     if (!r.ok) { eb.textContent = "Ошибка: " + (r.error || "неизвестная"); eb.style.display = "block"; btn.disabled = false; btn.textContent = EDIT_ID ? "Сохранить правку" : "Сдать смену"; return; }
     if (!EDIT_ID) { try { localStorage.removeItem(K_DRAFT); } catch (e) {} }
-    finish(EDIT_ID ? "Правка сохранена" : "Смена сдана", summary);
+    LAST_ID = (EDIT_ID || (target && target.shiftId) || r.shiftId || "");
+    finish(EDIT_ID ? "Правка сохранена" : target ? "Дописано в сданную смену" : "Смена сдана", summary);
+    $("okMore").style.display = (!EDIT_ID && LAST_ID) ? "block" : "none";
   } catch (err) {
-    if (EDIT_ID) { eb.textContent = "Нет связи. Правка не сохранена, повторите."; eb.style.display = "block"; btn.disabled = false; btn.textContent = "Сохранить правку"; return; }
+    if (EDIT_ID || target) { eb.textContent = "Нет связи. Правка не сохранена, повторите."; eb.style.display = "block"; btn.disabled = false; btn.textContent = EDIT_ID ? "Сохранить правку" : "Сдать смену"; return; }
     try { await OB.add({ id: pl.clientId, createdAt: Date.now(), body: Object.assign({ action: "submitDrillShift" }, pl), label: "Смена " + EQ_ID, after: null }); }
     catch (e2) { eb.textContent = "Нет связи, а сохранить смену на телефоне не удалось. Не закрывайте страницу и повторите отправку позже."; eb.style.display = "block"; btn.disabled = false; btn.textContent = "Сдать смену"; return; }
     registerSync();
@@ -519,13 +549,15 @@ function finish(title, sub) {
   $("scMain").classList.remove("active"); $("scDone").classList.add("active"); $("bar").style.display = "none";
   window.scrollTo(0, 0);
 }
+let LAST_ID = "";
+$("okMore").onclick = () => { if (LAST_ID) location.href = "bvr-form.html?eq=" + encodeURIComponent(EQ_ID) + "&shift=" + encodeURIComponent(LAST_ID) + "&back=1"; };
 $("okNew").onclick = () => {
-  if (EDIT_ID) { location.href = "bvr-panel.html"; return; }
-  S = freshState(); applyDefaults(); editIdx = -1; clearHoleForm(false);
+  if (EDIT_ID) { location.href = params.get("back") ? "checklist.html?eq=" + encodeURIComponent(EQ_ID) : "bvr-panel.html"; return; }
+  $("okMore").style.display = "none"; S = freshState(); applyDefaults(); editIdx = -1; clearHoleForm(false);
   $("scDone").classList.remove("active"); $("scMain").classList.add("active"); $("bar").style.display = "block";
   $("submitBtn").disabled = false; $("submitBtn").textContent = "Сдать смену"; renderAll(); window.scrollTo(0, 0);
 };
-$("okBack").onclick = () => { location.href = EDIT_ID ? "bvr-panel.html" : ("checklist.html?eq=" + encodeURIComponent(EQ_ID)); };
+$("okBack").onclick = () => { location.href = (EDIT_ID && !params.get("back")) ? "bvr-panel.html" : ("checklist.html?eq=" + encodeURIComponent(EQ_ID)); };
 
 function applyDefaults() {
   let d = null; try { d = JSON.parse(localStorage.getItem(K_EMP) || "null"); } catch (e) {}

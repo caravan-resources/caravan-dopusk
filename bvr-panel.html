@@ -194,7 +194,7 @@ function saveJrows2() { try { localStorage.setItem("bvr.jrows.v1", JSON.stringif
 // Смены от буровиков + строки журнала, которых нет среди смен от буровиков (за выбранный период)
 function allShifts() { return mergeSys(SHIFTS, JROWS, $("fFrom").value, $("fTo").value); }
 // Повторная отправка той же смены: запись того же станка/даты/смены/машиниста, чьи номера скважин целиком входят в более позднюю запись — дубль, в счёт не берём
-let DUPS = [];
+let DUPS = [], SUSP = [];
 function dedupSys(sys) {
   const grp = {}, drop = {};
   sys.forEach(s => { const k = s.equipmentId + "|" + s.date + "|" + s.smena + "|" + kpPk(s.empName); (grp[k] = grp[k] || []).push(s); });
@@ -207,6 +207,14 @@ function dedupSys(sys) {
     });
   });
   DUPS = sys.filter(s => drop[s.shiftId]);
+  // частичное совпадение номеров скважин у записей одной смены одного машиниста — возможный дубль, решает мастер
+  SUSP = [];
+  Object.keys(grp).forEach(k => {
+    const g = grp[k].filter(x => !drop[x.shiftId]); if (g.length < 2) return;
+    const cnt = {}; g.forEach(x => new Set((x.holes || []).map(h => String(h.n))).forEach(n => { cnt[n] = (cnt[n] || 0) + 1; }));
+    const same = Object.keys(cnt).filter(n => cnt[n] > 1);
+    if (same.length) SUSP.push({ rig: g[0].equipmentId, date: g[0].date, smena: g[0].smena, name: g[0].empName, holes: same.sort((a, b) => a - b), n: g.length });
+  });
   return sys.filter(s => !drop[s.shiftId]);
 }
 function mergeSys(sys, jrows, from, to) {
@@ -483,7 +491,7 @@ function render() {
 // ═════════ Сводка ═════════
 function renderSum() {
   const list = filtered(), t = totals(list);
-  let h = (DUPS.length ? '<div class="warnbox">Повторно отправленные смены не учтены (оставлена более полная запись): ' + DUPS.map(d => esc(d.equipmentId) + " " + ddmm(d.date) + (d.smena === 1 ? " ночь" : " день") + " · " + esc(d.empName) + " · " + fmt(num(d.metersDrilled), 1) + ' м').join("; ") + '. Запись-дубль остаётся в базе.</div>' : "") + '<div class="kpis">' +
+  let h = (DUPS.length ? '<div class="warnbox">Повторно отправленные смены не учтены (оставлена более полная запись): ' + DUPS.map(d => esc(d.equipmentId) + " " + ddmm(d.date) + (d.smena === 1 ? " ночь" : " день") + " · " + esc(d.empName) + " · " + fmt(num(d.metersDrilled), 1) + ' м').join("; ") + '. Запись-дубль остаётся в базе.</div>' : "") + (SUSP.length ? '<div class="warnbox">Возможный дубль (записи одной смены с общими скважинами, метры могут быть посчитаны дважды): ' + SUSP.map(d => esc(d.rig) + " " + ddmm(d.date) + (d.smena === 1 ? " ночь" : " день") + " · " + esc(d.name) + " · общие скв. №" + esc(d.holes.join(", №"))).join("; ") + '. Откройте вкладку «Смены», сверьте и удалите лишнюю запись.</div>' : "") + '<div class="kpis">' +
     '<div class="kpi"><span>Смен в периоде</span><b>' + t.shifts + '</b></div>' +
     '<div class="kpi"><span>Обурено, п/м</span><b>' + fmt(t.mH, 1) + '</b><small>' + fmt(t.holes) + ' скв.</small></div>' +
     '<div class="kpi"><span>Перебур, п/м</span><b>' + fmt(t.mI, 1) + '</b><small>' + fmt(t.redrill) + ' скв. · ' + fmt(t.pctRe, 1) + ' % метров</small></div>' +
