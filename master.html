@@ -1151,7 +1151,33 @@ const METER_TOLERANCE_H = 2;   // моточасы не могут выраст�
 // До 02.11.2026 время заправки и осмотров было временем отправки (связь в карьере плохая): данные считаем
 // приблизительно верными и показываем только явные завышения — запас шире, «расход ≤ 0» замечанием не считается.
 const METER_OLD_MARGIN_H = 12;
-const METER_FLOOR_H = 12;   // предел прироста моточасов не ниже длины смены: чек-лист мог уйти позже начала смены
+const METER_FLOOR_H = 12;
+// Заправляют днём: экскаваторы и станки — дважды, остальные — раз. Чек-лист и заправка при плохой связи уходят позже,
+// но бывают и реальные поздние заправки. Поэтому ночную запись (19:00–06:00) переносим на дневной интервал
+// (условно 13:00 того же или предыдущего дня) ТОЛЬКО если иначе расход этого интервала ≤ 0, а после переноса
+// положителен и он, и интервал, из которого запись забрали. Иначе запись остаётся там, где записана.
+const DOUBLE_REFUEL_TYPES = ["Экскаватор", "Буровой станок"];
+function adaptFuel(anchors, fuel) {
+  const A = anchors.filter(a => a.level != null).slice().sort((x, y) => x.date - y.date);
+  const out = fuel.map(f => Object.assign({}, f, { orig: f.date }));
+  if (A.length < 3 || !fuel.length) return out;
+  const MAXGAP = 72 * 3600000;
+  const idxOf = t => { for (let i = 0; i < A.length - 1; i++) if (t > A[i].date.getTime() && t <= A[i+1].date.getTime() && A[i+1].date - A[i].date <= MAXGAP) return i; return -1; };
+  const burn = i => { let r = 0; out.forEach(f => { const t = f.date.getTime(); if (t > A[i].date.getTime() && t <= A[i+1].date.getTime()) r += f.liters; }); return A[i].level + r - A[i+1].level; };
+  out.forEach(f => {
+    const h = f.orig.getHours();
+    if (h >= 6 && h < 19) return;
+    const eff = new Date(f.orig.getFullYear(), f.orig.getMonth(), f.orig.getDate(), 13, 0, 0);
+    if (h < 6) eff.setDate(eff.getDate() - 1);
+    const ia = idxOf(f.orig.getTime()), ib = idxOf(eff.getTime());
+    if (ia < 0 || ib < 0 || ia === ib) return;
+    if (burn(ib) > 0) return;               // у дневного интервала нет дефицита — оставляем как записано
+    f.date = eff;
+    if (burn(ib) > 0 && burn(ia) > 0) return;
+    f.date = f.orig;                        // перенос не помог — откат
+  });
+  return out;
+}   // предел прироста моточасов не ниже длины смены: чек-лист мог уйти позже начала смены
 const DUP_WINDOW_MIN = 30;   // повторная отправка осмотра с теми же показаниями не считается отдельным осмотром
 const RULES_STRICT_FROM_MS = Date.UTC(2026, 10, 1, 19, 0, 0);   // 02.11.2026 00:00 по Алматы
 const REFUEL_MAX_RATE = 300;   // л/ч выше — считаем ошибкой ввода (EX1200 ≈ 100–130, самосвалы ≈ 40–70)
@@ -1233,6 +1259,7 @@ function refuelIntervals(equipmentId, start, end) {
     .filter(f => String(f.equipmentId)===String(equipmentId))
     .map(f => ({ date: parseRecDateM(f.date), liters: Number(f.amountLiters)||0 }))
     .filter(f => f.date);
+  const fuelAdj = adaptFuel(anchors, fuel);
   const out = { intervals: [], skipped: { long: 0, short: 0, negative: 0, negativeOld: 0, badMeter: 0, implausible: 0 },
     anchors: anchors.length, withLevel: anchors.withLevel, withHours: anchors.withHours,
     burned: 0, hours: 0, refueled: 0, rate: null };
@@ -1246,7 +1273,7 @@ function refuelIntervals(equipmentId, start, end) {
     const hours = b.hours - a.hours;
     if (hours < 0 || hours > Math.max(elapsedH + (oldData ? METER_OLD_MARGIN_H : METER_TOLERANCE_H), METER_FLOOR_H)) { out.skipped.badMeter++; continue; }   // опечатка в моточасах
     if (hours < REFUEL_MIN_HOURS) { out.skipped.short++; continue; }
-    const refueled = fuel.filter(f => f.date > a.date && f.date <= b.date).reduce((s,f)=>s+f.liters,0);
+    const refueled = fuelAdj.filter(f => f.date > a.date && f.date <= b.date).reduce((s,f)=>s+f.liters,0);
     const burned = a.level + refueled - b.level;
     if (burned <= 0) { out.skipped[oldData ? "negativeOld" : "negative"]++; continue; }
     if (burned / hours > REFUEL_MAX_RATE) { out.skipped.implausible++; continue; }
@@ -1323,15 +1350,17 @@ function shiftReportRows(equipmentIds, start, end) {
       return !(q && q.emp === r.emp && q.level === r.level && q.mh === r.mh && q.odo === r.odo && (r.date - q.date) / 60000 <= DUP_WINDOW_MIN);
     });
     const fuel = (DATA.fuel||[]).filter(f => String(f.equipmentId) === id)
-      .map(f => ({ date: parseRecDateM(f.date), liters: Number(f.amountLiters)||0 })).filter(f => f.date);
+      .map(f => ({ date: parseRecDateM(f.date), liters: Number(f.amountLiters)||0, rid: f.recordId, src: f })).filter(f => f.date);
     const eq = eqById[id] || {};
+    const fuelAdj = adaptFuel(list, fuel);
     for (let i = 0; i < list.length; i++) {
       const a = list[i], nx = list[i+1];
       if (start && a.date < start) continue;
       if (end && a.date >= end) continue;
       const hasNext = !!nx && (nx.date - a.date) / 3600000 <= SHIFT_END_MAX_GAP_H;
       const winEnd = hasNext ? nx.date : new Date(a.date.getTime() + SHIFT_WINDOW_H * 3600000);
-      const refueled = fuel.filter(f => f.date > a.date && f.date <= winEnd).reduce((s,f)=>s+f.liters,0);
+      const refuelRecs = fuelAdj.filter(f => f.date > a.date && f.date <= winEnd);
+      const refueled = refuelRecs.reduce((s,f)=>s+f.liters,0);
       if (a.mh == null && a.level == null && a.odo == null && !refueled) continue; // осмотр без данных смены
       const mh1 = hasNext ? nx.mh : null, odo1 = hasNext ? nx.odo : null;
       // Проверка правдоподобия: моточасы не могут вырасти больше, чем прошло времени между осмотрами.
@@ -1348,11 +1377,19 @@ function shiftReportRows(equipmentIds, start, end) {
       }
       const burned = (hasNext && a.level != null && nx.level != null) ? +(a.level + refueled - nx.level).toFixed(1) : null;
       if (burned != null && burned <= 0 && !isCar && !oldRow) notes.push("расход ≤ 0 — проверьте остаток топлива или заправку");
+      // экскаваторы и станки заправляются дважды в сутки — одна запись за сутки подозрительна (с 02.11.2026, после окончания суток)
+      if (!oldRow && hasNext && DOUBLE_REFUEL_TYPES.indexOf(eq.type) >= 0 && shiftLabelOf(a.date) === "Дневная смена") {
+        const d0 = shiftDateOf(a.date).getTime() + 6 * 3600000, d1 = d0 + 24 * 3600000;
+        if (Date.now() >= d1 + 12 * 3600000) {
+          const cnt = fuelAdj.filter(f => f.date.getTime() >= d0 && f.date.getTime() < d1).length;
+          if (cnt < 2) notes.push(`заправок за сутки: ${cnt}, ожидается 2 — возможно, одна не внесена`);
+        }
+      }
       let rate = (!isCar && burned != null && burned > 0 && hours != null && hours >= REFUEL_MIN_HOURS) ? +(burned / hours).toFixed(1) : null;
       if (rate != null && rate > REFUEL_MAX_RATE) { notes.push("л/ч выше " + REFUEL_MAX_RATE + " — проверьте ввод"); rate = null; }
       rows.push({ site: (eq.site||"").trim(), date: shiftDateOf(a.date), shift: shiftLabelOf(a.date), emp: a.emp,
         type: eq.type || "", id, mh0: a.mh, mh1, odo0: a.odo, odo1, level0: a.level, refueled, hours, burned, rate, note: notes.join("; "), at: a.date,
-        recId: a.rid, nextRecId: hasNext ? nx.rid : "", nextAt: hasNext ? nx.date : null, nextEmp: hasNext ? nx.emp : "", level1: hasNext ? nx.level : null });
+        recId: a.rid, refuelRecs, nextRecId: hasNext ? nx.rid : "", nextAt: hasNext ? nx.date : null, nextEmp: hasNext ? nx.emp : "", level1: hasNext ? nx.level : null });
     }
   });
   return rows;
@@ -1865,8 +1902,7 @@ function openShiftFix(eq, atMs) {
   if (!row) { alert("Строка не найдена — обновите отчёт."); return; }
   const fmtDT = d => d ? d.toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—";
   const winEnd = row.nextAt ? row.nextAt.getTime() : row.at.getTime() + SHIFT_WINDOW_H * 3600000;
-  const fuel = (DATA.fuel || []).filter(f => String(f.equipmentId) === String(eq)).map(f => ({ f, d: parseRecDateM(f.date) }))
-    .filter(x => x.d && x.d.getTime() > row.at.getTime() && x.d.getTime() <= winEnd).sort((a, b) => a.d - b.d);
+  const fuel = (row.refuelRecs || []).map(x => ({ f: x.src, rec: x.orig, d: x.date })).sort((a, b) => a.d - b.d);
   const pad2 = n => String(n).padStart(2, "0");
   const addDate = `${row.at.getFullYear()}-${pad2(row.at.getMonth() + 1)}-${pad2(row.at.getDate())}`;
   const inp = (id, val, step) => `<input type="number" id="${id}" value="${val == null ? "" : val}" step="${step || "0.1"}" min="0" style="width:110px;padding:6px 8px;font-size:13px">`;
@@ -1892,7 +1928,7 @@ function openShiftFix(eq, atMs) {
     ${row.nextRecId ? block("Осмотр 2 (следующий)", row.nextRecId, row.mh1, row.level1, row.nextEmp, row.nextAt) : `<div style="font-size:12px;color:var(--gray);margin-bottom:8px">Следующего осмотра нет — править нечего.</div>`}
     ${fuel.length ? `<div style="font-size:12px;font-weight:700;margin:6px 0 4px">Заправки между осмотрами</div>${fuel.map(x => `
       <div style="font-size:12px;display:flex;gap:10px;align-items:center;margin-bottom:4px">
-        <span>${fmtDT(x.d)} · ${escapeHtml(x.f.empName || "—")}</span>
+        <span>${fmtDT(x.rec)}${x.rec && x.d && x.rec.getTime() !== x.d.getTime() ? " (в расчёте — днём)" : ""} · ${escapeHtml(x.f.empName || "—")}</span>
         <label>Литры ${inp("fixFl_" + x.f.recordId, x.f.amountLiters, "1")}</label>
       </div>`).join("")}` : ""}
     <div style="border:1px dashed var(--border);border-radius:8px;padding:8px 10px;margin-top:8px">
