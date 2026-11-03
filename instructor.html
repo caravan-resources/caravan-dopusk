@@ -5383,6 +5383,120 @@ async function exportShiftReportAll(site, btn) {
   }
 }
 
+// ══════════════════════════════════════════════════════
+// ИСПРАВЛЕНИЕ ЗНАЧЕНИЙ (03.11.2026; то же окно, что в master.html)
+// Окно по строке отчёта по сменам: два осмотра (начало и следующий) — моточасы и остаток топлива,
+// и заправки между ними — литры. Изменение пишется на сервер (correctInspectionValue / correctFuelValue)
+// с фамилией и причиной; прежнее значение сохраняется в листе «Корректировки».
+// ══════════════════════════════════════════════════════
+let SHIFT_FIX_CTX = null;
+
+function neighborMeters(eq, recId) {
+  const list = (DATA.checklistRecords || []).filter(r => String(r.equipmentId) === String(eq))
+    .map(r => ({ id: r.recordId, t: parseRecordDate(r.date), mh: chkNumItem(r, "Моточасы") }))
+    .filter(r => r.t && r.mh != null).sort((a, b) => a.t - b.t);
+  const i = list.findIndex(r => r.id === recId);
+  if (i < 0) return "";
+  const prev = list[i - 1], next = list[i + 1];
+  return `соседние осмотры: ${prev ? "до — " + prev.mh : "до — нет"}, ${next ? "после — " + next.mh : "после — нет"}`;
+}
+
+function openShiftFix(eq, atMs) {
+  const row = shiftReportRows([eq], new Date(atMs - 1000), new Date(atMs + 1000))[0];
+  if (!row) { alert("Строка не найдена — обновите отчёт."); return; }
+  const fmtDT = d => d ? d.toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—";
+  const winEnd = row.nextAt ? row.nextAt.getTime() : row.at.getTime() + SHIFT_WINDOW_H * 3600000;
+  const fuel = (DATA.fuel || []).filter(f => String(f.equipmentId) === String(eq)).map(f => ({ f, d: parseRecordDate(f.date) }))
+    .filter(x => x.d && x.d.getTime() > row.at.getTime() && x.d.getTime() <= winEnd).sort((a, b) => a.d - b.d);
+  const inp = (id, val, step) => `<input type="number" id="${id}" value="${val == null ? "" : val}" step="${step || "0.1"}" min="0" style="width:110px;padding:6px 8px;font-size:13px">`;
+  const block = (title, rid, mh, level, who, at) => `
+    <div style="border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:8px">
+      <div style="font-size:12px;font-weight:700;margin-bottom:4px">${title}: ${fmtDT(at)} · ${escapeHtml(who || "—")}</div>
+      <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;font-size:12px">
+        <label>Моточасы ${inp("fixMh_" + rid, mh)}</label>
+        <label>Остаток топлива, л ${inp("fixLv_" + rid, level, "1")}</label>
+      </div>
+      <div style="font-size:11px;color:var(--gray);margin-top:4px">${neighborMeters(eq, rid)}</div>
+    </div>`;
+  SHIFT_FIX_CTX = { eq, row, fuel, orig: {} };
+  SHIFT_FIX_CTX.orig["mh_" + row.recId] = row.mh0; SHIFT_FIX_CTX.orig["lv_" + row.recId] = row.level0;
+  if (row.nextRecId) { SHIFT_FIX_CTX.orig["mh_" + row.nextRecId] = row.mh1; SHIFT_FIX_CTX.orig["lv_" + row.nextRecId] = row.level1; }
+  fuel.forEach(x => { SHIFT_FIX_CTX.orig["fl_" + x.f.recordId] = Number(x.f.amountLiters); });
+  const by = (() => { try { return localStorage.getItem("operbaza.corrBy") || ""; } catch (e) { return ""; } })();
+  openModal(`
+    <div style="font-size:16px;font-weight:800;color:var(--navy);margin-bottom:2px">Исправление значений: ${eq}</div>
+    <div style="font-size:12px;color:var(--gray);margin-bottom:8px">${row.shift}, ${fmtDT(row.at)} · ${escapeHtml(row.emp || "—")}</div>
+    ${row.note ? `<div style="font-size:12px;color:var(--red);margin-bottom:8px">${escapeHtml(row.note)}</div>` : ""}
+    ${block("Осмотр 1 (начало смены)", row.recId, row.mh0, row.level0, row.emp, row.at)}
+    ${row.nextRecId ? block("Осмотр 2 (следующий)", row.nextRecId, row.mh1, row.level1, row.nextEmp, row.nextAt) : `<div style="font-size:12px;color:var(--gray);margin-bottom:8px">Следующего осмотра нет — править нечего.</div>`}
+    ${fuel.length ? `<div style="font-size:12px;font-weight:700;margin:6px 0 4px">Заправки между осмотрами</div>${fuel.map(x => `
+      <div style="font-size:12px;display:flex;gap:10px;align-items:center;margin-bottom:4px">
+        <span>${fmtDT(x.d)} · ${escapeHtml(x.f.empName || "—")}</span>
+        <label>Литры ${inp("fixFl_" + x.f.recordId, x.f.amountLiters, "1")}</label>
+      </div>`).join("")}` : ""}
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 6px">
+      <input type="text" id="fixBy" placeholder="Ваша фамилия" value="${escapeHtml(by)}" style="flex:1;min-width:140px;padding:7px 9px;font-size:13px">
+      <select id="fixReason" style="flex:1;min-width:160px;padding:7px 9px;font-size:13px">
+        <option>Опечатка при вводе</option><option>Неверное показание прибора</option><option>Заправка записана неверно</option><option>Другое</option>
+      </select>
+    </div>
+    <div id="fixMsg" style="font-size:12px;min-height:16px;margin-bottom:6px"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn-ghost" style="width:auto;padding:8px 14px;font-size:13px" onclick="closeModal()">Закрыть</button>
+      <button class="btn-gold" id="fixSaveBtn" style="width:auto;padding:8px 14px;font-size:13px" onclick="saveShiftFix()">Сохранить</button>
+    </div>`);
+}
+
+async function saveShiftFix() {
+  const c = SHIFT_FIX_CTX; if (!c) return;
+  const msg = document.getElementById("fixMsg"), btn = document.getElementById("fixSaveBtn");
+  const by = document.getElementById("fixBy").value.trim(), reason = document.getElementById("fixReason").value;
+  const changes = [];
+  const readNum = id => { const el = document.getElementById(id); return el ? el.value.trim() : null; };
+  const addInsp = (rid, field, key) => {
+    const idp = (field === "hours" ? "fixMh_" : "fixLv_") + rid; const raw = readNum(idp);
+    if (raw === null || raw === "") return;
+    const val = Number(raw.replace(",", "."));
+    const orig = c.orig[key + "_" + rid];
+    if (isNaN(val) || val < 0) { changes.push({ bad: true }); return; }
+    if (orig != null && Number(orig) === val) return;
+    changes.push({ action: "correctInspectionValue", payload: { recordId: rid, field, value: val }, label: (field === "hours" ? "Моточасы" : "Остаток топлива") + " " + (orig == null ? "—" : orig) + " → " + val });
+  };
+  addInsp(c.row.recId, "hours", "mh"); addInsp(c.row.recId, "fuel", "lv");
+  if (c.row.nextRecId) { addInsp(c.row.nextRecId, "hours", "mh"); addInsp(c.row.nextRecId, "fuel", "lv"); }
+  c.fuel.forEach(x => {
+    const raw = readNum("fixFl_" + x.f.recordId); if (raw === null || raw === "") return;
+    const val = Number(raw.replace(",", ".")); const orig = c.orig["fl_" + x.f.recordId];
+    if (isNaN(val) || val <= 0) { changes.push({ bad: true }); return; }
+    if (orig === val) return;
+    changes.push({ action: "correctFuelValue", payload: { recordId: x.f.recordId, field: "liters", value: val }, label: "Заправка " + orig + " → " + val + " л" });
+  });
+  if (changes.some(x => x.bad)) { msg.style.color = "var(--red)"; msg.textContent = "Проверьте числа: значения должны быть не меньше нуля (литры — больше нуля)."; return; }
+  if (!changes.length) { msg.style.color = "var(--red)"; msg.textContent = "Вы ничего не изменили."; return; }
+  if (by.length < 2) { msg.style.color = "var(--red)"; msg.textContent = "Укажите свою фамилию."; return; }
+  try { localStorage.setItem("operbaza.corrBy", by); } catch (e) {}
+  if (!confirm("Сохранить исправления?\n" + changes.map(x => "• " + x.label).join("\n"))) return;
+  btn.disabled = true; msg.style.color = "var(--gray)"; msg.textContent = "Сохраняю…";
+  const errs = [];
+  for (const ch of changes) {
+    try {
+      const res = await fetch(CFG.SHEET_URL, { method: "POST", body: JSON.stringify({ action: ch.action, ...ch.payload, by, reason }) });
+      const val = await res.json();
+      if (!val.ok) errs.push(ch.label + ": " + (val.error || "ошибка"));
+    } catch (e) { errs.push(ch.label + ": нет связи (" + e.message + ")"); }
+  }
+  if (errs.length) { btn.disabled = false; msg.style.color = "var(--red)"; msg.textContent = "Не всё сохранилось: " + errs.join("; "); }
+  else { msg.style.color = "var(--green,#2E7D32)"; msg.textContent = "Сохранено. Обновляю данные…"; }
+  // обновляем данные и перерисовываем (то, что сохранилось, уже на сервере)
+  try {
+    const fr = await jsonpFetchRetry(`${CFG.SHEET_URL}?action=getFuelRecords`, "cb_fuel_records", 40000, 2);
+    if (Array.isArray(fr)) DATA.fuel = fr;
+  } catch (e) { console.error("Обновление заправок:", e); }
+  FULL_HISTORY_LOADED = false;
+  await loadFullHistory(null);   // перечитывает журнал осмотров и перерисовывает панели
+  if (!errs.length) closeModal();
+}
+
 function renderFuelRecordsList(site) {
   const suffix = site === "Ашыктас" ? "Ashyktas" : "Almaty";
   const el = document.getElementById("fuelRecordsList"+suffix);
@@ -5513,7 +5627,7 @@ function renderFuelEquipmentHistory(site) {
   if (FULL_HISTORY_LOADED) {
     const sr = shiftReportRows([equipmentId], fuelPeriodStart(FUEL_PERIOD[site]), null);
     shiftBlock = sr.length
-      ? `<div style="font-size:13px;font-weight:700;color:var(--navy2);margin:14px 0 8px">Отчёт по сменам (как в MS Forms)</div>${shiftReportTableHtml(sr, 200)}`
+      ? `<div style="font-size:13px;font-weight:700;color:var(--navy2);margin:14px 0 8px">Отчёт по сменам (как в MS Forms)</div>${shiftReportTableHtml(sr, 200, true)}`
       : `<div style="font-size:12px;color:var(--gray);margin:14px 0 8px">Отчёт по сменам: за выбранный период осмотров с данными нет.</div>`;
   }
 
