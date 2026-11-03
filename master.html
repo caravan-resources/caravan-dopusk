@@ -1110,6 +1110,7 @@ const METER_TOLERANCE_H = 2;   // моточасы не могут выраст�
 // До 02.11.2026 время заправки и осмотров было временем отправки (связь в карьере плохая): данные считаем
 // приблизительно верными и показываем только явные завышения — запас шире, «расход ≤ 0» замечанием не считается.
 const METER_OLD_MARGIN_H = 12;
+const DUP_WINDOW_MIN = 30;   // повторная отправка осмотра с теми же показаниями не считается отдельным осмотром
 const RULES_STRICT_FROM_MS = Date.UTC(2026, 10, 1, 19, 0, 0);   // 02.11.2026 00:00 по Алматы
 const REFUEL_MAX_RATE = 300;   // л/ч выше — считаем ошибкой ввода (EX1200 ≈ 100–130, самосвалы ≈ 40–70)
 const REFUEL_MAX_GAP_H = 72;
@@ -1165,6 +1166,10 @@ function balanceAnchors(equipmentId) {
     if (level != null && !isNaN(hours)) out.push({ date: d, level, hours });
   });
   out.sort((a,b) => a.date - b.date);
+  // повторная отправка: те же показания в течение DUP_WINDOW_MIN минут — один осмотр
+  for (let i = out.length - 1; i > 0; i--) {
+    if (out[i].level === out[i-1].level && out[i].hours === out[i-1].hours && (out[i].date - out[i-1].date) / 60000 <= DUP_WINDOW_MIN) out.splice(i, 1);
+  }
   out.withLevel = withLevel; out.withHours = withHours;
   return out;
 }
@@ -1271,7 +1276,10 @@ function shiftReportRows(equipmentIds, start, end) {
   });
   const rows = [];
   Object.keys(pts).forEach(id => {
-    const list = pts[id].sort((a,b) => a.date - b.date);
+    const list = pts[id].sort((a,b) => a.date - b.date).filter((r, i, arr) => {
+      const q = arr[i-1];   // дубль: тот же оператор, те же показания, не позже DUP_WINDOW_MIN минут — берём первый
+      return !(q && q.emp === r.emp && q.level === r.level && q.mh === r.mh && q.odo === r.odo && (r.date - q.date) / 60000 <= DUP_WINDOW_MIN);
+    });
     const fuel = (DATA.fuel||[]).filter(f => String(f.equipmentId) === id)
       .map(f => ({ date: parseRecDateM(f.date), liters: Number(f.amountLiters)||0 })).filter(f => f.date);
     const eq = eqById[id] || {};
