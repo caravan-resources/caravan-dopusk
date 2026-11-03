@@ -4844,7 +4844,11 @@ function avgShiftFuelRate(equipmentId, start, end) {
 // израсходовано ≤ 0 (ошибка ввода остатка или незаписанная заправка).
 // ══════════════════════════════════════════════════════
 const REFUEL_MIN_HOURS = 1;
-const METER_TOLERANCE_H = 1;   // моточасы не могут вырасти больше, чем прошло времени между осмотрами (+ запас)
+const METER_TOLERANCE_H = 2;   // моточасы не могут вырасти больше, чем прошло времени между осмотрами (+ запас; с 02.11.2026 — 2 ч)
+// До 02.11.2026 время заправки и осмотров было временем отправки (связь в карьере плохая): данные считаем
+// приблизительно верными и показываем только явные завышения — запас шире, «расход ≤ 0» замечанием не считается.
+const METER_OLD_MARGIN_H = 12;
+const RULES_STRICT_FROM_MS = Date.UTC(2026, 10, 1, 19, 0, 0);   // 02.11.2026 00:00 по Алматы
 const REFUEL_MAX_RATE = 300;   // л/ч выше — считаем ошибкой ввода (EX1200 ≈ 100–130, самосвалы ≈ 40–70)
 const REFUEL_MAX_GAP_H = 72;
 const FUEL_LEVEL_LABEL_RE = /топлив/i;
@@ -4884,7 +4888,7 @@ function refuelIntervals(equipmentId, start, end) {
     .filter(f => String(f.equipmentId)===String(equipmentId))
     .map(f => ({ date: parseRecordDate(f.date), liters: Number(f.amountLiters)||0 }))
     .filter(f => f.date);
-  const out = { intervals: [], skipped: { long: 0, short: 0, negative: 0, badMeter: 0, implausible: 0 },
+  const out = { intervals: [], skipped: { long: 0, short: 0, negative: 0, negativeOld: 0, badMeter: 0, implausible: 0 },
     anchors: anchors.length, withLevel: anchors.withLevel, withHours: anchors.withHours,
     burned: 0, hours: 0, refueled: 0, rate: null };
   for (let i = 1; i < anchors.length; i++) {
@@ -4892,13 +4896,14 @@ function refuelIntervals(equipmentId, start, end) {
     if (start && b.date < start) continue;
     if (end && b.date >= end) continue;
     const elapsedH = (b.date - a.date) / 3600000;
+    const oldData = a.date.getTime() < RULES_STRICT_FROM_MS;
     if (elapsedH > REFUEL_MAX_GAP_H) { out.skipped.long++; continue; }
     const hours = b.hours - a.hours;
-    if (hours < 0 || hours > elapsedH + METER_TOLERANCE_H) { out.skipped.badMeter++; continue; }   // опечатка в моточасах
+    if (hours < 0 || hours > elapsedH + (oldData ? METER_OLD_MARGIN_H : METER_TOLERANCE_H)) { out.skipped.badMeter++; continue; }   // опечатка в моточасах
     if (hours < REFUEL_MIN_HOURS) { out.skipped.short++; continue; }
     const refueled = fuel.filter(f => f.date > a.date && f.date <= b.date).reduce((s,f)=>s+f.liters,0);
     const burned = a.level + refueled - b.level;
-    if (burned <= 0) { out.skipped.negative++; continue; }
+    if (burned <= 0) { out.skipped[oldData ? "negativeOld" : "negative"]++; continue; }
     if (burned / hours > REFUEL_MAX_RATE) { out.skipped.implausible++; continue; }
     out.intervals.push({ from: a.date, to: b.date, level0: a.level, level1: b.level, refueled,
       burned: +burned.toFixed(1), hours: +hours.toFixed(1), rate: +(burned / hours).toFixed(1) });
@@ -4914,7 +4919,7 @@ function refuelIntervals(equipmentId, start, end) {
 function skipNoteText(rate) {
   if (!rate) return "";
   const k = rate.skipped, parts = [];
-  if (k.badMeter) parts.push("моточасы неверны: " + k.badMeter);
+  if (k.badMeter) parts.push("моточасы не согласуются: " + k.badMeter);
   if (k.negative) parts.push("расход ≤ 0: " + k.negative);
   if (k.implausible) parts.push("л/ч выше " + REFUEL_MAX_RATE + ": " + k.implausible);
   if (k.long) parts.push("пропуск осмотров > " + REFUEL_MAX_GAP_H + " ч: " + k.long);
@@ -5002,15 +5007,16 @@ function shiftReportRows(equipmentIds, start, end) {
       // Для легкового транспорта и автобуса в поле «Моточасы» обычно пробег — часы и л/ч не считаем.
       const isCar = /Легков|Автобус/i.test(eq.type || "");
       const notes = [];
+      const oldRow = a.date.getTime() < RULES_STRICT_FROM_MS;   // данные до 02.11.2026 — приблизительные, показываем только явные завышения
       let hours = null;
       if (!isCar && mh1 != null && a.mh != null) {
         const dh = mh1 - a.mh, elapsedH = (nx.date - a.date) / 3600000;
         if (dh < 0) notes.push("моточасы идут вспять — проверьте ввод");
-        else if (dh > elapsedH + METER_TOLERANCE_H) notes.push("прирост моточасов больше времени между осмотрами — вероятна опечатка");
+        else if (dh > elapsedH + (oldRow ? METER_OLD_MARGIN_H : METER_TOLERANCE_H)) notes.push("моточасы не согласуются: прирост больше времени между осмотрами");
         else hours = +dh.toFixed(1);
       }
       const burned = (hasNext && a.level != null && nx.level != null) ? +(a.level + refueled - nx.level).toFixed(1) : null;
-      if (burned != null && burned <= 0 && !isCar) notes.push("расход ≤ 0 — проверьте остаток топлива или заправку");
+      if (burned != null && burned <= 0 && !isCar && !oldRow) notes.push("расход ≤ 0 — проверьте остаток топлива или заправку");
       let rate = (!isCar && burned != null && burned > 0 && hours != null && hours >= REFUEL_MIN_HOURS) ? +(burned / hours).toFixed(1) : null;
       if (rate != null && rate > REFUEL_MAX_RATE) { notes.push("л/ч выше " + REFUEL_MAX_RATE + " — проверьте ввод"); rate = null; }
       rows.push({ site: (eq.site||"").trim(), date: shiftDateOf(a.date), shift: shiftLabelOf(a.date), emp: a.emp,
@@ -5335,7 +5341,7 @@ function renderFuelTypePanel(site) {
             <td>${r.liters.toLocaleString("ru-RU")}</td>
             <td>${r.rate && r.rate.rate != null ? r.rate.burned.toLocaleString("ru-RU") : "—"}</td>
             <td>${r.rate && r.rate.rate != null ? r.rate.hours : "—"}</td>
-            <td title="${r.rate ? `Опорных осмотров (остаток топлива + моточасы): ${r.rate.anchors} из них остаток указан в ${r.rate.withLevel}, моточасы в ${r.rate.withHours}. Пропущено интервалов: слишком длинный ${r.rate.skipped.long}, короче 1 мч ${r.rate.skipped.short}, расход ≤ 0 ${r.rate.skipped.negative}, моточасы неверны ${r.rate.skipped.badMeter}, л/ч выше ${REFUEL_MAX_RATE} ${r.rate.skipped.implausible}` : ""}">${r.rate && r.rate.rate != null ? `<b>${r.rate.rate}</b> <span style="color:var(--gray);font-size:11px">(${r.rate.intervals.length} инт.)</span>` : (r.rate ? (r.rate.anchors < 2 ? `<span style="color:var(--gray);font-size:11px">нет остатка+моточасов</span>` : "—") : "")}</td>
+            <td title="${r.rate ? `Опорных осмотров (остаток топлива + моточасы): ${r.rate.anchors} из них остаток указан в ${r.rate.withLevel}, моточасы в ${r.rate.withHours}. Пропущено интервалов: слишком длинный ${r.rate.skipped.long}, короче 1 мч ${r.rate.skipped.short}, расход ≤ 0 ${r.rate.skipped.negative + r.rate.skipped.negativeOld}, моточасы не согласуются ${r.rate.skipped.badMeter}, л/ч выше ${REFUEL_MAX_RATE} ${r.rate.skipped.implausible}` : ""}">${r.rate && r.rate.rate != null ? `<b>${r.rate.rate}</b> <span style="color:var(--gray);font-size:11px">(${r.rate.intervals.length} инт.)</span>` : (r.rate ? (r.rate.anchors < 2 ? `<span style="color:var(--gray);font-size:11px">нет остатка+моточасов</span>` : "—") : "")}</td>
             <td style="color:var(--red);font-size:11px">${skipNoteText(r.rate)}</td>
           </tr>
         `).join("")}</tbody>
@@ -5639,8 +5645,8 @@ function renderFuelEquipmentHistory(site) {
     } else {
       const r = refuelIntervals(equipmentId, start, null);
       const fmtDT = d => `${String(d.getDate()).padStart(2,"0")}.${String(d.getMonth()+1).padStart(2,"0")} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
-      const sk = r.skipped, skTotal = sk.long + sk.short + sk.negative + sk.badMeter + sk.implausible;
-      const skText = skTotal ? `Пропущено интервалов: ${skTotal} (длиннее ${REFUEL_MAX_GAP_H} ч — ${sk.long}, короче ${REFUEL_MIN_HOURS} мч — ${sk.short}, расход ≤ 0 — ${sk.negative}, моточасы неверны — ${sk.badMeter}, л/ч выше ${REFUEL_MAX_RATE} — ${sk.implausible}).` : "";
+      const sk = r.skipped, skTotal = sk.long + sk.short + sk.negative + sk.negativeOld + sk.badMeter + sk.implausible;
+      const skText = skTotal ? `Пропущено интервалов: ${skTotal} (длиннее ${REFUEL_MAX_GAP_H} ч — ${sk.long}, короче ${REFUEL_MIN_HOURS} мч — ${sk.short}, расход ≤ 0 — ${sk.negative + sk.negativeOld}, моточасы не согласуются — ${sk.badMeter}, л/ч выше ${REFUEL_MAX_RATE} — ${sk.implausible}).` : "";
       const coverage = `Осмотров с остатком топлива: ${r.withLevel}, с моточасами: ${r.withHours}, с обоими: ${r.anchors}.`;
       if (r.rate != null) {
         rateBlock = `
