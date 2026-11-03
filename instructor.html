@@ -4836,6 +4836,8 @@ function avgShiftFuelRate(equipmentId, start, end) {
 // израсходовано ≤ 0 (ошибка ввода остатка или незаписанная заправка).
 // ══════════════════════════════════════════════════════
 const REFUEL_MIN_HOURS = 1;
+const METER_TOLERANCE_H = 1;   // моточасы не могут вырасти больше, чем прошло времени между осмотрами (+ запас)
+const REFUEL_MAX_RATE = 300;   // л/ч выше — считаем ошибкой ввода (EX1200 ≈ 100–130, самосвалы ≈ 40–70)
 const REFUEL_MAX_GAP_H = 72;
 const FUEL_LEVEL_LABEL_RE = /топлив/i;
 
@@ -4874,19 +4876,22 @@ function refuelIntervals(equipmentId, start, end) {
     .filter(f => String(f.equipmentId)===String(equipmentId))
     .map(f => ({ date: parseRecordDate(f.date), liters: Number(f.amountLiters)||0 }))
     .filter(f => f.date);
-  const out = { intervals: [], skipped: { long: 0, short: 0, negative: 0 },
+  const out = { intervals: [], skipped: { long: 0, short: 0, negative: 0, badMeter: 0, implausible: 0 },
     anchors: anchors.length, withLevel: anchors.withLevel, withHours: anchors.withHours,
     burned: 0, hours: 0, refueled: 0, rate: null };
   for (let i = 1; i < anchors.length; i++) {
     const a = anchors[i-1], b = anchors[i];
     if (start && b.date < start) continue;
     if (end && b.date >= end) continue;
-    if ((b.date - a.date) / 3600000 > REFUEL_MAX_GAP_H) { out.skipped.long++; continue; }
+    const elapsedH = (b.date - a.date) / 3600000;
+    if (elapsedH > REFUEL_MAX_GAP_H) { out.skipped.long++; continue; }
     const hours = b.hours - a.hours;
+    if (hours < 0 || hours > elapsedH + METER_TOLERANCE_H) { out.skipped.badMeter++; continue; }   // опечатка в моточасах
     if (hours < REFUEL_MIN_HOURS) { out.skipped.short++; continue; }
     const refueled = fuel.filter(f => f.date > a.date && f.date <= b.date).reduce((s,f)=>s+f.liters,0);
     const burned = a.level + refueled - b.level;
     if (burned <= 0) { out.skipped.negative++; continue; }
+    if (burned / hours > REFUEL_MAX_RATE) { out.skipped.implausible++; continue; }
     out.intervals.push({ from: a.date, to: b.date, level0: a.level, level1: b.level, refueled,
       burned: +burned.toFixed(1), hours: +hours.toFixed(1), rate: +(burned / hours).toFixed(1) });
     out.burned += burned; out.hours += hours; out.refueled += refueled;
@@ -4923,7 +4928,7 @@ function refuelRateLabel(equipmentId, start, end) {
 // ══════════════════════════════════════════════════════
 const SHIFT_END_MAX_GAP_H = 26;
 const SHIFT_WINDOW_H = 13;
-const SHIFT_REPORT_HEAD = ["Участок","Дата","Смена","ФИО","Техника","Бортовой номер","Моточасы на начало смены","Моточасы на конец смены","Пробег на начало смены","Пробег на конец смены","Топливо на начало смены","Заправлено","Отработано часов","Израсходовано","л/ч"];
+const SHIFT_REPORT_HEAD = ["Участок","Дата","Смена","ФИО","Техника","Бортовой номер","Моточасы на начало смены","Моточасы на конец смены","Пробег на начало смены","Пробег на конец смены","Топливо на начало смены","Заправлено","Отработано часов","Израсходовано","л/ч","Замечание"];
 
 function shiftLabelOf(d) {
   const h = d.getHours();
@@ -4974,11 +4979,23 @@ function shiftReportRows(equipmentIds, start, end) {
       const refueled = fuel.filter(f => f.date > a.date && f.date <= winEnd).reduce((s,f)=>s+f.liters,0);
       if (a.mh == null && a.level == null && a.odo == null && !refueled) continue; // осмотр без данных смены
       const mh1 = hasNext ? nx.mh : null, odo1 = hasNext ? nx.odo : null;
-      const hours = (mh1 != null && a.mh != null && mh1 >= a.mh) ? +(mh1 - a.mh).toFixed(1) : null;
+      // Проверка правдоподобия: моточасы не могут вырасти больше, чем прошло времени между осмотрами.
+      // Для легкового транспорта и автобуса в поле «Моточасы» обычно пробег — часы и л/ч не считаем.
+      const isCar = /Легков|Автобус/i.test(eq.type || "");
+      const notes = [];
+      let hours = null;
+      if (!isCar && mh1 != null && a.mh != null) {
+        const dh = mh1 - a.mh, elapsedH = (nx.date - a.date) / 3600000;
+        if (dh < 0) notes.push("моточасы идут вспять — проверьте ввод");
+        else if (dh > elapsedH + METER_TOLERANCE_H) notes.push("прирост моточасов больше времени между осмотрами — вероятна опечатка");
+        else hours = +dh.toFixed(1);
+      }
       const burned = (hasNext && a.level != null && nx.level != null) ? +(a.level + refueled - nx.level).toFixed(1) : null;
-      const rate = (burned != null && burned > 0 && hours != null && hours >= REFUEL_MIN_HOURS) ? +(burned / hours).toFixed(1) : null;
+      if (burned != null && burned <= 0 && !isCar) notes.push("расход ≤ 0 — проверьте остаток топлива или заправку");
+      let rate = (!isCar && burned != null && burned > 0 && hours != null && hours >= REFUEL_MIN_HOURS) ? +(burned / hours).toFixed(1) : null;
+      if (rate != null && rate > REFUEL_MAX_RATE) { notes.push("л/ч выше " + REFUEL_MAX_RATE + " — проверьте ввод"); rate = null; }
       rows.push({ site: (eq.site||"").trim(), date: shiftDateOf(a.date), shift: shiftLabelOf(a.date), emp: a.emp,
-        type: eq.type || "", id, mh0: a.mh, mh1, odo0: a.odo, odo1, level0: a.level, refueled, hours, burned, rate, at: a.date });
+        type: eq.type || "", id, mh0: a.mh, mh1, odo0: a.odo, odo1, level0: a.level, refueled, hours, burned, rate, note: notes.join("; "), at: a.date });
     }
   });
   return rows;
@@ -4993,7 +5010,7 @@ function shiftReportAoa(rows) {
   const fmt = d => `${String(d.getDate()).padStart(2,"0")}.${String(d.getMonth()+1).padStart(2,"0")}.${d.getFullYear()}`;
   const v = x => x == null ? "" : x;
   return [SHIFT_REPORT_HEAD].concat(shiftReportSort(rows, false).map(r => [
-    r.site, fmt(r.date), r.shift, r.emp, r.type, r.id, v(r.mh0), v(r.mh1), v(r.odo0), v(r.odo1), v(r.level0), r.refueled, v(r.hours), v(r.burned), v(r.rate),
+    r.site, fmt(r.date), r.shift, r.emp, r.type, r.id, v(r.mh0), v(r.mh1), v(r.odo0), v(r.odo1), v(r.level0), r.refueled, v(r.hours), v(r.burned), v(r.rate), r.note || "",
   ]));
 }
 
@@ -5006,7 +5023,7 @@ function shiftReportTableHtml(rows, limit) {
       <tbody>${shown.map(r => `<tr>
         <td>${r.site}</td><td>${fmt(r.date)}</td><td>${r.shift}</td><td>${escapeHtml(r.emp)}</td><td>${r.type}</td><td><b>${r.id}</b></td>
         <td>${v(r.mh0)}</td><td>${v(r.mh1)}</td><td>${v(r.odo0)}</td><td>${v(r.odo1)}</td><td>${v(r.level0)}</td>
-        <td>${r.refueled}</td><td>${v(r.hours)}</td><td>${v(r.burned)}</td><td><b>${v(r.rate)}</b></td>
+        <td>${r.refueled}</td><td>${v(r.hours)}</td><td>${v(r.burned)}</td><td><b>${v(r.rate)}</b></td><td style="color:var(--red);font-size:11px">${escapeHtml(r.note || "")}</td>
       </tr>`).join("")}</tbody></table></div>
     ${sorted.length > shown.length ? `<div style="font-size:11px;color:var(--gray);margin-bottom:8px">Показаны последние ${shown.length} из ${sorted.length} строк — полный отчёт в Excel.</div>` : ""}
     <div style="font-size:11px;color:var(--gray);margin-bottom:8px">Конец смены — по следующему осмотру этой машины (не позже ${SHIFT_END_MAX_GAP_H} ч). Остаток топлива на конец смены не выводится: он равен остатку на начало следующей смены. Пустая ячейка — значение не указано или нет следующего осмотра.</div>`;
@@ -5015,7 +5032,7 @@ function shiftReportTableHtml(rows, limit) {
 function addShiftReportSheet(wb, rows, sheetName) {
   if (!rows.length) return false;
   const ws = XLSX.utils.aoa_to_sheet(shiftReportAoa(rows));
-  ws["!cols"] = [{wch:9},{wch:11},{wch:14},{wch:30},{wch:20},{wch:12},{wch:12},{wch:12},{wch:12},{wch:12},{wch:12},{wch:11},{wch:11},{wch:13},{wch:8}];
+  ws["!cols"] = [{wch:9},{wch:11},{wch:14},{wch:30},{wch:20},{wch:12},{wch:12},{wch:12},{wch:12},{wch:12},{wch:12},{wch:11},{wch:11},{wch:13},{wch:8},{wch:60}];
   XLSX.utils.book_append_sheet(wb, ws, sheetName || "По сменам");
   return true;
 }
@@ -5298,7 +5315,7 @@ function renderFuelTypePanel(site) {
             <td>${r.liters.toLocaleString("ru-RU")}</td>
             <td>${r.rate && r.rate.rate != null ? r.rate.burned.toLocaleString("ru-RU") : "—"}</td>
             <td>${r.rate && r.rate.rate != null ? r.rate.hours : "—"}</td>
-            <td title="${r.rate ? `Опорных осмотров (остаток топлива + моточасы): ${r.rate.anchors} из них остаток указан в ${r.rate.withLevel}, моточасы в ${r.rate.withHours}. Пропущено интервалов: слишком длинный ${r.rate.skipped.long}, короче 1 мч ${r.rate.skipped.short}, расход ≤ 0 ${r.rate.skipped.negative}` : ""}">${r.rate && r.rate.rate != null ? `<b>${r.rate.rate}</b> <span style="color:var(--gray);font-size:11px">(${r.rate.intervals.length} инт.)</span>` : (r.rate ? (r.rate.anchors < 2 ? `<span style="color:var(--gray);font-size:11px">нет остатка+моточасов</span>` : "—") : "")}</td>
+            <td title="${r.rate ? `Опорных осмотров (остаток топлива + моточасы): ${r.rate.anchors} из них остаток указан в ${r.rate.withLevel}, моточасы в ${r.rate.withHours}. Пропущено интервалов: слишком длинный ${r.rate.skipped.long}, короче 1 мч ${r.rate.skipped.short}, расход ≤ 0 ${r.rate.skipped.negative}, моточасы неверны ${r.rate.skipped.badMeter}, л/ч выше ${REFUEL_MAX_RATE} ${r.rate.skipped.implausible}` : ""}">${r.rate && r.rate.rate != null ? `<b>${r.rate.rate}</b> <span style="color:var(--gray);font-size:11px">(${r.rate.intervals.length} инт.)</span>` : (r.rate ? (r.rate.anchors < 2 ? `<span style="color:var(--gray);font-size:11px">нет остатка+моточасов</span>` : "—") : "")}</td>
           </tr>
         `).join("")}</tbody>
       </table>
@@ -5444,8 +5461,8 @@ function renderFuelEquipmentHistory(site) {
     } else {
       const r = refuelIntervals(equipmentId, start, null);
       const fmtDT = d => `${String(d.getDate()).padStart(2,"0")}.${String(d.getMonth()+1).padStart(2,"0")} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
-      const sk = r.skipped, skTotal = sk.long + sk.short + sk.negative;
-      const skText = skTotal ? `Пропущено интервалов: ${skTotal} (длиннее ${REFUEL_MAX_GAP_H} ч — ${sk.long}, короче ${REFUEL_MIN_HOURS} мч — ${sk.short}, расход ≤ 0 — ${sk.negative}).` : "";
+      const sk = r.skipped, skTotal = sk.long + sk.short + sk.negative + sk.badMeter + sk.implausible;
+      const skText = skTotal ? `Пропущено интервалов: ${skTotal} (длиннее ${REFUEL_MAX_GAP_H} ч — ${sk.long}, короче ${REFUEL_MIN_HOURS} мч — ${sk.short}, расход ≤ 0 — ${sk.negative}, моточасы неверны — ${sk.badMeter}, л/ч выше ${REFUEL_MAX_RATE} — ${sk.implausible}).` : "";
       const coverage = `Осмотров с остатком топлива: ${r.withLevel}, с моточасами: ${r.withHours}, с обоими: ${r.anchors}.`;
       if (r.rate != null) {
         rateBlock = `
