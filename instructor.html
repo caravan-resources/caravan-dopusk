@@ -285,6 +285,15 @@ tr:hover td { background:#FAFBFD; }
     <!-- ══ ДАШБОРД ══ -->
     <div id="tabDash" class="screen">
 
+      <!-- ═══ ТРЕБУЕТ ИСПРАВЛЕНИЯ: ошибки ввода по топливу и моточасам (исправляют мастера и диспетчеры) ═══ -->
+      <div class="panel" id="fixCard" style="border:1.5px solid var(--red);margin-bottom:14px">
+        <div class="panel-title" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+          <span>🛠 Требует исправления <span id="fixCardCount" style="font-size:12px;color:var(--red)"></span></span>
+          <span id="fixCardCtl" style="display:flex;gap:6px;flex-wrap:wrap"></span>
+        </div>
+        <div id="fixCardBody" style="font-size:12px;color:var(--gray)">Загружаю журнал осмотров…</div>
+      </div>
+
       <!-- Компактная сводка на 4 категории — клик разворачивает подробности одной из них -->
       <div class="dash-cat-row" id="dashCatRow"></div>
 
@@ -1528,7 +1537,32 @@ async function loadAll() {
   renderAll();
 }
 
+// Блок «Требует исправления» на главной: все замечания по смене за период, кнопка «Исправить» у каждой строки
+let FIX_CARD = { days: 7, site: "all" };
+function setFixCard(o) { Object.assign(FIX_CARD, o); renderFixCard(); }
+function renderFixCard() {
+  const box = document.getElementById("fixCardBody"); if (!box) return;
+  const ctl = document.getElementById("fixCardCtl"), cnt = document.getElementById("fixCardCount");
+  const btn = (act, label, on) => `<button class="${on ? "btn btn-gold" : "btn btn-ghost"}" style="width:auto;padding:4px 10px;font-size:11px" onclick="${act}">${label}</button>`;
+  if (ctl) ctl.innerHTML = [["all","Все участки"],["Алмалы","Алмалы"],["Ашыктас","Ашыктас"]].map(([v,l]) => btn(`setFixCard({site:'${v}'})`, l, FIX_CARD.site === v)).join("")
+    + " " + [[7,"7 суток"],[30,"30 суток"]].map(([v,l]) => btn(`setFixCard({days:${v}})`, l, FIX_CARD.days === v)).join("");
+  if (!FULL_HISTORY_LOADED) {
+    if (cnt) cnt.textContent = "";
+    if (FULL_HISTORY_FAILED) { box.innerHTML = `Не удалось загрузить журнал осмотров. <button class="btn btn-gold" style="width:auto;padding:5px 10px;font-size:11px" onclick="loadFullHistory(this)">Повторить</button>`; return; }
+    box.textContent = "Загружаю журнал осмотров… (может занять до минуты)";
+    if (!FULL_HISTORY_LOADING) setTimeout(() => loadFullHistory(), 0);
+    return;
+  }
+  const end = new Date(), start = new Date(end.getTime() - FIX_CARD.days * 86400000);
+  const ids = (DATA.equipment || []).filter(e => FIX_CARD.site === "all" || (e.site || "").trim() === FIX_CARD.site).map(e => e.equipmentId);
+  const rows = shiftReportRows(ids, start, end).filter(r => r.note);
+  if (cnt) cnt.textContent = rows.length ? `(${rows.length})` : "";
+  box.style.color = "";
+  box.innerHTML = rows.length ? siteNotesHtml(rows, 100) : `<div style="color:var(--green,#2E7D32);padding:6px 0">За выбранный период замечаний нет.</div>`;
+}
+
 function renderAll() {
+  renderFixCard();
   renderDashboard();
   renderPersonnelList();
   renderSurveysList();
@@ -1711,9 +1745,11 @@ async function loadFullHistoryRun(btn) {
     }
     FULL_HISTORY_LOADING = false; FULL_HISTORY_FAILED = true;
     if (btn) { btn.disabled = false; btn.textContent = old; }
+    renderFixCard();
     return false;
   } catch(e) {
     FULL_HISTORY_LOADING = false; FULL_HISTORY_FAILED = true;
+    renderFixCard();
     if (btn) { btn.disabled = false; btn.textContent = old; }
     console.error("Журнал осмотров:", e);
     return false;
@@ -4862,6 +4898,7 @@ const METER_TOLERANCE_H = 2;   // моточасы не могут выраст�
 // До 02.11.2026 время заправки и осмотров было временем отправки (связь в карьере плохая): данные считаем
 // приблизительно верными и показываем только явные завышения — запас шире, «расход ≤ 0» замечанием не считается.
 const METER_OLD_MARGIN_H = 12;
+const METER_FLOOR_H = 12;   // предел прироста моточасов не ниже длины смены: чек-лист мог уйти позже начала смены
 const DUP_WINDOW_MIN = 30;   // повторная отправка осмотра с теми же показаниями не считается отдельным осмотром
 const RULES_STRICT_FROM_MS = Date.UTC(2026, 10, 1, 19, 0, 0);   // 02.11.2026 00:00 по Алматы
 const REFUEL_MAX_RATE = 300;   // л/ч выше — считаем ошибкой ввода (EX1200 ≈ 100–130, самосвалы ≈ 40–70)
@@ -4918,7 +4955,7 @@ function refuelIntervals(equipmentId, start, end) {
     const oldData = a.date.getTime() < RULES_STRICT_FROM_MS;
     if (elapsedH > REFUEL_MAX_GAP_H) { out.skipped.long++; continue; }
     const hours = b.hours - a.hours;
-    if (hours < 0 || hours > elapsedH + (oldData ? METER_OLD_MARGIN_H : METER_TOLERANCE_H)) { out.skipped.badMeter++; continue; }   // опечатка в моточасах
+    if (hours < 0 || hours > Math.max(elapsedH + (oldData ? METER_OLD_MARGIN_H : METER_TOLERANCE_H), METER_FLOOR_H)) { out.skipped.badMeter++; continue; }   // опечатка в моточасах
     if (hours < REFUEL_MIN_HOURS) { out.skipped.short++; continue; }
     const refueled = fuel.filter(f => f.date > a.date && f.date <= b.date).reduce((s,f)=>s+f.liters,0);
     const burned = a.level + refueled - b.level;
@@ -5034,7 +5071,7 @@ function shiftReportRows(equipmentIds, start, end) {
       if (!isCar && mh1 != null && a.mh != null) {
         const dh = mh1 - a.mh, elapsedH = (nx.date - a.date) / 3600000;
         if (dh < 0) notes.push("моточасы идут вспять — проверьте ввод");
-        else if (dh > elapsedH + (oldRow ? METER_OLD_MARGIN_H : METER_TOLERANCE_H)) notes.push("моточасы не согласуются: прирост больше времени между осмотрами");
+        else if (dh > Math.max(elapsedH + (oldRow ? METER_OLD_MARGIN_H : METER_TOLERANCE_H), METER_FLOOR_H)) notes.push("моточасы не согласуются: прирост больше времени между осмотрами");
         else hours = +dh.toFixed(1);
       }
       const burned = (hasNext && a.level != null && nx.level != null) ? +(a.level + refueled - nx.level).toFixed(1) : null;
@@ -5071,7 +5108,7 @@ function shiftReportTableHtml(rows, limit, withFix) {
       <tbody>${shown.map(r => `<tr>
         <td>${r.site}</td><td>${fmt(r.date)}</td><td>${r.shift}</td><td>${escapeHtml(r.emp)}</td><td>${r.type}</td><td><b>${r.id}</b></td>
         <td>${v(r.mh0)}</td><td>${v(r.mh1)}</td><td>${v(r.odo0)}</td><td>${v(r.odo1)}</td><td>${v(r.level0)}</td>
-        <td>${r.refueled}</td><td>${v(r.hours)}</td><td>${v(r.burned)}</td><td><b>${v(r.rate)}</b></td><td style="color:var(--red);font-size:11px">${escapeHtml(r.note || "")}</td>${withFix ? `<td><button class="btn-ghost" style="width:auto;padding:4px 8px;font-size:11px" onclick="openShiftFix('${r.id}', ${r.at.getTime()})">Исправить</button></td>` : ""}
+        <td>${r.refueled}</td><td>${v(r.hours)}</td><td>${v(r.burned)}</td><td><b>${v(r.rate)}</b></td><td style="color:var(--red);font-size:11px">${escapeHtml(r.note || "")}</td>${withFix ? `<td><button class="btn-ghost" style="width:auto;padding:4px 8px;font-size:11px" onclick="openShiftFix('${r.id}', ${r.at.getTime()})">${/расход ≤ 0/.test(r.note) ? "Исправить / добавить заправку" : "Исправить"}</button></td>` : ""}
       </tr>`).join("")}</tbody></table></div>
     ${sorted.length > shown.length ? `<div style="font-size:11px;color:var(--gray);margin-bottom:8px">Показаны последние ${shown.length} из ${sorted.length} строк — полный отчёт в Excel.</div>` : ""}
     <div style="font-size:11px;color:var(--gray);margin-bottom:8px">Конец смены — по следующему осмотру этой машины (не позже ${SHIFT_END_MAX_GAP_H} ч). Остаток топлива на конец смены не выводится: он равен остатку на начало следующей смены. Пустая ячейка — значение не указано или нет следующего осмотра.</div>`;
@@ -5447,6 +5484,8 @@ function openShiftFix(eq, atMs) {
   const winEnd = row.nextAt ? row.nextAt.getTime() : row.at.getTime() + SHIFT_WINDOW_H * 3600000;
   const fuel = (DATA.fuel || []).filter(f => String(f.equipmentId) === String(eq)).map(f => ({ f, d: parseRecordDate(f.date) }))
     .filter(x => x.d && x.d.getTime() > row.at.getTime() && x.d.getTime() <= winEnd).sort((a, b) => a.d - b.d);
+  const pad2 = n => String(n).padStart(2, "0");
+  const addDate = `${row.at.getFullYear()}-${pad2(row.at.getMonth() + 1)}-${pad2(row.at.getDate())}`;
   const inp = (id, val, step) => `<input type="number" id="${id}" value="${val == null ? "" : val}" step="${step || "0.1"}" min="0" style="width:110px;padding:6px 8px;font-size:13px">`;
   const block = (title, rid, mh, level, who, at) => `
     <div style="border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:8px">
@@ -5473,6 +5512,17 @@ function openShiftFix(eq, atMs) {
         <span>${fmtDT(x.d)} · ${escapeHtml(x.f.empName || "—")}</span>
         <label>Литры ${inp("fixFl_" + x.f.recordId, x.f.amountLiters, "1")}</label>
       </div>`).join("")}` : ""}
+    <div style="border:1px dashed var(--border);border-radius:8px;padding:8px 10px;margin-top:8px">
+      <div style="font-size:12px;font-weight:700;margin-bottom:4px">Заправка была, но не внесена? Добавить</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:12px">
+        <label>Дата <input type="date" id="addFuelDate" value="${addDate}" style="padding:5px 7px;font-size:12px"></label>
+        <label>Время <input type="time" id="addFuelTime" style="padding:5px 7px;font-size:12px"></label>
+        <label>Литры <input type="number" id="addFuelL" min="1" step="1" style="width:90px;padding:5px 7px;font-size:12px"></label>
+        <label>Моточасы <input type="number" id="addFuelMh" min="0" step="0.1" style="width:100px;padding:5px 7px;font-size:12px"></label>
+        <label>Кто заправлял <input type="text" id="addFuelWho" value="${escapeHtml(row.emp || "")}" style="width:170px;padding:5px 7px;font-size:12px"></label>
+      </div>
+      <div style="font-size:11px;color:var(--gray);margin-top:4px">Время — между осмотрами (${fmtDT(row.at)} – ${fmtDT(row.nextAt)}). Если поле «Литры» пустое, заправка не добавляется.</div>
+    </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 6px">
       <input type="text" id="fixBy" placeholder="Ваша фамилия" value="${escapeHtml(by)}" style="flex:1;min-width:140px;padding:7px 9px;font-size:13px">
       <select id="fixReason" style="flex:1;min-width:160px;padding:7px 9px;font-size:13px">
@@ -5510,6 +5560,20 @@ async function saveShiftFix() {
     if (orig === val) return;
     changes.push({ action: "correctFuelValue", payload: { recordId: x.f.recordId, field: "liters", value: val }, label: "Заправка " + orig + " → " + val + " л" });
   });
+  const addL = readNum("addFuelL");
+  if (addL !== null && addL !== "") {
+    const lit = Number(addL.replace(",", ".")), d = readNum("addFuelDate"), t = readNum("addFuelTime"), who = (readNum("addFuelWho") || "").trim();
+    const mhRaw = readNum("addFuelMh"), mh = (mhRaw === null || mhRaw === "") ? "" : Number(mhRaw.replace(",", "."));
+    if (isNaN(lit) || lit <= 0 || lit > 10000 || !d || !t || who.length < 2 || (mh !== "" && (isNaN(mh) || mh < 0))) {
+      msg.style.color = "var(--red)"; msg.textContent = "Заправка: укажите дату, время, литры (больше 0), кто заправлял; моточасы — число не меньше 0."; return;
+    }
+    const at = new Date(d + "T" + t), lo = c.row.at.getTime(), hi = c.row.nextAt ? c.row.nextAt.getTime() : lo + SHIFT_WINDOW_H * 3600000;
+    if (isNaN(at.getTime()) || at.getTime() > Date.now()) { msg.style.color = "var(--red)"; msg.textContent = "Заправка: дата и время неверны или в будущем."; return; }
+    if (at.getTime() <= lo || at.getTime() > hi) {
+      if (!confirm("Время заправки вне интервала между осмотрами — в расчёт этой смены она не попадёт. Всё равно добавить?")) return;
+    }
+    changes.push({ action: "addFuelRecordFix", payload: { equipmentId: c.eq, empName: who, fuelAt: d + "T" + t, liters: lit, hourMeter: mh }, label: "Добавить заправку " + lit + " л, " + d.split("-").reverse().join(".") + " " + t });
+  }
   if (changes.some(x => x.bad)) { msg.style.color = "var(--red)"; msg.textContent = "Проверьте числа: значения должны быть не меньше нуля (литры — больше нуля)."; return; }
   if (!changes.length) { msg.style.color = "var(--red)"; msg.textContent = "Вы ничего не изменили."; return; }
   if (by.length < 2) { msg.style.color = "var(--red)"; msg.textContent = "Укажите свою фамилию."; return; }
@@ -5544,12 +5608,12 @@ function siteNotesHtml(rows, limit) {
   if (!sorted.length) return `<div style="font-size:12px;color:var(--gray);padding:8px 0">За выбранный период замечаний нет.</div>`;
   return `<div style="font-size:12px;font-weight:700;color:var(--navy2);margin:8px 0">Замечания за период: ${sorted.length}${sorted.length > shown.length ? ` (показаны последние ${shown.length})` : ""}</div>
     <div class="tbl-wrap" style="margin-bottom:12px"><table style="font-size:12px">
-      <thead><tr><th>Дата</th><th>Смена</th><th>Техника</th><th>ФИО</th><th>Моточасы</th><th>Замечание</th><th></th></tr></thead>
+      <thead><tr><th>Участок</th><th>Дата</th><th>Смена</th><th>Техника</th><th>ФИО</th><th>Моточасы</th><th>Замечание</th><th></th></tr></thead>
       <tbody>${shown.map(r => `<tr>
-        <td>${fmt(r.date)}</td><td>${r.shift}</td><td><b>${r.id}</b></td><td>${escapeHtml(r.emp)}</td>
+        <td>${escapeHtml(r.site || "")}</td><td>${fmt(r.date)}</td><td>${r.shift}</td><td><b>${r.id}</b></td><td>${escapeHtml(r.emp)}</td>
         <td>${r.mh0 == null ? "" : r.mh0} → ${r.mh1 == null ? "" : r.mh1}</td>
         <td style="color:var(--red);font-size:11px">${escapeHtml(r.note)}</td>
-        <td><button class="btn-ghost" style="width:auto;padding:4px 8px;font-size:11px" onclick="openShiftFix('${r.id}', ${r.at.getTime()})">Исправить</button></td>
+        <td><button class="btn-ghost" style="width:auto;padding:4px 8px;font-size:11px" onclick="openShiftFix('${r.id}', ${r.at.getTime()})">${/расход ≤ 0/.test(r.note) ? "Исправить / добавить заправку" : "Исправить"}</button></td>
       </tr>`).join("")}</tbody></table></div>`;
 }
 
@@ -5577,7 +5641,7 @@ async function showSiteNotes(site, btn) {
     if (btn) { btn.disabled = false; btn.textContent = old; }
   }
 }
-function refreshSiteNotes() { if (SITE_NOTES_CTX) renderSiteNotes(SITE_NOTES_CTX.site); }
+function refreshSiteNotes() { if (SITE_NOTES_CTX) renderSiteNotes(SITE_NOTES_CTX.site); renderFixCard(); }
 
 function renderFuelRecordsList(site) {
   const suffix = site === "Ашыктас" ? "Ashyktas" : "Almaty";
