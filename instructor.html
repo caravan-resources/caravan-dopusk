@@ -662,6 +662,10 @@ tr:hover td { background:#FAFBFD; }
           <button class="btn btn-ghost" style="width:auto;padding:7px 12px;font-size:12px" onclick="exportShiftReportAll('Алмалы', this)">⬇️ Выгрузить всё: все типы, все операторы (Excel)</button>
           <span style="font-size:11px;color:var(--gray);margin-left:6px">за выбранный выше период, вся техника участка</span>
         </div>
+        <div style="margin-bottom:10px">
+          <button class="btn btn-ghost" style="width:auto;padding:7px 12px;font-size:12px" onclick="showSiteNotes('Алмалы', this)">Замечания по участку (список для исправления)</button>
+        </div>
+        <div id="fuelNotesBoxAlmaty"></div>
         <div id="fuelTypeFilterResultAlmaty"></div>
       </div>
 
@@ -750,6 +754,10 @@ tr:hover td { background:#FAFBFD; }
           <button class="btn btn-ghost" style="width:auto;padding:7px 12px;font-size:12px" onclick="exportShiftReportAll('Ашыктас', this)">⬇️ Выгрузить всё: все типы, все операторы (Excel)</button>
           <span style="font-size:11px;color:var(--gray);margin-left:6px">за выбранный выше период, вся техника участка</span>
         </div>
+        <div style="margin-bottom:10px">
+          <button class="btn btn-ghost" style="width:auto;padding:7px 12px;font-size:12px" onclick="showSiteNotes('Ашыктас', this)">Замечания по участку (список для исправления)</button>
+        </div>
+        <div id="fuelNotesBoxAshyktas"></div>
         <div id="fuelTypeFilterResultAshyktas"></div>
       </div>
 
@@ -5495,7 +5503,50 @@ async function saveShiftFix() {
   FULL_HISTORY_LOADED = false;
   await loadFullHistory(null);   // перечитывает журнал осмотров и перерисовывает панели
   if (!errs.length) closeModal();
+  refreshSiteNotes();
 }
+
+// Список «Замечания по участку»: все строки отчёта по сменам с замечаниями за период панели, с кнопкой «Исправить»
+function siteNotesHtml(rows, limit) {
+  const fmt = d => `${String(d.getDate()).padStart(2,"0")}.${String(d.getMonth()+1).padStart(2,"0")}.${d.getFullYear()}`;
+  const sorted = shiftReportSort(rows, true), shown = sorted.slice(0, limit || 300);
+  if (!sorted.length) return `<div style="font-size:12px;color:var(--gray);padding:8px 0">За выбранный период замечаний нет.</div>`;
+  return `<div style="font-size:12px;font-weight:700;color:var(--navy2);margin:8px 0">Замечания за период: ${sorted.length}${sorted.length > shown.length ? ` (показаны последние ${shown.length})` : ""}</div>
+    <div class="tbl-wrap" style="margin-bottom:12px"><table style="font-size:12px">
+      <thead><tr><th>Дата</th><th>Смена</th><th>Техника</th><th>ФИО</th><th>Моточасы</th><th>Замечание</th><th></th></tr></thead>
+      <tbody>${shown.map(r => `<tr>
+        <td>${fmt(r.date)}</td><td>${r.shift}</td><td><b>${r.id}</b></td><td>${escapeHtml(r.emp)}</td>
+        <td>${r.mh0 == null ? "" : r.mh0} → ${r.mh1 == null ? "" : r.mh1}</td>
+        <td style="color:var(--red);font-size:11px">${escapeHtml(r.note)}</td>
+        <td><button class="btn-ghost" style="width:auto;padding:4px 8px;font-size:11px" onclick="openShiftFix('${r.id}', ${r.at.getTime()})">Исправить</button></td>
+      </tr>`).join("")}</tbody></table></div>`;
+}
+
+let SITE_NOTES_CTX = null;
+function renderSiteNotes(site) {
+  const box = document.getElementById("fuelNotesBox" + (site === "Ашыктас" ? "Ashyktas" : "Almaty"));
+  if (!box) return;
+  const [start, end] = fuelTypeFilterRange(site);
+  const ids = (DATA.equipment||[]).filter(e => (e.site||"").trim() === site).map(e => e.equipmentId);
+  box.innerHTML = siteNotesHtml(shiftReportRows(ids, start, end).filter(r => r.note), 300);
+}
+async function showSiteNotes(site, btn) {
+  const [start, end] = fuelTypeFilterRange(site);
+  if (FUEL_TYPE_FILTER[site].mode === "custom" && (!start || !end)) { alert("Укажите обе даты диапазона и нажмите «Применить»."); return; }
+  const old = btn ? btn.textContent : "";
+  if (btn) { btn.disabled = true; btn.textContent = "Готовлю список..."; }
+  try {
+    if (!FULL_HISTORY_LOADED) {
+      const ok = await loadFullHistory(null);
+      if (!ok) { alert("Не удалось загрузить журнал осмотров — попробуйте ещё раз."); return; }
+    }
+    SITE_NOTES_CTX = { site };
+    renderSiteNotes(site);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = old; }
+  }
+}
+function refreshSiteNotes() { if (SITE_NOTES_CTX) renderSiteNotes(SITE_NOTES_CTX.site); }
 
 function renderFuelRecordsList(site) {
   const suffix = site === "Ашыктас" ? "Ashyktas" : "Almaty";
