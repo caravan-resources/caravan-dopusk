@@ -4895,6 +4895,123 @@ function refuelRateLabel(equipmentId, start, end) {
   return r.rate == null ? null : r;
 }
 
+// ══════════════════════════════════════════════════════
+// 03.11.2026: ОТЧЁТ ПО СМЕНАМ В ФОРМЕ MS FORMS
+// ──────────────────────────────────────────────────────
+// Одна строка = один осмотр машины (начало смены). Колонки — как во вкладке
+// «MS Forms» книги аналитики, кроме остатка топлива на конец смены (он и так
+// равен остатку на начало следующей смены). «Конец смены» восстанавливается из
+// СЛЕДУЮЩЕГО осмотра той же машины (если он не дальше SHIFT_END_MAX_GAP_H):
+//   моточасы/пробег на конец = значения следующего осмотра;
+//   отработано = моточасы_конец − моточасы_начало;
+//   заправлено = заправки в (осмотр; следующий осмотр] (если следующего нет —
+//     в течение SHIFT_WINDOW_H часов после осмотра);
+//   израсходовано = остаток_начало + заправлено − остаток следующего осмотра.
+// Пустые ячейки — значение не указано в осмотре или нет следующего осмотра.
+// Осмотр за час до начала смены (18:00–18:59 / 06:00–06:59) относится к
+// заступающей смене; осмотр до 06:00 — к ночной смене предыдущих суток.
+// В «Бортовой номер» — полный код машины (HT117), чтобы номера разных типов
+// техники не путались. Логика та же в instructor.html и master.html.
+// ══════════════════════════════════════════════════════
+const SHIFT_END_MAX_GAP_H = 26;
+const SHIFT_WINDOW_H = 13;
+const SHIFT_REPORT_HEAD = ["Участок","Дата","Смена","ФИО","Техника","Бортовой номер","Моточасы на начало смены","Моточасы на конец смены","Пробег на начало смены","Пробег на конец смены","Топливо на начало смены","Заправлено","Отработано часов","Израсходовано","л/ч"];
+
+function shiftLabelOf(d) {
+  const h = d.getHours();
+  if (h === 18) return "Ночная смена";
+  if (h === 6) return "Дневная смена";
+  return (h >= 7 && h < 19) ? "Дневная смена" : "Ночная смена";
+}
+function shiftDateOf(d) {
+  const x = new Date(d.getTime());
+  if (x.getHours() < 6) x.setDate(x.getDate() - 1);
+  x.setHours(0, 0, 0, 0);
+  return x;
+}
+function chkNumItem(rec, text) {
+  const it = (rec.items||[]).find(i => i.itemText === text);
+  if (!it || it.status === "" || it.status == null) return null;
+  const v = Number(it.status);
+  return isNaN(v) ? null : v;
+}
+
+// equipmentIds — массив id; start/end (Date|null) — по времени осмотра.
+function shiftReportRows(equipmentIds, start, end) {
+  const eqById = {};
+  (DATA.equipment||[]).forEach(e => eqById[String(e.equipmentId)] = e);
+  const wanted = new Set(equipmentIds.map(String));
+  const pts = {};
+  (DATA.checklistRecords||[]).forEach(rec => {
+    const id = String(rec.equipmentId);
+    if (!wanted.has(id)) return;
+    const d = parseRecordDate(rec.date); if (!d) return;
+    (pts[id] = pts[id] || []).push({
+      date: d, emp: rec.empName || "",
+      level: fuelLevelOfRecord(rec), mh: chkNumItem(rec, "Моточасы"), odo: chkNumItem(rec, "Пробег (км)"),
+    });
+  });
+  const rows = [];
+  Object.keys(pts).forEach(id => {
+    const list = pts[id].sort((a,b) => a.date - b.date);
+    const fuel = (DATA.fuel||[]).filter(f => String(f.equipmentId) === id)
+      .map(f => ({ date: parseRecordDate(f.date), liters: Number(f.amountLiters)||0 })).filter(f => f.date);
+    const eq = eqById[id] || {};
+    for (let i = 0; i < list.length; i++) {
+      const a = list[i], nx = list[i+1];
+      if (start && a.date < start) continue;
+      if (end && a.date >= end) continue;
+      const hasNext = !!nx && (nx.date - a.date) / 3600000 <= SHIFT_END_MAX_GAP_H;
+      const winEnd = hasNext ? nx.date : new Date(a.date.getTime() + SHIFT_WINDOW_H * 3600000);
+      const refueled = fuel.filter(f => f.date > a.date && f.date <= winEnd).reduce((s,f)=>s+f.liters,0);
+      if (a.mh == null && a.level == null && a.odo == null && !refueled) continue; // осмотр без данных смены
+      const mh1 = hasNext ? nx.mh : null, odo1 = hasNext ? nx.odo : null;
+      const hours = (mh1 != null && a.mh != null && mh1 >= a.mh) ? +(mh1 - a.mh).toFixed(1) : null;
+      const burned = (hasNext && a.level != null && nx.level != null) ? +(a.level + refueled - nx.level).toFixed(1) : null;
+      const rate = (burned != null && burned > 0 && hours != null && hours >= REFUEL_MIN_HOURS) ? +(burned / hours).toFixed(1) : null;
+      rows.push({ site: (eq.site||"").trim(), date: shiftDateOf(a.date), shift: shiftLabelOf(a.date), emp: a.emp,
+        type: eq.type || "", id, mh0: a.mh, mh1, odo0: a.odo, odo1, level0: a.level, refueled, hours, burned, rate, at: a.date });
+    }
+  });
+  return rows;
+}
+
+function shiftReportSort(rows, desc) {
+  const k = desc ? -1 : 1;
+  return rows.slice().sort((x,y) => k * ((x.at - y.at) || String(x.id).localeCompare(String(y.id))));
+}
+
+function shiftReportAoa(rows) {
+  const fmt = d => `${String(d.getDate()).padStart(2,"0")}.${String(d.getMonth()+1).padStart(2,"0")}.${d.getFullYear()}`;
+  const v = x => x == null ? "" : x;
+  return [SHIFT_REPORT_HEAD].concat(shiftReportSort(rows, false).map(r => [
+    r.site, fmt(r.date), r.shift, r.emp, r.type, r.id, v(r.mh0), v(r.mh1), v(r.odo0), v(r.odo1), v(r.level0), r.refueled, v(r.hours), v(r.burned), v(r.rate),
+  ]));
+}
+
+function shiftReportTableHtml(rows, limit) {
+  const fmt = d => `${String(d.getDate()).padStart(2,"0")}.${String(d.getMonth()+1).padStart(2,"0")}.${d.getFullYear()}`;
+  const v = x => x == null ? "" : x;
+  const sorted = shiftReportSort(rows, true), shown = sorted.slice(0, limit || 200);
+  return `<div class="tbl-wrap" style="margin-bottom:8px"><table style="font-size:12px">
+      <thead><tr>${SHIFT_REPORT_HEAD.map(h => `<th>${h}</th>`).join("")}</tr></thead>
+      <tbody>${shown.map(r => `<tr>
+        <td>${r.site}</td><td>${fmt(r.date)}</td><td>${r.shift}</td><td>${escapeHtml(r.emp)}</td><td>${r.type}</td><td><b>${r.id}</b></td>
+        <td>${v(r.mh0)}</td><td>${v(r.mh1)}</td><td>${v(r.odo0)}</td><td>${v(r.odo1)}</td><td>${v(r.level0)}</td>
+        <td>${r.refueled}</td><td>${v(r.hours)}</td><td>${v(r.burned)}</td><td><b>${v(r.rate)}</b></td>
+      </tr>`).join("")}</tbody></table></div>
+    ${sorted.length > shown.length ? `<div style="font-size:11px;color:var(--gray);margin-bottom:8px">Показаны последние ${shown.length} из ${sorted.length} строк — полный отчёт в Excel.</div>` : ""}
+    <div style="font-size:11px;color:var(--gray);margin-bottom:8px">Конец смены — по следующему осмотру этой машины (не позже ${SHIFT_END_MAX_GAP_H} ч). Остаток топлива на конец смены не выводится: он равен остатку на начало следующей смены. Пустая ячейка — значение не указано или нет следующего осмотра.</div>`;
+}
+
+function addShiftReportSheet(wb, rows, sheetName) {
+  if (!rows.length) return false;
+  const ws = XLSX.utils.aoa_to_sheet(shiftReportAoa(rows));
+  ws["!cols"] = [{wch:9},{wch:11},{wch:14},{wch:30},{wch:20},{wch:12},{wch:12},{wch:12},{wch:12},{wch:12},{wch:12},{wch:11},{wch:11},{wch:13},{wch:8}];
+  XLSX.utils.book_append_sheet(wb, ws, sheetName || "По сменам");
+  return true;
+}
+
 function setFuelPeriod(site, p) {
   FUEL_PERIOD[site] = p;
   renderFuelAnalytics(site);
@@ -5178,10 +5295,31 @@ function renderFuelTypePanel(site) {
         `).join("")}</tbody>
       </table>
     </div>
+    <div style="margin-top:10px">${metersReady
+      ? `<button class="btn btn-ghost" style="width:auto;padding:8px 12px;font-size:12px" onclick="exportShiftReportExcel('${site}')">⬇️ Отчёт по сменам (Excel, как MS Forms)</button>`
+      : ""}</div>
     <div style="font-size:11px;color:var(--gray);margin-top:8px">
       л/ч = израсходовано ÷ моточасы между соседними осмотрами, где указаны остаток топлива и моточасы. Израсходовано = остаток в начале + все заправки между осмотрами − остаток в конце (допущение «до полного бака» не нужно). «—» — нет пары осмотров с остатком и моточасами за период, либо интервал длиннее 72 ч, короче 1 мч или с расходом ≤ 0.
     </div>
   `;
+}
+
+// Отчёт по сменам (формат MS Forms) для текущего фильтра панели «Расход по типу техники»:
+// тип + модель + период. Остаток топлива на конец смены не выводится.
+function exportShiftReportExcel(site) {
+  if (typeof XLSX === "undefined") { alert("Библиотека Excel не загрузилась (нужен интернет) — попробуй ещё раз."); return; }
+  if (!FULL_HISTORY_LOADED) { alert("Сначала загрузите журнал осмотров."); return; }
+  const st = FUEL_TYPE_FILTER[site];
+  const [start, end] = fuelTypeFilterRange(site);
+  let eqList = (DATA.equipment||[]).filter(e => (e.site||"").trim()===site && e.type===st.type);
+  if (st.model && st.model.trim()) {
+    const needle = st.model.trim().toLowerCase();
+    eqList = eqList.filter(e => String(e.model||"").toLowerCase().indexOf(needle) >= 0);
+  }
+  const rows = shiftReportRows(eqList.map(e => e.equipmentId), start, end);
+  const wb = XLSX.utils.book_new();
+  if (!addShiftReportSheet(wb, rows, "MS Forms")) { alert("За выбранный период нет осмотров с данными по этой технике."); return; }
+  XLSX.writeFile(wb, `Отчёт_по_сменам_${site}_${st.type}_${today()}.xlsx`);
 }
 
 function renderFuelRecordsList(site) {
@@ -5310,11 +5448,20 @@ function renderFuelEquipmentHistory(site) {
     }
   }
 
+  let shiftBlock = "";
+  if (FULL_HISTORY_LOADED) {
+    const sr = shiftReportRows([equipmentId], fuelPeriodStart(FUEL_PERIOD[site]), null);
+    shiftBlock = sr.length
+      ? `<div style="font-size:13px;font-weight:700;color:var(--navy2);margin:14px 0 8px">Отчёт по сменам (как в MS Forms)</div>${shiftReportTableHtml(sr, 200)}`
+      : `<div style="font-size:12px;color:var(--gray);margin:14px 0 8px">Отчёт по сменам: за выбранный период осмотров с данными нет.</div>`;
+  }
+
   tableEl.innerHTML = `
     <div style="font-size:12px;color:var(--gray);margin-bottom:8px">
       Всего заправок: <b>${list.length}</b> · Литров всего: <b>${total.toLocaleString("ru-RU")}</b>
     </div>
     ${rateBlock}
+    ${shiftBlock}
     <div class="tbl-wrap">
       <table style="font-size:13px">
         <thead><tr><th>Дата и время</th><th>Смена</th><th>Сотрудник</th><th>Литры</th></tr></thead>
@@ -5411,6 +5558,7 @@ function exportFuelEquipmentExcel(site) {
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Заправки");
   addFuelRateSheet(wb, equipmentId);
+  if (FULL_HISTORY_LOADED) addShiftReportSheet(wb, shiftReportRows([equipmentId], null, null), "По сменам");
   XLSX.writeFile(wb, `Заправки_${equipmentId}_${today()}.xlsx`);
 }
 
