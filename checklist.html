@@ -215,7 +215,7 @@ input:focus, select:focus, textarea:focus { border-color:var(--gold); }
 
     <div class="card" id="fuelCard" style="display:none">
       <div class="card-title" id="fuelCardTitle">Уровень топлива</div>
-      <div class="hint" style="margin-bottom:8px">Необязательно. Вносится только в начале смены.</div>
+      <div class="hint" style="margin-bottom:8px">Обязательно. Вносится только в начале смены.</div>
       <input type="number" id="fuelLevel" min="0" placeholder="Введите количество">
     </div>
 
@@ -738,9 +738,17 @@ async function submitChecklist() {
     // метки нет — не плодим строки в листе записей (он близок к лимиту ячеек).
     items.push({ section: "Общее", itemText: "Тип осмотра", status: "Горячая пересменка", comment: "" });
   } else if (template.fuelLevelField) {
-    // Остаток топлива необязателен: пустое поле строкой не пишется.
+    // Остаток топлива обязателен (с 03.11.2026): нужен для расчёта расхода л/ч по балансу между осмотрами.
+    // В горячей пересменке поля нет — там остаток не вносится.
     const fuelVal = document.getElementById("fuelLevel").value;
-    if (fuelVal) items.push({ section: "Общее", itemText: template.fuelLevelField.label, status: fuelVal, comment: "" });
+    if (fuelVal === "" || isNaN(Number(fuelVal)) || Number(fuelVal) < 0) {
+      hint.style.color = "var(--red)";
+      hint.textContent = `Укажите остаток топлива: «${template.fuelLevelField.label}» (${template.fuelLevelField.unit || ""})`;
+      const fc = document.getElementById("fuelCard");
+      if (fc && fc.scrollIntoView) fc.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
+    items.push({ section: "Общее", itemText: template.fuelLevelField.label, status: fuelVal, comment: "" });
   }
 
   const hourMeterVal = document.getElementById("hourMeter").value;
