@@ -52,6 +52,7 @@ tr.miss td { background:var(--redbg); }
 .hidden { display:none !important; }
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="bvr-plan.js"></script>
 </head>
 <body>
 <div id="login">
@@ -73,10 +74,10 @@ tr.miss td { background:var(--redbg); }
       <button class="btn btn-gold" id="btnLoad">Обновить</button>
     </div>
     <div class="tabs" id="tabs">
-      <div class="tab on" data-t="sum">Сводка</div><div class="tab" data-t="shifts">Смены</div><div class="tab" data-t="tools">Инструмент</div><div class="tab" data-t="crew">Буровики</div><div class="tab" data-t="insp">Осмотры</div><div class="tab" data-t="kpi">KPI</div><div class="tab" data-t="journal">Журнал (выгрузка)</div>
+      <div class="tab on" data-t="sum">Сводка</div><div class="tab" data-t="shifts">Смены</div><div class="tab" data-t="tools">Инструмент</div><div class="tab" data-t="crew">Буровики</div><div class="tab" data-t="insp">Осмотры</div><div class="tab" data-t="blocks">Блоки</div><div class="tab" data-t="kpi">KPI</div><div class="tab" data-t="journal">Журнал (выгрузка)</div>
     </div>
     <div id="msg"></div>
-    <div id="v-sum"></div><div id="v-shifts" class="hidden"></div><div id="v-tools" class="hidden"></div><div id="v-crew" class="hidden"></div><div id="v-insp" class="hidden"></div><div id="v-kpi" class="hidden"></div><div id="v-journal" class="hidden"></div>
+    <div id="v-sum"></div><div id="v-shifts" class="hidden"></div><div id="v-tools" class="hidden"></div><div id="v-crew" class="hidden"></div><div id="v-insp" class="hidden"></div><div id="v-blocks" class="hidden"></div><div id="v-kpi" class="hidden"></div><div id="v-journal" class="hidden"></div>
   </div>
 </div>
 
@@ -250,7 +251,7 @@ async function init() {
   ["fRig", "fSmena"].forEach(id => $(id).onchange = render);
   document.querySelectorAll("#tabs .tab").forEach(t => t.onclick = () => {
     curTab = t.dataset.t; document.querySelectorAll("#tabs .tab").forEach(x => x.classList.toggle("on", x === t));
-    ["sum", "shifts", "tools", "crew", "insp", "kpi", "journal"].forEach(k => $("v-" + k).classList.toggle("hidden", k !== curTab)); render();
+    ["sum", "shifts", "tools", "crew", "insp", "blocks", "kpi", "journal"].forEach(k => $("v-" + k).classList.toggle("hidden", k !== curTab)); render();
   });
   try { EQUIP = await fetch(CFG.SHEET_URL + "?action=getEquipment").then(r => r.json()); } catch (e) { EQUIP = []; }
   await load();
@@ -485,7 +486,7 @@ function renderKpi() {
 }
 
 function render() {
-  if (curTab === "sum") renderSum(); else if (curTab === "shifts") renderShifts(); else if (curTab === "tools") renderTools(); else if (curTab === "crew") renderCrew(); else if (curTab === "insp") renderInsp(); else if (curTab === "kpi") renderKpi(); else { renderJournal(); appendArchive(); }
+  if (curTab === "sum") renderSum(); else if (curTab === "shifts") renderShifts(); else if (curTab === "tools") renderTools(); else if (curTab === "crew") renderCrew(); else if (curTab === "insp") renderInsp(); else if (curTab === "blocks") renderBlocks(); else if (curTab === "kpi") renderKpi(); else { renderJournal(); appendArchive(); }
 }
 
 // ═════════ Сводка ═════════
@@ -558,6 +559,181 @@ function renderShifts() {
       openShift = ""; delArm = ""; await load();
     } catch (e) { msg("Не удалось удалить: " + e.message, "err"); b.disabled = false; }
   });
+}
+
+// ═════════ Блоки (проект на бурение и статистика по плану) ═════════
+// План блока: CSV со скважинами (+ PDF со схемой) грузит мастер. Факт берётся из смен буровиков по номеру скважины и блока.
+// Логика расчётов и схема — в bvr-plan.js (BP), общая с формой буровика.
+let BLK = null, PRE = null, blkSel = "", blkBusy = false, blkArm = "", blkLoading = false;
+const STATUS_TXT = { todo: "не пробурена", ok: "пробурена", replaced: "разрушена, заменена" };
+async function blkPost(body) { const r = await fetch(CFG.SHEET_URL, { method: "POST", body: JSON.stringify(body) }); return r.json(); }
+async function loadBlocks() {
+  if (blkLoading) return; blkLoading = true;
+  try {
+    const list = await fetch(CFG.SHEET_URL + "?action=getDrillBlocks").then(r => r.json());
+    if (!Array.isArray(list)) throw new Error(list && list.error ? list.error : "ответ сервера не распознан");
+    const plans = {};
+    await Promise.all(list.map(async b => {
+      const res = await fetch(CFG.SHEET_URL + "?action=getDrillPlan&block=" + encodeURIComponent(b.block)).then(r => r.json());
+      if (res && res.ok) plans[b.block] = res;
+    }));
+    BLK = { list: list, plans: plans };
+    if (!blkSel || !plans[blkSel]) blkSel = (list.filter(b => b.status === "active")[0] || list[0] || {}).block || "";
+    msg("");
+  } catch (e) {
+    BLK = BLK || { list: [], plans: {} };
+    msg("Не удалось загрузить блоки: " + e.message + ". Если это первый запуск — проверьте, что новая версия бэкенда (проект блока) развёрнута.", "err");
+  }
+  blkLoading = false; renderBlocks();
+}
+function blkExists(b) { return !!(BLK && BLK.list.some(x => String(x.block) === String(b))); }
+
+function renderBlocks() {
+  if (!BLK) { $("v-blocks").innerHTML = '<div class="card"><div class="note">Загрузка блоков…</div></div>'; loadBlocks(); return; }
+  if (!$("bkList")) {
+    $("v-blocks").innerHTML = '<div class="card"><h3>Загрузить проект блока</h3><div class="note">CSV со скважинами обязателен. PDF со схемой и экспликацией — вложение к блоку. Номер блока берётся из CSV.</div>' +
+      '<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end"><div><div class="note" style="margin:0 0 3px">CSV (скважины проекта)</div><input type="file" id="bkCsv" accept=".csv,text/csv"></div>' +
+      '<div><div class="note" style="margin:0 0 3px">PDF (схема блока), необязательно</div><input type="file" id="bkPdf" accept=".pdf,application/pdf"></div>' +
+      '<div><div class="note" style="margin:0 0 3px">Дата проекта</div><input type="date" id="bkDate"></div></div><div id="bkPrev"></div></div>' +
+      '<div class="card"><h3>Блоки</h3><div id="bkList"></div></div><div id="bkDet"></div>';
+    $("bkCsv").onchange = e => { if (e.target.files[0]) blkReadCsv(e.target.files[0]); else { PRE = null; renderBlkPrev(); } };
+    $("bkPdf").onchange = e => { if (PRE) { PRE.pdf = e.target.files[0] || null; renderBlkPrev(); } };
+    $("bkDate").onchange = e => { if (PRE) PRE.date = e.target.value; };
+  }
+  renderBlkPrev(); renderBlkList(); renderBlkDet();
+}
+
+function blkReadCsv(file) {
+  const fr = new FileReader();
+  fr.onload = () => {
+    const parsed = BP.parsePlanCsv(String(fr.result || ""));
+    blkArm = "";
+    PRE = { parsed: parsed, pdf: ($("bkPdf") && $("bkPdf").files[0]) || null, date: $("bkDate") ? $("bkDate").value : "" };
+    renderBlkPrev();
+  };
+  fr.onerror = () => { PRE = { parsed: { ok: false, error: "Не удалось прочитать файл" } }; renderBlkPrev(); };
+  fr.readAsText(file, "utf-8");
+}
+
+function renderBlkPrev() {
+  const box = $("bkPrev"); if (!box) return;
+  if (!PRE) { box.innerHTML = ""; return; }
+  const P = PRE.parsed;
+  if (!P.ok) { box.innerHTML = '<div class="warnbox" style="margin-top:12px;background:#FEF2F2;border-color:#DC2626;color:#DC2626">' + esc(P.error) + "</div>"; return; }
+  const S = P.summary, ex = blkExists(P.block);
+  const dm = {}; P.holes.forEach(h => { const o = dm[h.diameter] || (dm[h.diameter] = { n: 0, m: 0 }); o.n++; o.m += h.depth; });
+  const incl = P.holes.filter(BP.isIncl);
+  let h = '<div class="kpis" style="margin-top:14px"><div class="kpi"><span>Блок</span><b>' + esc(P.block) + '</b></div><div class="kpi"><span>Скважин</span><b>' + S.holes + '</b></div>' +
+    '<div class="kpi"><span>План, п/м (сумма по скважинам)</span><b>' + fmt(S.planMeters, 2) + '</b></div><div class="kpi"><span>Средняя глубина</span><b>' + fmt(S.avgDepth, 2) + '</b><small>м</small></div>' +
+    '<div class="kpi"><span>Рядов</span><b>' + P.rowsCount + '</b></div><div class="kpi"><span>Наклонных</span><b>' + incl.length + '</b><small>' + fmt(incl.reduce((s, x) => s + x.depth, 0), 2) + ' м</small></div>' +
+    (S.area ? '<div class="kpi"><span>Площадь, м²</span><b>' + fmt(S.area) + "</b></div>" : "") + (S.volume ? '<div class="kpi"><span>Объём, м³</span><b>' + fmt(S.volume) + "</b></div>" : "") + "</div>";
+  h += '<div class="note"><b>По диаметрам:</b> ' + Object.keys(dm).map(Number).sort((a, b) => a - b).map(k => k + " мм — " + dm[k].n + " скв., " + fmt(dm[k].m, 2) + " м").join("; ") + "</div>";
+  P.warnings.forEach(w => { h += '<div class="warnbox">' + esc(w) + "</div>"; });
+  h += '<div class="cols" style="display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start"><div style="flex:1;min-width:300px"><table class="pv"><tr><th>Ряд</th><th class="r">Скважин</th><th class="r">Метры</th><th>Номера</th></tr>' +
+    BP.rowSummary(P.holes).map(r => '<tr><td><b>' + r.row + '</b></td><td class="r">' + r.count + '</td><td class="r">' + fmt(r.meters, 2) + "</td><td>№" + r.from + "–" + r.to + "</td></tr>").join("") + "</table>" +
+    '<div class="note">Вывод, не данные проекта: в CSV колонки «ряд» нет. Ряд определён методом «' + esc(P.rowsMethod) + '»' + (P.rowsMethod === "нумерация" ? " (ряд открывает серия наклонных скважин)" : "") + '. Сверьте количество рядов и состав со схемой PDF: в PDF блока 3780316 указано 7 рядов.</div></div>' +
+    '<div style="flex:1;min-width:300px;max-width:520px">' + BP.planSvg(P.holes.map(x => Object.assign({}, x, { done: false })), { labels: false }) + "</div></div>";
+  if (ex) h += '<div class="warnbox" style="margin-top:10px">Блок ' + esc(P.block) + ' уже загружен. Новый план заменит прежний; прежние строки плана сохранятся в архиве («БВР-План-Архив»). Факт по сменам не меняется.</div>';
+  h += '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center"><button class="btn ' + (ex ? "btn-red" : "btn-gold") + '" id="bkSave"' + (blkBusy ? " disabled" : "") + ">" +
+    (blkBusy ? "Сохранение…" : (ex ? (blkArm === "save" ? "Нажмите ещё раз: заменить план блока" : "Заменить план блока") : "Сохранить проект блока")) + "</button>" +
+    '<span class="note">' + (PRE.pdf ? "PDF: " + esc(PRE.pdf.name) + " (" + fmt(PRE.pdf.size / 1048576, 1) + " МБ)" : "PDF не выбран") + "</span></div>";
+  box.innerHTML = h;
+  $("bkSave").onclick = saveBlkPlan;
+}
+
+function fileB64(file) {
+  return new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(",")[1] || ""); fr.onerror = () => rej(new Error("не удалось прочитать PDF")); fr.readAsDataURL(file); });
+}
+async function uploadBlkPdf(block, file) {
+  const b64 = await fileB64(file);
+  const r = await blkPost({ action: "uploadDrillPlanPdf", block: block, base64: b64 });
+  if (!r.ok) throw new Error(r.error || "ошибка");
+  return r;
+}
+async function saveBlkPlan() {
+  const P = PRE && PRE.parsed; if (!P || !P.ok || blkBusy) return;
+  const ex = blkExists(P.block);
+  if (ex && blkArm !== "save") { blkArm = "save"; renderBlkPrev(); return; }
+  blkBusy = true; blkArm = ""; renderBlkPrev();
+  let note = "";
+  try {
+    const r = await blkPost({ action: "saveDrillPlan", block: P.block, projectDate: (PRE.date || ""), area: P.summary.area, volume: P.summary.volume, holes: P.holes, overwrite: ex });
+    if (!r.ok) throw new Error(r.error || "ошибка");
+    note = "План блока " + P.block + " сохранён: " + r.holes + " скв., " + fmt(r.planMeters, 2) + " м.";
+    if (PRE.pdf) {
+      try { await uploadBlkPdf(P.block, PRE.pdf); note += " PDF загружен."; }
+      catch (e) { note += " PDF не загрузился (" + e.message + "): план сохранён, загрузите PDF повторно в карточке блока."; }
+    }
+    const blk = P.block; PRE = null; blkSel = blk;
+    if ($("bkCsv")) $("bkCsv").value = ""; if ($("bkPdf")) $("bkPdf").value = ""; if ($("bkDate")) $("bkDate").value = "";
+    blkBusy = false; BLK = null; await loadBlocks(); msg(note);
+  } catch (e) { blkBusy = false; renderBlkPrev(); msg("Не удалось сохранить план: " + e.message, "err"); }
+}
+
+function renderBlkList() {
+  const box = $("bkList"); if (!box) return;
+  const L = BLK.list;
+  if (!L.length) { box.innerHTML = '<div class="note">Блоков пока нет. Загрузите CSV проекта выше.</div>'; return; }
+  box.innerHTML = '<div class="scroll"><table><tr><th>Блок</th><th>Статус</th><th>Проект от</th><th class="r">Скв. пробурено / план</th><th class="r">Метры по проекту</th><th class="r">Перебур, скв. / м</th><th class="r">Рядов</th></tr>' +
+    L.map(b => { const res = BLK.plans[b.block], S = res ? BP.planStats(res, todayIso()) : null;
+      return '<tr class="click" data-b="' + esc(b.block) + '"' + (b.block === blkSel ? ' style="background:#FFFBEB"' : "") + "><td><b>" + esc(b.block) + "</b></td><td>" + (b.status === "closed" ? '<span class="tag">закрыт</span>' : '<span class="tag g">в работе</span>') + "</td><td>" + (b.projectDate ? ddmmyyyy(b.projectDate) : "—") + "</td>" +
+        '<td class="r">' + (S ? S.doneHoles + " / " + S.planHoles + " (" + fmt(S.pctHoles, 1) + " %)" : "—") + '</td><td class="r">' + (S ? fmt(S.donePlanMeters, 1) + " / " + fmt(S.planMeters, 1) + " (" + fmt(S.pctMeters, 1) + " %)" : "—") + '</td><td class="r">' + (S ? S.redrillCount + " / " + fmt(S.redrillMeters, 1) : "—") + '</td><td class="r">' + esc(b.rows) + "</td></tr>"; }).join("") + "</table></div>";
+  box.querySelectorAll("tr.click").forEach(tr => tr.onclick = () => { blkSel = tr.dataset.b; renderBlkList(); renderBlkDet(); });
+}
+
+function renderBlkDet() {
+  const box = $("bkDet"); if (!box) return;
+  const meta = BLK.list.find(b => b.block === blkSel), res = meta && BLK.plans[meta.block];
+  if (!meta || !res) { box.innerHTML = ""; return; }
+  const S = BP.planStats(res, todayIso()), holes = res.holes;
+  let h = '<div class="card"><h3>Блок ' + esc(meta.block) + ' — статистика по плану</h3><div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">' +
+    (meta.pdfUrl ? '<a class="btn btn-dark" style="text-decoration:none" target="_blank" rel="noopener" href="' + esc(meta.pdfUrl) + '">Открыть проект (PDF)</a>' : '<span class="tag">PDF не загружен</span>') +
+    '<label class="btn" style="cursor:pointer">' + (meta.pdfUrl ? "Заменить PDF" : "Загрузить PDF") + '<input type="file" id="bkPdf2" accept=".pdf,application/pdf" class="hidden"></label>' +
+    '<button class="btn btn-gold" id="bkXls">Выгрузить факт по блоку (.xlsx)</button>' +
+    '<button class="btn ' + (meta.status === "closed" ? "btn-dark" : "") + '" id="bkStat">' + (meta.status === "closed" ? "Вернуть в работу" : "Закрыть блок") + "</button></div>";
+  h += '<div class="kpis"><div class="kpi"><span>Скважин пробурено</span><b>' + S.doneHoles + " / " + S.planHoles + '</b><small>' + fmt(S.pctHoles, 1) + ' %, осталось ' + S.remainHoles + '</small></div>' +
+    '<div class="kpi"><span>Метры по проекту</span><b>' + fmt(S.donePlanMeters, 1) + " / " + fmt(S.planMeters, 1) + '</b><small>' + fmt(S.pctMeters, 1) + ' %, осталось ' + fmt(S.remainMeters, 1) + ' м</small></div>' +
+    '<div class="kpi"><span>Факт, м (пробуренные скв.)</span><b>' + fmt(S.factMeters, 1) + '</b><small>откл. к проекту ' + (S.factMeters - S.donePlanMeters >= 0 ? "+" : "") + fmt(S.factMeters - S.donePlanMeters, 2) + ' м</small></div>' +
+    '<div class="kpi"><span>Перебур</span><b>' + S.redrillCount + " скв. / " + fmt(S.redrillMeters, 1) + ' м</b><small>разрушено и заменено: ' + S.replacedHoles + '</small></div>' +
+    '<div class="kpi"><span>Темп, м в сутки</span><b>' + (S.pace ? fmt(S.pace, 1) : "—") + '</b><small>за ' + S.activeDays + ' сут. бурения</small></div>' +
+    '<div class="kpi"><span>Оценка окончания</span><b>' + (S.forecast ? ddmmyyyy(S.forecast) : (S.remainHoles ? "—" : "готов")) + '</b><small>' + (S.daysLeft ? "≈ " + S.daysLeft + " сут. при текущем темпе" : "") + '</small></div></div>';
+  if (S.extraCount) h += '<div class="warnbox">Скважины, которых нет в проекте блока: ' + S.extraCount + " шт., " + fmt(S.extraMeters, 1) + " м (№" + res.extra.map(x => esc(x.n)).join(", №") + "). Проверьте номера в сменах.</div>";
+  if (S.repeated.length) h += '<div class="warnbox">Скважина записана в сменах несколько раз: ' + S.repeated.map(x => "№" + esc(x.hole) + " (" + x.count + " раза)").join(", ") + ". В статистике учтена последняя запись.</div>";
+  const tbl = (title, rows, keyName) => '<div style="flex:1;min-width:280px"><b>' + title + '</b><table class="pv"><tr><th>' + keyName + '</th><th class="r">Скв.</th><th class="r">Пробурено</th><th class="r">План, м</th><th class="r">По проекту, м</th><th class="r">Факт, м</th></tr>' +
+    rows.map(x => "<tr><td><b>" + esc(x.key) + '</b></td><td class="r">' + x.holes + '</td><td class="r">' + x.done + '</td><td class="r">' + fmt(x.planMeters, 1) + '</td><td class="r">' + fmt(x.donePlanMeters, 1) + '</td><td class="r">' + fmt(x.factMeters, 1) + "</td></tr>").join("") + "</table></div>";
+  h += '<div class="cols" style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:12px">' + tbl("По диаметрам, мм", S.byDiam, "Диаметр") + tbl("По рядам", S.byRow, "Ряд") + '<div style="flex:1;min-width:240px"><b>По станкам и буровикам (факт, м)</b><table class="pv"><tr><th>Станок</th><th class="r">Скв.</th><th class="r">Метры</th></tr>' +
+    (S.byRig.length ? S.byRig.map(x => "<tr><td><b>" + esc(x.key) + '</b></td><td class="r">' + x.holes + '</td><td class="r">' + fmt(x.meters, 1) + "</td></tr>").join("") : '<tr><td colspan="3" style="color:#64748B">Фактов пока нет</td></tr>') +
+    '</table><table class="pv" style="margin-top:8px"><tr><th>Буровик</th><th class="r">Скв.</th><th class="r">Метры</th></tr>' +
+    (S.byEmp.length ? S.byEmp.map(x => "<tr><td>" + esc(x.key) + '</td><td class="r">' + x.holes + '</td><td class="r">' + fmt(x.meters, 1) + "</td></tr>").join("") : '<tr><td colspan="3" style="color:#64748B">Фактов пока нет</td></tr>') + "</table></div></div>";
+  h += '<div class="note">Факт идёт из смен буровиков по блоку и номеру скважины (журнал, загруженный из Excel, номеров скважин не содержит и сюда не входит). Процент считается по проектным метрам пробуренных скважин; перебур и отклонение глубины показаны отдельно. Прогноз — оценка по среднему темпу за сутки бурения.</div>';
+  h += '<h3 style="margin-top:14px">Схема блока</h3><div class="note"><span class="tag g">пробурена</span> <span class="tag">не пробурена — серая</span> <span class="tag r">разрушена, заменена</span></div><div style="max-width:900px">' + BP.planSvg(holes, { labels: true }) + "</div>";
+  if (S.deviations.length) h += '<h3 style="margin-top:14px">Отклонения глубины от проекта (фиксируются как комментарий, порога нет)</h3><div class="scroll" style="max-height:260px"><table class="pv"><tr><th>№</th><th>Ряд</th><th class="r">Проект, м</th><th class="r">Факт, м</th><th class="r">Откл., м</th><th>Дата</th><th>Станок</th></tr>' +
+    S.deviations.map(x => "<tr><td>" + esc(x.hole) + "</td><td>" + x.row + '</td><td class="r">' + fmt(x.plan, 2) + '</td><td class="r">' + fmt(x.fact, 2) + '</td><td class="r">' + (x.diff > 0 ? "+" : "") + fmt(x.diff, 2) + "</td><td>" + (x.date ? ddmmyyyy(x.date) : "") + "</td><td>" + esc(x.rig) + "</td></tr>").join("") + "</table></div>";
+  h += "</div>";
+  box.innerHTML = h;
+  $("bkPdf2").onchange = async e => {
+    const f = e.target.files[0]; if (!f) return;
+    msg("Загрузка PDF…");
+    try { await uploadBlkPdf(meta.block, f); BLK = null; await loadBlocks(); msg("PDF загружен."); } catch (x) { msg("PDF не загрузился: " + x.message, "err"); }
+  };
+  $("bkStat").onclick = async () => {
+    const st = meta.status === "closed" ? "active" : "closed";
+    try { const r = await blkPost({ action: "setDrillBlockStatus", block: meta.block, status: st }); if (!r.ok) throw new Error(r.error || "ошибка"); BLK = null; await loadBlocks(); } catch (x) { msg("Не удалось изменить статус: " + x.message, "err"); }
+  };
+  $("bkXls").onclick = () => exportBlk(meta, res);
+}
+
+function exportBlk(meta, res) {
+  const head = ["№ скважины", "Ряд", "Диаметр, мм", "Угол", "Азимут", "Проектная глубина, м", "Факт, м", "Отклонение, м", "Дата", "Смена", "Станок", "Буровик", "Статус", "Заменена скв."];
+  const rows = res.holes.map(x => {
+    const done = !!x.done, fd = done ? num(x.factDepth) : "";
+    return [Number(x.hole), x.row, x.diameter, x.dip, x.azimuth, num(x.depth), fd, done ? r2(num(x.factDepth) - num(x.depth)) : "", x.date ? ddmmyyyy(x.date) : "", done ? (x.smena === 1 ? "ночь" : "день") : "", x.rig || "", x.empName || "", STATUS_TXT[BP.statusOf(x)], x.replacedBy || ""];
+  });
+  const re = [["Скважина (замена)", "Вместо скв.", "Метры", "Дата", "Станок", "Буровик"]].concat(res.redrills.map(x => [x.n, x.replacesHole, num(x.depth), x.date ? ddmmyyyy(x.date) : "", x.rig, x.empName]));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([head].concat(rows)), "Факт по блоку");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(re), "Перебуры");
+  XLSX.writeFile(wb, "Блок_" + meta.block + "_факт.xlsx");
 }
 
 // ═════════ Инструмент ═════════

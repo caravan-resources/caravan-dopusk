@@ -8,7 +8,7 @@
 importScripts("outbox.js");
 
 const CACHE = "operbaza-offline-v1";
-const FILES = ["checklist.html", "bvr-form.html", "outbox.js"];
+const FILES = ["checklist.html", "bvr-form.html", "outbox.js", "bvr-plan.js"];
 const SHEET_URL = "https://script.google.com/macros/s/AKfycbwhdMV20k8US2BXUz1Xk2XCXE9MEwpHpQaadTF9xEfzbU1--dHL-Zuj06K2qXW-rFtKGw/exec";
 
 self.addEventListener("install", e => {
