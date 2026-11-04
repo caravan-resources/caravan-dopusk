@@ -59,6 +59,16 @@ textarea { min-height:70px; resize:vertical; }
 .ok-box { text-align:center; padding:26px 16px; } .ok-t { font-size:20px; font-weight:800; color:var(--green); margin-bottom:8px; } .ok-s { font-size:14px; color:var(--gray); margin-bottom:14px; line-height:1.5; }
 .net { font-size:12px; text-align:center; padding:8px; border-radius:8px; margin-bottom:10px; background:var(--amberbg); color:var(--amber); font-weight:700; display:none; }
 a.back { font-size:13px; color:var(--gray); text-decoration:none; display:inline-block; margin-bottom:10px; }
+.chips { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:6px; }
+.chip { padding:10px 14px; border:1.5px solid var(--border); border-radius:20px; background:#fff; font-weight:800; font-size:14px; font-family:inherit; color:var(--navy); cursor:pointer; min-height:42px; }
+.chip.on { background:var(--navy); color:#fff; border-color:var(--navy); }
+.plan { border-radius:10px; padding:10px 12px; margin-bottom:10px; font-size:14px; border:1.5px solid var(--border); background:var(--light); }
+.plan .pr { display:flex; justify-content:space-between; gap:8px; font-size:13px; margin-top:4px; } .plan .pr span { color:var(--gray); }
+.plan .st { margin-top:6px; font-weight:800; font-size:13px; }
+.plan.good { background:var(--greenbg); border-color:var(--green); } .plan.good .st { color:var(--green); }
+.plan.warnc { background:var(--amberbg); border-color:var(--amber); } .plan.warnc .st { color:var(--amber); }
+.plan.bad { background:var(--redbg); border-color:var(--red); } .plan.bad .st { color:var(--red); }
+.lg { font-size:12px; color:var(--gray); margin-top:6px; line-height:1.5; }
 </style>
 </head>
 <body>
@@ -84,6 +94,7 @@ a.back { font-size:13px; color:var(--gray); text-decoration:none; display:inline
         <div><label class="lb">Блок №</label><input id="fBlock1" inputmode="numeric" placeholder="1760637" autocomplete="off"></div>
         <div><label class="lb">Второй блок (если был)</label><input id="fBlock2" inputmode="numeric" placeholder="необязательно" autocomplete="off"></div>
       </div>
+      <div id="blkChips" style="margin-top:10px"></div>
     </div>
 
     <div class="card">
@@ -94,8 +105,11 @@ a.back { font-size:13px; color:var(--gray); text-decoration:none; display:inline
         <div><label class="lb">Время, мин</label><input id="hM" inputmode="numeric" autocomplete="off"></div>
       </div>
       <div id="hWarn" class="warn" style="display:none"></div>
+      <div id="hPlan" class="plan" style="display:none"></div>
+      <button class="btn btn-ghost" id="hScheme" style="display:none;margin-bottom:10px">Схема блока</button>
+      <div id="hSchemeBox" style="display:none" class="mb"></div>
       <div class="mb"><div class="toggle" id="hRe"><span class="box"></span><span>Перебур (прежняя скважина разрушилась)</span></div></div>
-      <div id="hReBox" style="display:none" class="mb"><label class="lb">Вместо скважины №</label><input id="hReN" inputmode="numeric" autocomplete="off"></div>
+      <div id="hReBox" style="display:none" class="mb"><label class="lb">Вместо скважины №</label><input id="hReN" inputmode="numeric" autocomplete="off" list="reList"><datalist id="reList"></datalist></div>
       <div id="hBlockBox" style="display:none" class="mb"><label class="lb">Блок</label><select id="hBlock"></select></div>
       <div class="mb"><label class="lb">Примечание к скважине</label><input id="hNote" placeholder="необязательно" autocomplete="off"></div>
       <button class="btn btn-dark" id="hAdd">Добавить скважину</button>
@@ -159,6 +173,7 @@ a.back { font-size:13px; color:var(--gray); text-decoration:none; display:inline
 </div>
 
 <script src="outbox.js"></script>
+<script src="bvr-plan.js"></script>
 <script>
 const CFG = {
   SHEET_URL: "https://script.google.com/macros/s/AKfycbwhdMV20k8US2BXUz1Xk2XCXE9MEwpHpQaadTF9xEfzbU1--dHL-Zuj06K2qXW-rFtKGw/exec",
@@ -228,7 +243,7 @@ function payloadOf(s) {
     clientId: s.clientId, equipmentId: EQ_ID, date: s.date, smena: s.smena,
     empId: s.emp ? s.emp.id : "", empName: s.emp ? s.emp.name : "",
     diameter: s.diameter, blocks: blocks,
-    holes: s.holes.map(x => ({ n: x.n, depth: num(x.depth), minutes: num(x.minutes), redrill: !!x.redrill, replacesHole: x.replacesHole || "", block: x.block || "", note: x.note || "" })),
+    holes: s.holes.map(x => ({ n: x.n, depth: num(x.depth), minutes: num(x.minutes), redrill: !!x.redrill, replacesHole: x.replacesHole || "", block: x.block || "", note: x.note || "", row: x.row || 0, planDepth: x.planDepth || 0 })),
     downtimes: s.downtimes.map(x => ({ reason: x.reason, minutes: num(x.minutes), from: x.from || "", to: x.to || "", note: x.note || "" })),
     replacements: s.replacements.map(x => ({ tool: x.tool, model: x.model || "", atHole: x.atHole || "", note: x.note || "" })),
     note: s.note || "",
@@ -355,6 +370,7 @@ function renderHoleBlock() {
   box.style.display = bl.length > 1 ? "block" : "none";
   sel.innerHTML = bl.map(b => '<option>' + esc(b) + '</option>').join("");
   if (bl.indexOf(cur) >= 0) sel.value = cur;
+  renderPlanUI();
 }
 
 function holeNums() { return S.holes.map(h => String(h.n)).filter(Boolean); }
@@ -410,7 +426,7 @@ function renderTotals() {
 
 // ── ввод скважин ──
 let reOn = false;
-function setRe(on) { reOn = on; $("hRe").classList.toggle("on", on); $("hReBox").style.display = on ? "block" : "none"; }
+function setRe(on) { reOn = on; $("hRe").classList.toggle("on", on); $("hReBox").style.display = on ? "block" : "none"; holeWarn(); }
 $("hRe").onclick = () => setRe(!reOn);
 
 function holeWarn() {
@@ -419,9 +435,20 @@ function holeWarn() {
   else if (d > 30) w.push("Метраж больше 30 м — проверьте");
   if (m > 240) w.push("Время бурения больше 4 часов — проверьте");
   if (n && S.holes.some((h, i) => i !== editIdx && String(h.n) === n)) w.push("Скважина №" + n + " уже есть в этой смене");
+  const P = planInfo(n);
+  if (n && P.res && !reOn) {
+    if (!P.h) w.push("Скважины №" + n + " нет в проекте блока " + P.block);
+    else if (P.h.done && !ownFact(P.h)) w.push("Скважина №" + n + " уже пробурена: станок " + (P.h.rig || "—") + ", " + ddmm(P.h.date) + ". Проверьте номер");
+  }
+  if (reOn && P.res) {
+    const rn = $("hReN").value.trim();
+    if (rn) { const rh = P.res.holes.find(x => x.hole === normN(rn)); if (!rh) w.push("Скважины №" + rn + " нет в проекте блока " + P.block); else if (planStatus(P.block)(rh) === "todo") w.push("Скважина №" + rn + " ещё не бурилась. Замена записывается, когда пробуренная скважина разрушилась"); }
+  }
+  renderPlanCard();
   const el = $("hWarn"); el.textContent = w.join(". "); el.style.display = w.length ? "block" : "none";
 }
-["hN", "hD", "hM"].forEach(id => $(id).addEventListener("input", holeWarn));
+["hN", "hD", "hM", "hReN"].forEach(id => $(id).addEventListener("input", holeWarn));
+$("hBlock").addEventListener("change", renderPlanUI);
 
 function clearHoleForm(keepMin) {
   $("hN").value = ""; $("hD").value = ""; if (!keepMin) $("hM").value = ""; $("hNote").value = ""; $("hReN").value = "";
@@ -445,6 +472,11 @@ $("hAdd").onclick = () => {
   if (!(m > 0)) { $("hWarn").textContent = "Укажите время бурения в минутах"; $("hWarn").style.display = "block"; $("hM").focus(); return; }
   const bl = blocksList();
   const h = { n: n, depth: d, minutes: m, redrill: reOn, replacesHole: reOn ? $("hReN").value.trim() : "", note: $("hNote").value.trim(), block: bl.length > 1 ? $("hBlock").value : (bl[0] || "") };
+  // Привязка к проекту блока: ряд и проектная глубина; отклонение факта фиксируется комментарием, ввод не блокируется
+  const P0 = planInfo(n), old0 = editIdx >= 0 ? S.holes[editIdx] : null;
+  h.note = h.note.replace(DEV_RE, "").trim();
+  if (P0.h && !reOn) { h.row = P0.h.row; h.planDepth = num(P0.h.depth); h.note = withDev(h.note, d, P0.h.depth); }
+  else if (old0 && normN(old0.n) === normN(n) && !reOn && old0.planDepth) { h.row = old0.row; h.planDepth = old0.planDepth; h.note = withDev(h.note, d, old0.planDepth); }
   if (editIdx >= 0) { S.holes[editIdx] = h; editIdx = -1; $("hAdd").textContent = "Добавить скважину"; $("hCancel").style.display = "none"; }
   else S.holes.push(h);
   clearHoleForm(true);   // время бурения оставляем: обычно скважины одинаковые по времени
@@ -481,6 +513,108 @@ $("fBlock2").oninput = () => { S.block2 = $("fBlock2").value; renderHoleBlock();
 $("fNote").oninput = () => { S.note = $("fNote").value; saveDraft(); };
 document.querySelectorAll("#segSmena button").forEach(b => b.onclick = () => { S.smena = Number(b.dataset.v); renderAll(); saveDraft(); });
 
+// ── проект блока: карточка скважины, схема, замена при перебуре ──
+// План блока приходит с сервера (getDrillPlan) и кэшируется на телефоне: в карьере связи может не быть.
+// Отклонение глубины от проекта ввод не блокирует: оно записывается комментарием к скважине.
+let PLANS = {}, BLOCKS = [], schemeOpen = false;
+const K_BLOCKS = "bvr.blocks", K_PLAN = b => "bvr.plan." + b;
+const normN = v => { const s = String(v == null ? "" : v).trim(); return /^\d+$/.test(s) ? String(parseInt(s, 10)) : s; };
+const ddmm = iso => iso ? String(iso).slice(8, 10) + "." + String(iso).slice(5, 7) : "";
+const DEV_RE = /\s*\[откл\. от проекта[^\]]*\]\s*$/;
+function curBlock() { const bl = blocksList(); return bl.length > 1 ? $("hBlock").value : (bl[0] || ""); }
+function planInfo(n) { const block = curBlock(), res = PLANS[block] || null, key = normN(n); return { block: block, res: res, h: (res && key) ? (res.holes.find(x => x.hole === key) || null) : null }; }
+// Статус с учётом скважин этой, ещё не сданной смены
+function planLocal(block) {
+  const done = {}, rep = {};
+  S.holes.forEach(x => { const b = x.block || blocksList()[0] || ""; if (b !== block) return; if (x.redrill) { if (x.replacesHole) rep[normN(x.replacesHole)] = 1; } else done[normN(x.n)] = 1; });
+  return { done: done, rep: rep };
+}
+function planStatus(block) { const L = planLocal(block); return h => (h.replacedBy || L.rep[h.hole]) ? "replaced" : (h.done || L.done[h.hole]) ? "ok" : "todo"; }
+// Запись смены, которую мы сейчас правим, на сервере уже есть: её скважины не считаются «пробуренными ранее»
+function ownFact(h) { return !!EDIT_ID && h.rig === EQ_ID && h.date === S.date && Number(h.smena) === Number(S.smena); }
+function withDev(note, fact, plan) {
+  const base = String(note || "").replace(DEV_RE, "").trim(), diff = Math.round((fact - num(plan)) * 100) / 100;
+  if (diff === 0) return base;
+  return (base ? base + " " : "") + "[откл. от проекта " + (diff > 0 ? "+" : "") + fmt(diff, 2) + " м, проект " + fmt(num(plan), 2) + " м]";
+}
+
+function renderChips() {
+  const box = $("blkChips"), act = BLOCKS.filter(b => b.status !== "closed");
+  if (!act.length) { box.innerHTML = ""; return; }
+  const sel = blocksList();
+  box.innerHTML = '<label class="lb">Блоки в работе (нажмите, чтобы выбрать)</label><div class="chips">' + act.map(b => '<button type="button" class="chip' + (sel.indexOf(b.block) >= 0 ? " on" : "") + '" data-b="' + esc(b.block) + '">' + esc(b.block) + "</button>").join("") + "</div>";
+  box.querySelectorAll(".chip").forEach(c => c.onclick = () => {
+    const b = c.dataset.b; if (blocksList().indexOf(b) >= 0) return;
+    if (!S.block1) S.block1 = b; else S.block2 = b;
+    $("fBlock1").value = S.block1; $("fBlock2").value = S.block2; renderHoleBlock(); saveDraft();
+  });
+}
+
+function renderPlanCard() {
+  const box = $("hPlan"), n = $("hN").value.trim(), P = planInfo(n);
+  if (!n || !P.res || !P.h) { box.style.display = "none"; return; }
+  const h = P.h, st = planStatus(P.block)(h), incl = BP.isIncl(h);
+  let txt, cls;
+  if (st === "replaced") { txt = "Разрушена, заменена" + (h.replacedBy ? " скв. №" + h.replacedBy : ""); cls = "bad"; }
+  else if (st === "ok") { txt = "Уже пробурена" + (h.rig && !ownFact(h) ? ": станок " + h.rig + ", " + ddmm(h.date) + ", " + fmt(num(h.factDepth), 2) + " м" : " в этой смене"); cls = ownFact(h) ? "good" : "warnc"; }
+  else { txt = "Не пробурена"; cls = "good"; }
+  box.className = "plan " + cls;
+  box.innerHTML = "<b>Скв. №" + esc(h.hole) + "</b> · ряд " + esc(h.row) + '<div class="pr"><span>Проектная глубина</span><b>' + fmt(num(h.depth), 2) + " м</b></div>" +
+    '<div class="pr"><span>Диаметр</span><b>' + esc(h.diameter) + " мм" + (Number(h.diameter) !== Number(S.diameter) ? " (в смене выбран " + esc(S.diameter) + ")" : "") + "</b></div>" +
+    '<div class="pr"><span>Угол</span><b>' + (incl ? "наклонная " + fmt(Math.abs(num(h.dip)), 0) + "°, азимут " + fmt(num(h.azimuth), 0) + "°" : "вертикальная") + "</b></div>" +
+    (num(h.subdrill) > 0 ? '<div class="pr"><span>Перебур по проекту</span><b>' + fmt(num(h.subdrill), 2) + " м</b></div>" : "") +
+    '<div class="st">' + esc(txt) + "</div>";
+  box.style.display = "block";
+}
+
+function renderScheme() {
+  const box = $("hSchemeBox"), b = curBlock(), res = PLANS[b];
+  if (!schemeOpen || !res) { box.style.display = "none"; return; }
+  box.style.display = "block";
+  box.innerHTML = BP.planSvg(res.holes, { labels: true, sel: true, current: normN($("hN").value), status: planStatus(b) }) +
+    '<div class="lg"><span style="color:#16A34A">●</span> пробурена &nbsp; <span style="color:#94A3B8">●</span> не пробурена &nbsp; <span style="color:#DC2626">●</span> разрушена, заменена &nbsp; Нажмите на скважину, чтобы выбрать её номер.</div>' +
+    (res.block && res.block.pdfUrl ? '<div class="lg"><a href="' + esc(res.block.pdfUrl) + '" target="_blank" rel="noopener">Открыть проект блока (PDF) с экспликацией</a></div>' : "");
+}
+$("hSchemeBox").addEventListener("click", e => {
+  const g = e.target.closest ? e.target.closest("[data-h]") : null; if (!g) return;
+  $("hN").value = g.getAttribute("data-h"); holeWarn(); renderScheme(); $("hD").focus();
+});
+$("hScheme").onclick = () => { schemeOpen = !schemeOpen; renderPlanUI(); };
+
+function renderPlanUI() {
+  renderChips();
+  const b = curBlock(), res = PLANS[b];
+  $("hScheme").style.display = res ? "block" : "none";
+  if (!res) schemeOpen = false;
+  $("hScheme").textContent = schemeOpen ? "Скрыть схему блока" : "Схема блока " + b;
+  if (res) { const L = planStatus(b), used = res.holes.filter(h => L(h) !== "todo"); $("reList").innerHTML = (used.length ? used : res.holes).map(h => '<option value="' + esc(h.hole) + '">').join(""); }
+  else $("reList").innerHTML = "";
+  renderScheme(); holeWarn();
+}
+
+async function loadPlans() {
+  let list = null; try { list = JSON.parse(localStorage.getItem(K_BLOCKS) || "null"); } catch (e) {}
+  const hasCache = Array.isArray(list);
+  const wanted = l => { const w = (l || []).filter(b => b.status !== "closed").map(b => b.block); [S.block1, S.block2].forEach(x => { x = String(x || "").trim(); if (x && w.indexOf(x) < 0 && (l || []).some(b => b.block === x)) w.push(x); }); return w; };
+  if (hasCache) {
+    BLOCKS = list;
+    wanted(list).forEach(b => { try { const c = JSON.parse(localStorage.getItem(K_PLAN(b)) || "null"); if (c && c.ok) PLANS[b] = c; } catch (e) {} });
+    renderPlanUI();
+  }
+  const get = async (url, ms) => { const ctrl = new AbortController(), t = setTimeout(() => ctrl.abort(), ms); try { return await (await fetch(url, { signal: ctrl.signal })).json(); } finally { clearTimeout(t); } };
+  try {
+    const r = await get(CFG.SHEET_URL + "?action=getDrillBlocks", hasCache ? 7000 : 30000);
+    if (Array.isArray(r)) { BLOCKS = r; try { localStorage.setItem(K_BLOCKS, JSON.stringify(r)); } catch (e) {} }
+  } catch (e) { /* остаётся кэш */ }
+  await Promise.all(wanted(BLOCKS).map(async b => {
+    try {
+      const r = await get(CFG.SHEET_URL + "?action=getDrillPlan&block=" + encodeURIComponent(b), PLANS[b] ? 7000 : 30000);
+      if (r && r.ok) { PLANS[b] = r; try { localStorage.setItem(K_PLAN(b), JSON.stringify(r)); } catch (e) {} }
+    } catch (e) { /* остаётся кэш */ }
+  }));
+  renderPlanUI();
+}
+
 // ── проверка и отправка ──
 function validate() {
   const e = [];
@@ -505,7 +639,7 @@ async function findSameShift(pl) {
 }
 // Новые данные поверх сданной записи: скважины с тем же номером заменяются, остальные добавляются; простои и замены без повторов
 function mergeInto(old, pl) {
-  const hs = (old.holes || []).map(h => ({ n: h.n, depth: num(h.depth), minutes: num(h.minutes), redrill: !!h.redrill, replacesHole: h.replacesHole || "", block: h.block || "", note: h.note || "" }));
+  const hs = (old.holes || []).map(h => ({ n: h.n, depth: num(h.depth), minutes: num(h.minutes), redrill: !!h.redrill, replacesHole: h.replacesHole || "", block: h.block || "", note: h.note || "", row: h.row || 0, planDepth: h.planDepth || 0 }));
   pl.holes.forEach(h => { const i = hs.findIndex(x => String(x.n) === String(h.n)); if (i >= 0) hs[i] = h; else hs.push(h); });
   const dk = d => [d.reason, d.from || "", d.to || "", num(d.minutes)].join("|"), seenD = {}, dts = [];
   (old.downtimes || []).concat(pl.downtimes).forEach(d => { if (!seenD[dk(d)]) { seenD[dk(d)] = 1; dts.push({ reason: d.reason, minutes: num(d.minutes), from: d.from || "", to: d.to || "", note: d.note || "" }); } });
@@ -593,13 +727,14 @@ async function init() {
       shiftMeta = sh;
       S = { clientId: sh.clientId || uid(), date: sh.date, smena: Number(sh.smena), emp: { id: sh.empId, name: sh.empName }, diameter: Number(sh.diameter) || 171,
         block1: (sh.blockList || [])[0] || "", block2: (sh.blockList || [])[1] || "",
-        holes: (sh.holes || []).map(h => ({ n: h.n, depth: h.depth, minutes: h.minutes, redrill: !!h.redrill, replacesHole: h.replacesHole || "", note: h.note || "", block: h.block || "" })),
+        holes: (sh.holes || []).map(h => ({ n: h.n, depth: h.depth, minutes: h.minutes, redrill: !!h.redrill, replacesHole: h.replacesHole || "", note: h.note || "", block: h.block || "", row: h.row || 0, planDepth: h.planDepth || 0 })),
         downtimes: sh.downtimes || [], replacements: sh.replacements || [], note: sh.note || "" };
     } else {
       const dr = loadDraft();
       if (dr) S = dr; else applyDefaults();
     }
     renderAll();
+    loadPlans();
     loadCached(CFG.SHEET_URL + "?action=list&site=" + encodeURIComponent(equipment.site || ""), "employees." + (equipment.site || ""), e => ({ id: e.id, name: e.name, position: e.position }))
       .then(emp => { EMPLOYEES = emp || []; }).catch(() => {});
     loadCached(CFG.SHEET_URL + "?action=getShiftAssignments&site=" + encodeURIComponent(equipment.site || ""), "roster." + (equipment.site || ""))
