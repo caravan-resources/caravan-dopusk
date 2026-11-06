@@ -5537,6 +5537,18 @@ function openShiftFix(eq, atMs) {
   if (row.nextRecId) { SHIFT_FIX_CTX.orig["mh_" + row.nextRecId] = row.mh1; SHIFT_FIX_CTX.orig["lv_" + row.nextRecId] = row.level1; }
   fuel.forEach(x => { SHIFT_FIX_CTX.orig["fl_" + x.f.recordId] = Number(x.f.amountLiters); });
   const by = (() => { try { return localStorage.getItem("operbaza.corrBy") || ""; } catch (e) { return ""; } })();
+  const addFuelBlock = (sfx, title) => `
+    <div style="border:1px dashed var(--border);border-radius:8px;padding:8px 10px;margin-top:${sfx ? 6 : 8}px">
+      <div style="font-size:12px;font-weight:700;margin-bottom:4px">${title}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:12px">
+        <label>Дата <input type="date" id="addFuelDate${sfx}" value="${addDate}" style="padding:5px 7px;font-size:12px"></label>
+        <label>Время <input type="time" id="addFuelTime${sfx}" style="padding:5px 7px;font-size:12px"></label>
+        <label>Литры <input type="number" id="addFuelL${sfx}" min="1" step="1" style="width:90px;padding:5px 7px;font-size:12px"></label>
+        <label>Моточасы <input type="number" id="addFuelMh${sfx}" min="0" step="0.1" style="width:100px;padding:5px 7px;font-size:12px"></label>
+        <label>Кто заправлял <input type="text" id="addFuelWho${sfx}" value="${escapeHtml(row.emp || "")}" style="width:170px;padding:5px 7px;font-size:12px"></label>
+      </div>
+      <div style="font-size:11px;color:var(--gray);margin-top:4px">Время — между осмотрами (${fmtDT(row.at)} – ${fmtDT(row.nextAt)}). Если поле «Литры» пустое, заправка не добавляется.</div>
+    </div>`;
   openModal(`
     <div style="font-size:16px;font-weight:800;color:var(--navy);margin-bottom:2px">Исправление значений: ${eq}</div>
     <div style="font-size:12px;color:var(--gray);margin-bottom:8px">${row.shift}, ${fmtDT(row.at)} · ${escapeHtml(row.emp || "—")}</div>
@@ -5548,17 +5560,8 @@ function openShiftFix(eq, atMs) {
         <span>${fmtDT(x.rec)}${x.rec && x.d && x.rec.getTime() !== x.d.getTime() ? " (в расчёте — днём)" : ""} · ${escapeHtml(x.f.empName || "—")}</span>
         <label>Литры ${inp("fixFl_" + x.f.recordId, x.f.amountLiters, "1")}</label>
       </div>`).join("")}` : ""}
-    <div style="border:1px dashed var(--border);border-radius:8px;padding:8px 10px;margin-top:8px">
-      <div style="font-size:12px;font-weight:700;margin-bottom:4px">Заправка была, но не внесена? Добавить</div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:12px">
-        <label>Дата <input type="date" id="addFuelDate" value="${addDate}" style="padding:5px 7px;font-size:12px"></label>
-        <label>Время <input type="time" id="addFuelTime" style="padding:5px 7px;font-size:12px"></label>
-        <label>Литры <input type="number" id="addFuelL" min="1" step="1" style="width:90px;padding:5px 7px;font-size:12px"></label>
-        <label>Моточасы <input type="number" id="addFuelMh" min="0" step="0.1" style="width:100px;padding:5px 7px;font-size:12px"></label>
-        <label>Кто заправлял <input type="text" id="addFuelWho" value="${escapeHtml(row.emp || "")}" style="width:170px;padding:5px 7px;font-size:12px"></label>
-      </div>
-      <div style="font-size:11px;color:var(--gray);margin-top:4px">Время — между осмотрами (${fmtDT(row.at)} – ${fmtDT(row.nextAt)}). Если поле «Литры» пустое, заправка не добавляется.</div>
-    </div>
+    ${addFuelBlock("", "Заправка была, но не внесена? Добавить")}
+    ${addFuelBlock("2", "Вторая заправка (экскаваторы заправляются дважды) — добавить")}
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 6px">
       <input type="text" id="fixBy" placeholder="Ваша фамилия" value="${escapeHtml(by)}" style="flex:1;min-width:140px;padding:7px 9px;font-size:13px">
       <select id="fixReason" style="flex:1;min-width:160px;padding:7px 9px;font-size:13px">
@@ -5596,19 +5599,22 @@ async function saveShiftFix() {
     if (orig === val) return;
     changes.push({ action: "correctFuelValue", payload: { recordId: x.f.recordId, field: "liters", value: val }, label: "Заправка " + orig + " → " + val + " л" });
   });
-  const addL = readNum("addFuelL");
+  for (const sfx of ["", "2"]) {
+  const pre = sfx ? "Заправка 2: " : "Заправка: ";
+  const addL = readNum("addFuelL" + sfx);
   if (addL !== null && addL !== "") {
-    const lit = Number(addL.replace(",", ".")), d = readNum("addFuelDate"), t = readNum("addFuelTime"), who = (readNum("addFuelWho") || "").trim();
-    const mhRaw = readNum("addFuelMh"), mh = (mhRaw === null || mhRaw === "") ? "" : Number(mhRaw.replace(",", "."));
+    const lit = Number(addL.replace(",", ".")), d = readNum("addFuelDate" + sfx), t = readNum("addFuelTime" + sfx), who = (readNum("addFuelWho" + sfx) || "").trim();
+    const mhRaw = readNum("addFuelMh" + sfx), mh = (mhRaw === null || mhRaw === "") ? "" : Number(mhRaw.replace(",", "."));
     if (isNaN(lit) || lit <= 0 || lit > 10000 || !d || !t || who.length < 2 || (mh !== "" && (isNaN(mh) || mh < 0))) {
-      msg.style.color = "var(--red)"; msg.textContent = "Заправка: укажите дату, время, литры (больше 0), кто заправлял; моточасы — число не меньше 0."; return;
+      msg.style.color = "var(--red)"; msg.textContent = pre + "укажите дату, время, литры (больше 0), кто заправлял; моточасы — число не меньше 0."; return;
     }
     const at = new Date(d + "T" + t), lo = c.row.at.getTime(), hi = c.row.nextAt ? c.row.nextAt.getTime() : lo + SHIFT_WINDOW_H * 3600000;
-    if (isNaN(at.getTime()) || at.getTime() > Date.now()) { msg.style.color = "var(--red)"; msg.textContent = "Заправка: дата и время неверны или в будущем."; return; }
+    if (isNaN(at.getTime()) || at.getTime() > Date.now()) { msg.style.color = "var(--red)"; msg.textContent = pre + "дата и время неверны или в будущем."; return; }
     if (at.getTime() <= lo || at.getTime() > hi) {
       if (!confirm("Время заправки вне интервала между осмотрами — в расчёт этой смены она не попадёт. Всё равно добавить?")) return;
     }
-    changes.push({ action: "addFuelRecordFix", payload: { equipmentId: c.eq, empName: who, fuelAt: d + "T" + t, liters: lit, hourMeter: mh }, label: "Добавить заправку " + lit + " л, " + d.split("-").reverse().join(".") + " " + t });
+    changes.push({ action: "addFuelRecordFix", payload: { equipmentId: c.eq, empName: who, fuelAt: d + "T" + t, liters: lit, hourMeter: mh }, label: "Добавить " + (sfx ? "вторую заправку " : "заправку ") + lit + " л, " + d.split("-").reverse().join(".") + " " + t });
+  }
   }
   if (changes.some(x => x.bad)) { msg.style.color = "var(--red)"; msg.textContent = "Проверьте числа: значения должны быть не меньше нуля (литры — больше нуля)."; return; }
   if (!changes.length) { msg.style.color = "var(--red)"; msg.textContent = "Вы ничего не изменили."; return; }
