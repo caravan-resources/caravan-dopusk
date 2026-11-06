@@ -5531,6 +5531,7 @@ function openShiftFix(eq, atMs) {
         <label>Остаток топлива, л ${inp("fixLv_" + rid, level, "1")}</label>
       </div>
       <div style="font-size:11px;color:var(--gray);margin-top:4px">${neighborMeters(eq, rid)}</div>
+      <div style="margin-top:6px"><button type="button" class="btn-ghost" style="width:auto;padding:4px 10px;font-size:11px;color:var(--red);border-color:var(--red)" onclick="deleteShiftInspection('${rid}')">Удалить этот осмотр</button></div>
     </div>`;
   SHIFT_FIX_CTX = { eq, row, fuel, orig: {} };
   SHIFT_FIX_CTX.orig["mh_" + row.recId] = row.mh0; SHIFT_FIX_CTX.orig["lv_" + row.recId] = row.level0;
@@ -5565,7 +5566,7 @@ function openShiftFix(eq, atMs) {
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 6px">
       <input type="text" id="fixBy" placeholder="Ваша фамилия" value="${escapeHtml(by)}" style="flex:1;min-width:140px;padding:7px 9px;font-size:13px">
       <select id="fixReason" style="flex:1;min-width:160px;padding:7px 9px;font-size:13px">
-        <option>Опечатка при вводе</option><option>Неверное показание прибора</option><option>Заправка записана неверно</option><option>Другое</option>
+        <option>Опечатка при вводе</option><option>Неверное показание прибора</option><option>Заправка записана неверно</option><option>Осмотр сделан по ошибке (не та техника / не тот человек)</option><option>Дубль осмотра</option><option>Другое</option>
       </select>
     </div>
     <div id="fixMsg" style="font-size:12px;min-height:16px;margin-bottom:6px"></div>
@@ -5573,6 +5574,40 @@ function openShiftFix(eq, atMs) {
       <button class="btn-ghost" style="width:auto;padding:8px 14px;font-size:13px" onclick="closeModal()">Закрыть</button>
       <button class="btn-gold" id="fixSaveBtn" style="width:auto;padding:8px 14px;font-size:13px" onclick="saveShiftFix()">Сохранить</button>
     </div>`);
+}
+
+// Удаление осмотра, сделанного неправильно (06.11.2026). Бэкенд копирует строки осмотра в лист
+// «Удалённые осмотры», пишет «Корректировки», убирает строку отчёта по смене и пересчитывает соседние.
+async function deleteShiftInspection(rid) {
+  const c = SHIFT_FIX_CTX; if (!c) return;
+  const msg = document.getElementById("fixMsg");
+  const by = document.getElementById("fixBy").value.trim(), reason = document.getElementById("fixReason").value;
+  if (by.length < 2) { msg.style.color = "var(--red)"; msg.textContent = "Укажите свою фамилию."; return; }
+  const first = rid === c.row.recId;
+  const who = first ? c.row.emp : c.row.nextEmp, at = first ? c.row.at : c.row.nextAt;
+  const when = at ? at.toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—";
+  if (!confirm("УДАЛИТЬ осмотр?\n" + c.eq + ", " + when + ", " + (who || "—") + "\nПричина: " + reason + "\n\nВсе его строки будут перенесены в лист «Удалённые осмотры» (можно вернуть вручную). Отчёт по смене пересчитается.")) return;
+  document.querySelectorAll("#fixSaveBtn").forEach(b => b.disabled = true);
+  msg.style.color = "var(--gray)"; msg.textContent = "Удаляю…";
+  let ok = false;
+  try {
+    const res = await fetch(CFG.SHEET_URL, { method: "POST", body: JSON.stringify({ action: "deleteInspection", recordId: rid, by, reason }) });
+    const val = await res.json();
+    if (val.ok) ok = true;
+    else { msg.style.color = "var(--red)"; msg.textContent = "Не удалено: " + (val.error === "unknown action" ? "на сервере ещё не обновлён скрипт (нужен новый деплой Код.gs)" : (val.error || "ошибка")); }
+  } catch (e) { msg.style.color = "var(--red)"; msg.textContent = "Не удалено: нет связи (" + e.message + ")"; }
+  const btn = document.getElementById("fixSaveBtn"); if (btn) btn.disabled = false;
+  if (!ok) return;
+  try { localStorage.setItem("operbaza.corrBy", by); } catch (e) {}
+  msg.style.color = "var(--green,#2E7D32)"; msg.textContent = "Удалено. Обновляю данные…";
+  try {
+    const fr = await jsonpFetchRetry(`${CFG.SHEET_URL}?action=getFuelRecords`, "cb_fuel_records", 40000, 2);
+    if (Array.isArray(fr)) DATA.fuel = fr;
+  } catch (e) { console.error("Обновление заправок:", e); }
+  FULL_HISTORY_LOADED = false;
+  await loadFullHistory(null);
+  closeModal();
+  refreshSiteNotes();
 }
 
 async function saveShiftFix() {
