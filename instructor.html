@@ -5522,6 +5522,7 @@ function openShiftFix(eq, atMs) {
   const fuel = (row.refuelRecs || []).map(x => ({ f: x.src, rec: x.orig, d: x.date })).sort((a, b) => a.d - b.d);
   const pad2 = n => String(n).padStart(2, "0");
   const addDate = `${row.at.getFullYear()}-${pad2(row.at.getMonth() + 1)}-${pad2(row.at.getDate())}`;
+  const dtVal = (d, k) => d ? (k === "d" ? `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}` : `${pad2(d.getHours())}:${pad2(d.getMinutes())}`) : "";
   const inp = (id, val, step) => `<input type="number" id="${id}" value="${val == null ? "" : val}" step="${step || "0.1"}" min="0" style="width:110px;padding:6px 8px;font-size:13px">`;
   const block = (title, rid, mh, level, who, at) => `
     <div style="border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:8px">
@@ -5530,11 +5531,17 @@ function openShiftFix(eq, atMs) {
         <label>Моточасы ${inp("fixMh_" + rid, mh)}</label>
         <label>Остаток топлива, л ${inp("fixLv_" + rid, level, "1")}</label>
       </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;font-size:12px;margin-top:6px">
+        <label>Дата осмотра <input type="date" id="fixDt_${rid}" value="${dtVal(at, "d")}" style="padding:5px 7px;font-size:12px"></label>
+        <label>Время <input type="time" id="fixTm_${rid}" value="${dtVal(at, "t")}" style="padding:5px 7px;font-size:12px"></label>
+      </div>
       <div style="font-size:11px;color:var(--gray);margin-top:4px">${neighborMeters(eq, rid)}</div>
       <div style="margin-top:6px"><button type="button" class="btn-ghost" style="width:auto;padding:4px 10px;font-size:11px;color:var(--red);border-color:var(--red)" onclick="deleteShiftInspection('${rid}')">Удалить этот осмотр</button></div>
     </div>`;
   SHIFT_FIX_CTX = { eq, row, fuel, orig: {} };
   SHIFT_FIX_CTX.orig["mh_" + row.recId] = row.mh0; SHIFT_FIX_CTX.orig["lv_" + row.recId] = row.level0;
+  SHIFT_FIX_CTX.orig["dt_" + row.recId] = dtVal(row.at, "d") + "T" + dtVal(row.at, "t");
+  if (row.nextRecId && row.nextAt) SHIFT_FIX_CTX.orig["dt_" + row.nextRecId] = dtVal(row.nextAt, "d") + "T" + dtVal(row.nextAt, "t");
   if (row.nextRecId) { SHIFT_FIX_CTX.orig["mh_" + row.nextRecId] = row.mh1; SHIFT_FIX_CTX.orig["lv_" + row.nextRecId] = row.level1; }
   fuel.forEach(x => { SHIFT_FIX_CTX.orig["fl_" + x.f.recordId] = Number(x.f.amountLiters); });
   const by = (() => { try { return localStorage.getItem("operbaza.corrBy") || ""; } catch (e) { return ""; } })();
@@ -5627,6 +5634,20 @@ async function saveShiftFix() {
   };
   addInsp(c.row.recId, "hours", "mh"); addInsp(c.row.recId, "fuel", "lv");
   if (c.row.nextRecId) { addInsp(c.row.nextRecId, "hours", "mh"); addInsp(c.row.nextRecId, "fuel", "lv"); }
+  // Время осмотра (07.11.2026): дата и время в часовом поясе карьера; не в будущем
+  const addTime = rid => {
+    const d = readNum("fixDt_" + rid), t = readNum("fixTm_" + rid);
+    if (d === null) return;
+    const orig = c.orig["dt_" + rid];
+    if (!d || !t) { changes.push({ bad: "time" }); return; }
+    const nv = d + "T" + t;
+    if (nv === orig) return;
+    const ms = new Date(nv).getTime();
+    if (isNaN(ms) || ms > Date.now()) { changes.push({ bad: "time" }); return; }
+    changes.push({ action: "correctInspectionTime", payload: { recordId: rid, newAt: nv }, label: "Время осмотра " + (orig || "—").replace("T", " ") + " → " + nv.replace("T", " ") });
+  };
+  addTime(c.row.recId);
+  if (c.row.nextRecId) addTime(c.row.nextRecId);
   c.fuel.forEach(x => {
     const raw = readNum("fixFl_" + x.f.recordId); if (raw === null || raw === "") return;
     const val = Number(raw.replace(",", ".")); const orig = c.orig["fl_" + x.f.recordId];
@@ -5651,6 +5672,7 @@ async function saveShiftFix() {
     changes.push({ action: "addFuelRecordFix", payload: { equipmentId: c.eq, empName: who, fuelAt: d + "T" + t, liters: lit, hourMeter: mh }, label: "Добавить " + (sfx ? "вторую заправку " : "заправку ") + lit + " л, " + d.split("-").reverse().join(".") + " " + t });
   }
   }
+  if (changes.some(x => x.bad === "time")) { msg.style.color = "var(--red)"; msg.textContent = "Проверьте дату и время осмотра: они должны быть заполнены и не в будущем."; return; }
   if (changes.some(x => x.bad)) { msg.style.color = "var(--red)"; msg.textContent = "Проверьте числа: значения должны быть не меньше нуля (литры — больше нуля)."; return; }
   if (!changes.length) { msg.style.color = "var(--red)"; msg.textContent = "Вы ничего не изменили."; return; }
   if (by.length < 2) { msg.style.color = "var(--red)"; msg.textContent = "Укажите свою фамилию."; return; }
