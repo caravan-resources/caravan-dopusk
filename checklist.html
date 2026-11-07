@@ -215,6 +215,15 @@ input:focus, select:focus, textarea:focus { border-color:var(--gold); }
       </div>
     </label>
 
+    <div class="card" id="inspTimeCard">
+      <div class="card-title">Время осмотра</div>
+      <div style="display:flex;gap:8px">
+        <div style="flex:1"><label class="label" style="font-size:12px;font-weight:700;color:var(--gray);margin-bottom:6px;display:block">Дата</label><input type="date" id="inspDate" oninput="inspTimeEdited=true"></div>
+        <div style="flex:1"><label class="label" style="font-size:12px;font-weight:700;color:var(--gray);margin-bottom:6px;display:block">Время</label><input type="time" id="inspTime" oninput="inspTimeEdited=true"></div>
+      </div>
+      <div class="hint" style="margin-top:6px">Если не меняли — осмотр запишется временем отправки. Если осматривали раньше или связи не было, укажите фактическое время осмотра.</div>
+    </div>
+
     <div class="card" id="fuelCard" style="display:none">
       <div class="card-title" id="fuelCardTitle">Уровень топлива</div>
       <div class="hint" style="margin-bottom:8px">Обязательно. Вносится только в начале смены.</div>
@@ -702,7 +711,16 @@ async function submitFuel() {
   }
 }
 
+let inspTimeEdited = false;
+function resetInspTime() {
+  const n = almatyNow();
+  document.getElementById("inspDate").value = n.date;
+  document.getElementById("inspTime").value = n.time;
+  inspTimeEdited = false;
+}
+
 function showForm() {
+  resetInspTime();
   document.getElementById("selectedBoxWrap").innerHTML = `
     <div class="selected-box">
       <div class="emp-avatar">${initials(selected.name)}</div>
@@ -860,13 +878,32 @@ async function submitChecklist() {
     items.push({ section: "Общее", itemText: "Общие замечания", status: "", comment: generalComment });
   }
 
+  // Время осмотра: не менялось — момент отправки; изменено вручную — то, что ввёл оператор (часовой пояс карьера, UTC+5)
+  let performedAt = new Date().toISOString();
+  if (inspTimeEdited) {
+    const idv = document.getElementById("inspDate").value, itv = document.getElementById("inspTime").value;
+    const at = (idv && itv) ? Date.parse(idv + "T" + itv + ":00+05:00") : NaN;
+    let err = "";
+    if (isNaN(at)) err = "Укажите дату и время осмотра";
+    else if (at > Date.now() + 10 * 60 * 1000) err = "Время осмотра в будущем: проверьте дату и время";
+    else if (at < Date.now() - 30 * 24 * 3600 * 1000) err = "Дата осмотра старше 30 дней: проверьте дату";
+    if (err) {
+      hint.style.color = "var(--red)";
+      hint.textContent = err;
+      const tc = document.getElementById("inspTimeCard");
+      if (tc && tc.scrollIntoView) tc.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
+    performedAt = new Date(at).toISOString();
+  }
+
   const btn = document.getElementById("submitBtn");
   btn.disabled = true;
   btn.textContent = "Отправка...";
 
-  // performedAt — когда осмотр заполнен на телефоне (важно, если отправка уйдёт позже, из очереди)
+  // performedAt — когда осмотр проведён (по умолчанию — когда заполнен на телефоне; важно, если отправка уйдёт позже, из очереди)
   const out = await sendOrQueue({
-    action: "submitChecklistRecord", clientId: newClientId(), performedAt: new Date().toISOString(),
+    action: "submitChecklistRecord", clientId: newClientId(), performedAt,
     equipmentId: equipment.equipmentId, templateId: template.id, empId: selected.id, empName: selected.name, items,
   }, (isHandover ? "Пересменка " : "Осмотр ") + equipment.equipmentId, { status: "В работе", equipmentId: equipment.equipmentId });
   if (out.ok) {
