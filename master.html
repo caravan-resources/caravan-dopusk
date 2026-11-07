@@ -1291,8 +1291,8 @@ function refuelIntervals(equipmentId, start, end) {
 // 03.11.2026: ОТЧЁТ ПО СМЕНАМ В ФОРМЕ MS FORMS
 // ──────────────────────────────────────────────────────
 // Одна строка = один осмотр машины (начало смены). Колонки — как во вкладке
-// «MS Forms» книги аналитики, кроме остатка топлива на конец смены (он и так
-// равен остатку на начало следующей смены). «Конец смены» восстанавливается из
+// «MS Forms» книги аналитики; «Остаток топлива на конец смены» = остаток на
+// начало следующей смены (из следующего осмотра). «Конец смены» восстанавливается из
 // СЛЕДУЮЩЕГО осмотра той же машины (если он не дальше SHIFT_END_MAX_GAP_H):
 //   моточасы/пробег на конец = значения следующего осмотра;
 //   отработано = моточасы_конец − моточасы_начало;
@@ -1307,7 +1307,7 @@ function refuelIntervals(equipmentId, start, end) {
 // ══════════════════════════════════════════════════════
 const SHIFT_END_MAX_GAP_H = 26;
 const SHIFT_WINDOW_H = 13;
-const SHIFT_REPORT_HEAD = ["Участок","Дата","Смена","ФИО","Техника","Бортовой номер","Моточасы на начало смены","Моточасы на конец смены","Пробег на начало смены","Пробег на конец смены","Топливо на начало смены","Заправлено","Отработано часов","Израсходовано","л/ч","Замечание"];
+const SHIFT_REPORT_HEAD = ["Участок","Дата","Смена","ФИО","Техника","Бортовой номер","Моточасы на начало смены","Моточасы на конец смены","Пробег на начало смены","Пробег на конец смены","Топливо на начало смены","Заправлено","Остаток топлива на конец смены","Отработано часов","Израсходовано","л/ч","Замечание"];
 
 function shiftLabelOf(d) {
   const h = d.getHours();
@@ -1404,7 +1404,7 @@ function shiftReportAoa(rows) {
   const fmt = d => `${String(d.getDate()).padStart(2,"0")}.${String(d.getMonth()+1).padStart(2,"0")}.${d.getFullYear()}`;
   const v = x => x == null ? "" : x;
   return [SHIFT_REPORT_HEAD].concat(shiftReportSort(rows, false).map(r => [
-    r.site, fmt(r.date), r.shift, r.emp, r.type, r.id, v(r.mh0), v(r.mh1), v(r.odo0), v(r.odo1), v(r.level0), r.refueled, v(r.hours), v(r.burned), v(r.rate), r.note || "",
+    r.site, fmt(r.date), r.shift, r.emp, r.type, r.id, v(r.mh0), v(r.mh1), v(r.odo0), v(r.odo1), v(r.level0), r.refueled, v(r.level1), v(r.hours), v(r.burned), v(r.rate), r.note || "",
   ]));
 }
 
@@ -1417,16 +1417,16 @@ function shiftReportTableHtml(rows, limit, withFix) {
       <tbody>${shown.map(r => `<tr>
         <td>${r.site}</td><td>${fmt(r.date)}</td><td>${r.shift}</td><td>${escapeHtml(r.emp)}</td><td>${r.type}</td><td><b>${r.id}</b></td>
         <td>${v(r.mh0)}</td><td>${v(r.mh1)}</td><td>${v(r.odo0)}</td><td>${v(r.odo1)}</td><td>${v(r.level0)}</td>
-        <td>${r.refueled}</td><td>${v(r.hours)}</td><td>${v(r.burned)}</td><td><b>${v(r.rate)}</b></td><td style="color:var(--red);font-size:11px">${escapeHtml(r.note || "")}</td>${withFix ? `<td><button class="btn-ghost" style="width:auto;padding:4px 8px;font-size:11px" onclick="openShiftFix('${r.id}', ${r.at.getTime()})">${/расход ≤ 0/.test(r.note) ? "Исправить / добавить заправку" : "Исправить"}</button></td>` : ""}
+        <td>${r.refueled}</td><td>${v(r.level1)}</td><td>${v(r.hours)}</td><td>${v(r.burned)}</td><td><b>${v(r.rate)}</b></td><td style="color:var(--red);font-size:11px">${escapeHtml(r.note || "")}</td>${withFix ? `<td><button class="btn-ghost" style="width:auto;padding:4px 8px;font-size:11px" onclick="openShiftFix('${r.id}', ${r.at.getTime()})">${/расход ≤ 0/.test(r.note) ? "Исправить / добавить заправку" : "Исправить"}</button></td>` : ""}
       </tr>`).join("")}</tbody></table></div>
     ${sorted.length > shown.length ? `<div style="font-size:11px;color:var(--gray);margin-bottom:8px">Показаны последние ${shown.length} из ${sorted.length} строк — полный отчёт в Excel.</div>` : ""}
-    <div style="font-size:11px;color:var(--gray);margin-bottom:8px">Конец смены — по следующему осмотру этой машины (не позже ${SHIFT_END_MAX_GAP_H} ч). Остаток топлива на конец смены не выводится: он равен остатку на начало следующей смены. Пустая ячейка — значение не указано или нет следующего осмотра.</div>`;
+    <div style="font-size:11px;color:var(--gray);margin-bottom:8px">Конец смены — по следующему осмотру этой машины (не позже ${SHIFT_END_MAX_GAP_H} ч). Остаток топлива на конец смены — остаток на начало следующей смены этой машины (из следующего осмотра). Пустая ячейка — значение не указано или нет следующего осмотра.</div>`;
 }
 
 function addShiftReportSheet(wb, rows, sheetName) {
   if (!rows.length) return false;
   const ws = XLSX.utils.aoa_to_sheet(shiftReportAoa(rows));
-  ws["!cols"] = [{wch:9},{wch:11},{wch:14},{wch:30},{wch:20},{wch:12},{wch:12},{wch:12},{wch:12},{wch:12},{wch:12},{wch:11},{wch:11},{wch:13},{wch:8},{wch:60}];
+  ws["!cols"] = [{wch:9},{wch:11},{wch:14},{wch:30},{wch:20},{wch:12},{wch:12},{wch:12},{wch:12},{wch:12},{wch:12},{wch:11},{wch:14},{wch:11},{wch:13},{wch:8},{wch:60}];
   XLSX.utils.book_append_sheet(wb, ws, sheetName || "По сменам");
   return true;
 }
@@ -1837,7 +1837,7 @@ function renderFuelTypeFilterM() {
 }
 
 // Отчёт по сменам (формат MS Forms) для текущего фильтра панели «Расход по типу техники»:
-// тип + модель + период. Остаток топлива на конец смены не выводится.
+// тип + модель + период.
 function exportShiftReportExcelM() {
   if (typeof XLSX === "undefined") { alert("Библиотека Excel не загрузилась (нужен интернет) — попробуй ещё раз."); return; }
   const st = FUEL_TYPE_FILTER_M;
