@@ -606,6 +606,10 @@ function renderStats() {
   `).join("");
 }
 
+// Пробег самосвала выше этого значения помечаем «проверить» (на 08.11.2026 у парка 36–170 тыс. км,
+// 1 300 861 у HT184 — ошибка ввода). Лимит роста между осмотрами пока не задан — нужна история показаний.
+const ODO_SUSPECT_KM = 500000;
+
 function renderAnalytics() {
   const st = chkStats();
   const byEqEl = document.getElementById("analyticsByEquipment");
@@ -629,7 +633,9 @@ function renderAnalytics() {
       if (row.odoKm != null) {
         const od = parseRecordDate(row.odoDate);
         const odShort = od ? `${String(od.getDate()).padStart(2,"0")}.${String(od.getMonth()+1).padStart(2,"0")}` : "";
-        odoHtml = ` · <span style="color:var(--navy);font-weight:600">пробег ${Number(row.odoKm).toLocaleString("ru-RU")} км</span>${odShort ? ` (на ${odShort})` : ""}`;
+        const odoColor = row.odoKm > ODO_SUSPECT_KM ? "var(--red)" : "var(--navy)";
+        odoHtml = ` · <span style="color:${odoColor};font-weight:600">пробег ${Number(row.odoKm).toLocaleString("ru-RU")} км</span>${odShort ? ` (на ${odShort})` : ""}`
+          + (row.odoKm > ODO_SUSPECT_KM ? ` <span style="background:var(--redbg);color:var(--red);font-weight:700;padding:1px 7px;border-radius:99px">проверить: похоже на ошибку ввода</span>` : "");
       } else {
         odoHtml = ` · пробег не вносили`;
       }
