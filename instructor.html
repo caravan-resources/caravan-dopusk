@@ -5524,12 +5524,13 @@ function openShiftFix(eq, atMs) {
   const addDate = `${row.at.getFullYear()}-${pad2(row.at.getMonth() + 1)}-${pad2(row.at.getDate())}`;
   const dtVal = (d, k) => d ? (k === "d" ? `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}` : `${pad2(d.getHours())}:${pad2(d.getMinutes())}`) : "";
   const inp = (id, val, step) => `<input type="number" id="${id}" value="${val == null ? "" : val}" step="${step || "0.1"}" min="0" style="width:110px;padding:6px 8px;font-size:13px">`;
-  const block = (title, rid, mh, level, who, at) => `
+  const block = (title, rid, mh, level, who, at, odo) => `
     <div style="border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:8px">
       <div style="font-size:12px;font-weight:700;margin-bottom:4px">${title}: ${fmtDT(at)} · ${escapeHtml(who || "—")}</div>
       <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;font-size:12px">
         <label>Моточасы ${inp("fixMh_" + rid, mh)}</label>
         <label>Остаток топлива, л ${inp("fixLv_" + rid, level, "1")}</label>
+        ${odo != null ? `<label>Пробег, км ${inp("fixOd_" + rid, odo, "1")}</label>` : ""}
       </div>
       <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;font-size:12px;margin-top:6px">
         <label>Дата осмотра <input type="date" id="fixDt_${rid}" value="${dtVal(at, "d")}" style="padding:5px 7px;font-size:12px"></label>
@@ -5539,10 +5540,10 @@ function openShiftFix(eq, atMs) {
       <div style="margin-top:6px"><button type="button" class="btn-ghost" style="width:auto;padding:4px 10px;font-size:11px;color:var(--red);border-color:var(--red)" onclick="deleteShiftInspection('${rid}')">Удалить этот осмотр</button></div>
     </div>`;
   SHIFT_FIX_CTX = { eq, row, fuel, orig: {} };
-  SHIFT_FIX_CTX.orig["mh_" + row.recId] = row.mh0; SHIFT_FIX_CTX.orig["lv_" + row.recId] = row.level0;
+  SHIFT_FIX_CTX.orig["mh_" + row.recId] = row.mh0; SHIFT_FIX_CTX.orig["lv_" + row.recId] = row.level0; SHIFT_FIX_CTX.orig["od_" + row.recId] = row.odo0;
   SHIFT_FIX_CTX.orig["dt_" + row.recId] = dtVal(row.at, "d") + "T" + dtVal(row.at, "t");
   if (row.nextRecId && row.nextAt) SHIFT_FIX_CTX.orig["dt_" + row.nextRecId] = dtVal(row.nextAt, "d") + "T" + dtVal(row.nextAt, "t");
-  if (row.nextRecId) { SHIFT_FIX_CTX.orig["mh_" + row.nextRecId] = row.mh1; SHIFT_FIX_CTX.orig["lv_" + row.nextRecId] = row.level1; }
+  if (row.nextRecId) { SHIFT_FIX_CTX.orig["mh_" + row.nextRecId] = row.mh1; SHIFT_FIX_CTX.orig["lv_" + row.nextRecId] = row.level1; SHIFT_FIX_CTX.orig["od_" + row.nextRecId] = row.odo1; }
   fuel.forEach(x => { SHIFT_FIX_CTX.orig["fl_" + x.f.recordId] = Number(x.f.amountLiters); });
   const by = (() => { try { return localStorage.getItem("operbaza.corrBy") || ""; } catch (e) { return ""; } })();
   const addFuelBlock = (sfx, title) => `
@@ -5561,8 +5562,8 @@ function openShiftFix(eq, atMs) {
     <div style="font-size:16px;font-weight:800;color:var(--navy);margin-bottom:2px">Исправление значений: ${eq}</div>
     <div style="font-size:12px;color:var(--gray);margin-bottom:8px">${row.shift}, ${fmtDT(row.at)} · ${escapeHtml(row.emp || "—")}</div>
     ${row.note ? `<div style="font-size:12px;color:var(--red);margin-bottom:8px">${escapeHtml(row.note)}</div>` : ""}
-    ${block("Осмотр 1 (начало смены)", row.recId, row.mh0, row.level0, row.emp, row.at)}
-    ${row.nextRecId ? block("Осмотр 2 (следующий)", row.nextRecId, row.mh1, row.level1, row.nextEmp, row.nextAt) : `<div style="font-size:12px;color:var(--gray);margin-bottom:8px">Следующего осмотра нет — править нечего.</div>`}
+    ${block("Осмотр 1 (начало смены)", row.recId, row.mh0, row.level0, row.emp, row.at, row.odo0)}
+    ${row.nextRecId ? block("Осмотр 2 (следующий)", row.nextRecId, row.mh1, row.level1, row.nextEmp, row.nextAt, row.odo1) : `<div style="font-size:12px;color:var(--gray);margin-bottom:8px">Следующего осмотра нет — править нечего.</div>`}
     ${fuel.length ? `<div style="font-size:12px;font-weight:700;margin:6px 0 4px">Заправки между осмотрами</div>${fuel.map(x => `
       <div style="font-size:12px;display:flex;gap:10px;align-items:center;margin-bottom:4px">
         <span>${fmtDT(x.rec)}${x.rec && x.d && x.rec.getTime() !== x.d.getTime() ? " (в расчёте — днём)" : ""} · ${escapeHtml(x.f.empName || "—")}</span>
@@ -5624,16 +5625,16 @@ async function saveShiftFix() {
   const changes = [];
   const readNum = id => { const el = document.getElementById(id); return el ? el.value.trim() : null; };
   const addInsp = (rid, field, key) => {
-    const idp = (field === "hours" ? "fixMh_" : "fixLv_") + rid; const raw = readNum(idp);
+    const idp = (field === "hours" ? "fixMh_" : field === "odo" ? "fixOd_" : "fixLv_") + rid; const raw = readNum(idp);
     if (raw === null || raw === "") return;
     const val = Number(raw.replace(",", "."));
     const orig = c.orig[key + "_" + rid];
     if (isNaN(val) || val < 0) { changes.push({ bad: true }); return; }
     if (orig != null && Number(orig) === val) return;
-    changes.push({ action: "correctInspectionValue", payload: { recordId: rid, field, value: val }, label: (field === "hours" ? "Моточасы" : "Остаток топлива") + " " + (orig == null ? "—" : orig) + " → " + val });
+    changes.push({ action: "correctInspectionValue", payload: { recordId: rid, field, value: val }, label: (field === "hours" ? "Моточасы" : field === "odo" ? "Пробег, км" : "Остаток топлива") + " " + (orig == null ? "—" : orig) + " → " + val });
   };
-  addInsp(c.row.recId, "hours", "mh"); addInsp(c.row.recId, "fuel", "lv");
-  if (c.row.nextRecId) { addInsp(c.row.nextRecId, "hours", "mh"); addInsp(c.row.nextRecId, "fuel", "lv"); }
+  addInsp(c.row.recId, "hours", "mh"); addInsp(c.row.recId, "fuel", "lv"); addInsp(c.row.recId, "odo", "od");
+  if (c.row.nextRecId) { addInsp(c.row.nextRecId, "hours", "mh"); addInsp(c.row.nextRecId, "fuel", "lv"); addInsp(c.row.nextRecId, "odo", "od"); }
   // Время осмотра (07.11.2026): дата и время в часовом поясе карьера; не в будущем
   const addTime = rid => {
     const d = readNum("fixDt_" + rid), t = readNum("fixTm_" + rid);
