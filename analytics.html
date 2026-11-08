@@ -101,12 +101,21 @@ body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans
         style="font-size:13px;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;background:#fff;color:var(--navy)"></select>
       <button class="btn-ghost" style="margin-left:auto;padding:6px 12px;font-size:12px" onclick="loadAll()">Обновить</button>
     </div>
+    <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center;flex-wrap:wrap">
+      <span style="font-size:13px;color:var(--gray);font-weight:600">Дата или период:</span>
+      <input type="date" id="statFromM" style="font-size:13px;padding:7px 9px;border:1.5px solid var(--border);border-radius:8px">
+      <span style="font-size:12px;color:var(--gray)">—</span>
+      <input type="date" id="statToM" style="font-size:13px;padding:7px 9px;border:1.5px solid var(--border);border-radius:8px">
+      <button class="btn-ghost" style="padding:7px 14px;font-size:13px" onclick="applyMetersPeriod()">Применить</button>
+      <button class="btn-ghost" style="padding:7px 14px;font-size:13px" onclick="resetStatPeriod()">Сброс (30 дней)</button>
+      <span style="font-size:11px;color:var(--gray)">Одна дата — показания за этот день</span>
+    </div>
     <div class="panel">
       <div class="panel-title">Пробег и моточасы по чек-листам — <span id="titleSiteMeters"></span></div>
       <div id="metersSummary" style="font-size:12px;color:var(--gray);margin-bottom:10px"></div>
       <div id="metersBody" style="overflow-x:auto"></div>
       <p style="font-size:11px;color:var(--gray);margin-top:12px">
-        Берётся последнее значение, внесённое в чек-листе за выбранный период (по умолчанию 30 дней; период задаётся на вкладке «Обзор осмотров»).
+        Берётся последнее значение, внесённое в чек-листе за выбранные даты (по умолчанию — последние 30 дней). Период общий с вкладкой «Обзор осмотров».
         Под значением — дата и время осмотра. У легковых машин и автобусов в поле «Моточасы» обычно вносят пробег.
       </p>
     </div>
@@ -330,13 +339,30 @@ function applyStatPeriod() {
   toDate.setDate(toDate.getDate() + 1);
   STAT_FROM = fromVal + "T00:00:00";
   STAT_TO = toDate.toISOString();
+  // Те же даты на вкладке «Пробег и моточасы»
+  document.getElementById("statFromM").value = fromVal;
+  document.getElementById("statToM").value = toVal;
   loadAll();
+}
+
+// Период на вкладке «Пробег и моточасы»: одна дата = один день; две даты = диапазон.
+// Использует тот же серверный запрос, что и вкладка «Обзор осмотров».
+function applyMetersPeriod() {
+  let f = document.getElementById("statFromM").value, t = document.getElementById("statToM").value;
+  if (!f && !t) { alert("Укажите дату или период."); return; }
+  if (!f) f = t;
+  if (!t) t = f;
+  document.getElementById("statFrom").value = f;
+  document.getElementById("statTo").value = t;
+  applyStatPeriod();
 }
 
 function resetStatPeriod() {
   STAT_FROM = null; STAT_TO = null;
   document.getElementById("statFrom").value = "";
   document.getElementById("statTo").value = "";
+  document.getElementById("statFromM").value = "";
+  document.getElementById("statToM").value = "";
   loadAll();
 }
 
@@ -984,9 +1010,15 @@ function renderMeters() {
     </tr>`;
   }).join("");
 
+  // Подпись периода: выбранные даты или значение по умолчанию
+  const ruDay = s => String(s || "").split("-").reverse().join(".");
+  const fv = (document.getElementById("statFrom") || {}).value, tv = (document.getElementById("statTo") || {}).value;
+  const periodLbl = (STAT_FROM && fv && tv)
+    ? (fv === tv ? `Дата: ${ruDay(fv)}` : `Период: ${ruDay(fv)} — ${ruDay(tv)}`)
+    : "Период: последние 30 дней";
   document.getElementById("metersSummary").textContent = list.length
-    ? `Показано ${list.length} из ${eqs.length} ед. техники · с пробегом: ${withOdo} · с моточасами: ${withMh}`
-    : "";
+    ? `${periodLbl} · показано ${list.length} из ${eqs.length} ед. техники · с пробегом: ${withOdo} · с моточасами: ${withMh}`
+    : periodLbl;
   body.innerHTML = list.length
     ? `<table style="width:100%;border-collapse:collapse;font-size:13px">
         <thead><tr style="text-align:left;color:var(--gray);font-size:12px;border-bottom:2px solid var(--border)">
