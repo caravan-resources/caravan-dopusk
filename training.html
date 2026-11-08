@@ -5526,7 +5526,7 @@ async function downloadRoster(btn) {
     ? ["№","ФИО","Должность","Департамент","Дата","Подпись","Практика/Дата","Подпись"]
     : ["№","ФИО","Должность","Департамент","Подпись"];
   const colWidths = type === "profession"
-    ? [4, 27, 13, 6, 10, 10, 10, 10]
+    ? [4, 24, 13, 9, 10, 10, 10, 10]
     : [5, 44, 20, 9, 22];
   const rowCols = (r,i) => type === "profession"
     ? [i+1, escapeHtml(r.name), escapeHtml(r.position), escapeHtml(r.department), "", "", "", ""]
@@ -5547,7 +5547,7 @@ async function downloadRoster(btn) {
       <table style="width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed">
         <colgroup>${colWidths.map(w => `<col style="width:${w}%">`).join("")}</colgroup>
         <thead>
-          <tr>${headCols.map(h => `<th style="border:1px solid #333;padding:3px;font-size:4px;text-transform:none;font-weight:700;color:#111;overflow-wrap:break-word">${h}</th>`).join("")}</tr>
+          <tr>${headCols.map(h => `<th style="border:1px solid #333;padding:3px;font-size:8px;text-transform:none;font-weight:700;color:#111;overflow-wrap:break-word">${h}</th>`).join("")}</tr>
         </thead>
         <tbody>
           ${rows.map((r,i) => `<tr>${rowCols(r,i).map((v,ci) => `<td style="border:1px solid #333;padding:4px;overflow-wrap:break-word${ci===0?';text-align:center':''}">${v}</td>`).join("")}</tr>`).join("")}
@@ -5580,7 +5580,7 @@ function printRoster() {
     ? ["№","ФИО","Должность","Департамент","Дата","Подпись","Практика/Дата","Подпись"]
     : ["№","ФИО","Должность","Департамент","Подпись"];
   const colWidths = type === "profession"
-    ? [4, 27, 13, 6, 10, 10, 10, 10]
+    ? [4, 24, 13, 9, 10, 10, 10, 10]
     : [5, 44, 20, 9, 22];
   const rowCols = (r,i) => type === "profession"
     ? [i+1, escapeHtml(r.name), escapeHtml(r.position), escapeHtml(r.department), "", "", "", ""]
@@ -5607,7 +5607,7 @@ function printRoster() {
       <table style="width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed">
         <colgroup>${colWidths.map(w => `<col style="width:${w}%">`).join("")}</colgroup>
         <thead>
-          <tr>${headCols.map(h => `<th style="border:1px solid #333;padding:3px;font-size:4px;text-transform:none;font-weight:700;color:#111;overflow-wrap:break-word">${h}</th>`).join("")}</tr>
+          <tr>${headCols.map(h => `<th style="border:1px solid #333;padding:3px;font-size:8px;text-transform:none;font-weight:700;color:#111;overflow-wrap:break-word">${h}</th>`).join("")}</tr>
         </thead>
         <tbody>
           ${rows.map((r,i) => `<tr>${rowCols(r,i).map((v,ci) => `<td style="border:1px solid #333;padding:4px;overflow-wrap:break-word${ci===0?';text-align:center':''}">${v}</td>`).join("")}</tr>`).join("")}
