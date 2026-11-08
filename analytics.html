@@ -623,11 +623,22 @@ function renderAnalytics() {
 
   byEqEl.innerHTML = st.byEquipment.map(row => {
     const label = row.model ? `${row.equipmentId} — ${row.model}` : row.equipmentId;
+    // Пробег (км) из чек-листа — только у самосвалов; поле в чек-листе необязательное
+    let odoHtml = "";
+    if (String(row.type || "").trim().toLowerCase() === "самосвал") {
+      if (row.odoKm != null) {
+        const od = parseRecordDate(row.odoDate);
+        const odShort = od ? `${String(od.getDate()).padStart(2,"0")}.${String(od.getMonth()+1).padStart(2,"0")}` : "";
+        odoHtml = ` · <span style="color:var(--navy);font-weight:600">пробег ${Number(row.odoKm).toLocaleString("ru-RU")} км</span>${odShort ? ` (на ${odShort})` : ""}`;
+      } else {
+        odoHtml = ` · пробег не вносили`;
+      }
+    }
     return `
       <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border);font-size:13px">
         <div>
           <div style="font-weight:700;color:var(--navy)">${label}</div>
-          <div style="font-size:11px;color:var(--gray)">${row.osmotrs} осмотр(ов)</div>
+          <div style="font-size:11px;color:var(--gray)">${row.osmotrs} осмотр(ов)${odoHtml}</div>
         </div>
         ${row.defects > 0
           ? `<span style="background:var(--redbg);color:var(--red);font-size:12px;font-weight:700;padding:3px 10px;border-radius:99px">${row.defects}</span>`
