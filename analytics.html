@@ -83,7 +83,33 @@ body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans
 
   <div class="tabbar" id="tabBar">
     <button class="tab on" id="tabBtnOverview" onclick="showTab('overview')">Обзор осмотров</button>
+    <button class="tab" id="tabBtnMeters" onclick="showTab('meters')">Пробег и моточасы</button>
     <button class="tab" id="tabBtnHist" onclick="showTab('hist')">История техники</button>
+  </div>
+  <div class="wrap hist" id="tabMeters" style="display:none">
+    <div id="loadErrorBannerMeters" style="display:none;background:var(--red,#DC2626);color:#fff;
+      padding:12px 16px;border-radius:8px;font-size:13px;font-weight:700;margin-bottom:14px">
+      ⚠ Данные не загрузились с сервера — таблица может быть неполной.
+      <button onclick="loadAll()" style="margin-left:10px;background:#fff;color:var(--red,#DC2626);
+        border:none;padding:4px 12px;border-radius:6px;font-weight:800;cursor:pointer">Повторить</button>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center;flex-wrap:wrap">
+      <span style="font-size:13px;color:var(--gray);font-weight:600">Участок:</span>
+      <div id="siteSwitchMeters" style="display:flex;gap:8px"></div>
+      <span style="font-size:13px;color:var(--gray);font-weight:600;margin-left:12px">Тип техники:</span>
+      <select id="metersType" onchange="setMetersType(this.value)"
+        style="font-size:13px;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;background:#fff;color:var(--navy)"></select>
+      <button class="btn-ghost" style="margin-left:auto;padding:6px 12px;font-size:12px" onclick="loadAll()">Обновить</button>
+    </div>
+    <div class="panel">
+      <div class="panel-title">Пробег и моточасы по чек-листам — <span id="titleSiteMeters"></span></div>
+      <div id="metersSummary" style="font-size:12px;color:var(--gray);margin-bottom:10px"></div>
+      <div id="metersBody" style="overflow-x:auto"></div>
+      <p style="font-size:11px;color:var(--gray);margin-top:12px">
+        Берётся последнее значение, внесённое в чек-листе за выбранный период (по умолчанию 30 дней; период задаётся на вкладке «Обзор осмотров»).
+        Под значением — дата и время осмотра. У легковых машин и автобусов в поле «Моточасы» обычно вносят пробег.
+      </p>
+    </div>
   </div>
   <div class="wrap hist" id="tabHist" style="display:none">
     <iframe id="histFrame" title="История техники" style="width:100%;border:0;height:900px;display:block"></iframe>
@@ -284,6 +310,8 @@ async function loadAll() {
 
   // Честно показываем сбой, а не делаем вид, что данных просто нет
   if (banner) banner.style.display = failed ? "block" : "none";
+  const bannerM = document.getElementById("loadErrorBannerMeters");
+  if (bannerM) bannerM.style.display = failed ? "block" : "none";
   renderAll();
 }
 
@@ -342,7 +370,7 @@ function siteRecords() {
   return (DATA.checklistRecords || []).filter(r => ids.has(String(r.equipmentId)));
 }
 function renderSiteSwitch() {
-  ["titleSite1","titleSite2","titleSite3"].forEach(id => {
+  ["titleSite1","titleSite2","titleSite3","titleSiteMeters"].forEach(id => {
     const t = document.getElementById(id);
     if (t) t.textContent = CURRENT_SITE;
   });
@@ -353,7 +381,7 @@ function renderSiteSwitch() {
     const s = (e.site || "").trim();
     if (s) counts[s] = (counts[s] || 0) + 1;
   });
-  el.innerHTML = ["Алмалы", "Ашыктас"].map(s => `
+  const switchHtml = ["Алмалы", "Ашыктас"].map(s => `
     <button onclick="setSite('${s}')" style="
       padding:10px 18px;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;
       border:1.5px solid ${CURRENT_SITE===s ? 'var(--gold)' : 'var(--border)'};
@@ -362,6 +390,9 @@ function renderSiteSwitch() {
       ${s} <span style="opacity:.75;font-weight:500">(${counts[s] || 0})</span>
     </button>
   `).join("");
+  el.innerHTML = switchHtml;
+  const el2 = document.getElementById("siteSwitchMeters");   // тот же переключатель на вкладке «Пробег и моточасы»
+  if (el2) el2.innerHTML = switchHtml;
 }
 
 
@@ -566,6 +597,7 @@ function renderAll() {
   renderEquipmentList();
   renderRecordsList();
   renderDayPicker();
+  renderMeters();
 }
 
 function parseRecordDate(s) {
@@ -890,15 +922,92 @@ function downloadDayChecklistExcel() {
   XLSX.writeFile(wb, `Чеклист_${D.equipmentId}_${D.date}.xlsx`);
 }
 
+// ══ ПРОБЕГ И МОТОЧАСЫ ПО ЧЕК-ЛИСТАМ (вкладка, 08.11.2026) ══
+// Последние значения из чек-листа по каждой единице техники выбранного участка с фильтром по типу.
+// Значения считает сервер (getChecklistStats: odoKm/odoDate, mhHours/mhDate); техника без осмотров
+// с этими полями за период показывается с прочерком.
+let METERS_TYPE = "";
+function metersTypeKey(t) { return String(t || "").trim().toLowerCase(); }
+function setMetersType(v) { METERS_TYPE = v; renderMeters(); }
+
+function renderMeters() {
+  const body = document.getElementById("metersBody");
+  const sel = document.getElementById("metersType");
+  if (!body || !sel) return;
+  const eqs = siteEquipment();
+  const st = chkStats();
+  const byId = {};
+  if (st) (st.byEquipment || []).forEach(r => { byId[String(r.equipmentId)] = r; });
+
+  // Типы техники участка (регистр не различаем: «Каток» и «каток» — один тип)
+  const types = {};
+  eqs.forEach(e => {
+    const k = metersTypeKey(e.type);
+    if (k && !types[k]) types[k] = String(e.type).trim().replace(/^./, c => c.toUpperCase());
+  });
+  const keys = Object.keys(types).sort((a, b) => types[a].localeCompare(types[b], "ru"));
+  if (METERS_TYPE && !types[METERS_TYPE]) METERS_TYPE = "";
+  sel.innerHTML = `<option value="">Все типы (${eqs.length})</option>` + keys.map(k => {
+    const n = eqs.filter(e => metersTypeKey(e.type) === k).length;
+    return `<option value="${dayEsc(k)}"${k === METERS_TYPE ? " selected" : ""}>${dayEsc(types[k])} (${n})</option>`;
+  }).join("");
+
+  const list = eqs.filter(e => !METERS_TYPE || metersTypeKey(e.type) === METERS_TYPE)
+    .sort((a, b) => String(a.equipmentId).localeCompare(String(b.equipmentId), "ru", { numeric: true }));
+
+  const shortDT = iso => {
+    const d = parseRecordDate(iso);
+    if (!d) return "";
+    const p = n => String(n).padStart(2, "0");
+    return `${p(d.getDate())}.${p(d.getMonth() + 1)}.${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  };
+  const cell = (v, iso, dec, suspect) => {
+    if (v == null) return `<span style="color:var(--gray)">—</span>`;
+    const color = suspect ? "var(--red)" : "var(--navy)";
+    return `<div style="font-weight:700;color:${color}">${Number(v).toLocaleString("ru-RU", { maximumFractionDigits: dec })}</div>`
+      + `<div style="font-size:11px;color:var(--gray)">${shortDT(iso)}</div>`
+      + (suspect ? `<div style="font-size:11px;color:var(--red);font-weight:700">проверить: похоже на ошибку ввода</div>` : "");
+  };
+
+  let withOdo = 0, withMh = 0;
+  const rows = list.map(e => {
+    const r = byId[String(e.equipmentId)] || {};
+    if (r.odoKm != null) withOdo++;
+    if (r.mhHours != null) withMh++;
+    const isDump = metersTypeKey(e.type) === "самосвал";
+    return `<tr style="border-bottom:1px solid var(--border)">
+      <td style="padding:8px 10px;font-weight:700;color:var(--navy);white-space:nowrap">${dayEsc(e.equipmentId)}</td>
+      <td style="padding:8px 10px">${dayEsc(e.model || "—")}</td>
+      <td style="padding:8px 10px">${dayEsc(e.type || "—")}</td>
+      <td style="padding:8px 10px;text-align:right">${cell(r.odoKm, r.odoDate, 0, isDump && r.odoKm != null && r.odoKm > ODO_SUSPECT_KM)}</td>
+      <td style="padding:8px 10px;text-align:right">${cell(r.mhHours, r.mhDate, 1, false)}</td>
+    </tr>`;
+  }).join("");
+
+  document.getElementById("metersSummary").textContent = list.length
+    ? `Показано ${list.length} из ${eqs.length} ед. техники · с пробегом: ${withOdo} · с моточасами: ${withMh}`
+    : "";
+  body.innerHTML = list.length
+    ? `<table style="width:100%;border-collapse:collapse;font-size:13px">
+        <thead><tr style="text-align:left;color:var(--gray);font-size:12px;border-bottom:2px solid var(--border)">
+          <th style="padding:8px 10px">Бортовой №</th><th style="padding:8px 10px">Модель</th><th style="padding:8px 10px">Тип</th>
+          <th style="padding:8px 10px;text-align:right">Пробег, км</th><th style="padding:8px 10px;text-align:right">Моточасы, ч</th>
+        </tr></thead><tbody>${rows}</tbody></table>`
+    : `<div class="empty">Техники этого типа на участке нет</div>`;
+}
+
 // ══ ТОПЛИВО ══
-// ── Вкладки: обзор / история одной техники ─────────────────
+// ── Вкладки: обзор / пробег и моточасы / история одной техники ─────────────────
 function showTab(name) {
-  const hist = name === "hist";
+  const hist = name === "hist", meters = name === "meters";
   const ov = document.querySelector("#app > .wrap:not(.hist)");
-  if (ov) ov.style.display = hist ? "none" : "";
+  if (ov) ov.style.display = (hist || meters) ? "none" : "";
   document.getElementById("tabHist").style.display = hist ? "" : "none";
-  document.getElementById("tabBtnOverview").classList.toggle("on", !hist);
+  document.getElementById("tabMeters").style.display = meters ? "" : "none";
+  document.getElementById("tabBtnOverview").classList.toggle("on", !hist && !meters);
+  document.getElementById("tabBtnMeters").classList.toggle("on", meters);
   document.getElementById("tabBtnHist").classList.toggle("on", hist);
+  if (meters) renderMeters();
   const f = document.getElementById("histFrame");
   // Страницу истории грузим только при первом открытии вкладки
   if (hist && !f.getAttribute("src")) f.src = "equipment-history.html?embed=1";
