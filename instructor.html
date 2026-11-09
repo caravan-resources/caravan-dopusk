@@ -3355,14 +3355,19 @@ function competencyGap(emp) {
   const testsDone    = testsRequired.filter(t => passedTestIds.has(t));
   const testsMissing = testsRequired.filter(t => !passedTestIds.has(t));
 
+  // Ключ сравнения названий курсов: регистр, пробелы (в т.ч. внутри, «922 AWD» = «922AWD»)
+  // и суффикс « — базовый курс» не должны влиять на совпадение.
+  const courseKey = c => String(c||"").toLowerCase()
+    .replace(/\s*[—–-]\s*базовый\s+курс\s*$/i, "")
+    .replace(/\s+/g, "")
+    .trim();
   const doneCourseNames = new Set(
     (DATA.training||[])
       .filter(t => String(t.empId)===String(emp.id) || nameEq(t.empName, emp.name))
-      .map(t => String(t.course||"").trim().toLowerCase())
+      .map(t => courseKey(t.course))
       .filter(Boolean)
   );
   const coursesRequired = req.requiredCourses || [];
-  const courseKey = c => String(c||"").trim().toLowerCase();
   // Курс/тест переименовали — старые записи «Обучение» остаются под прежним
   // названием и по строке не совпадают. Тест при переименовании сохраняет id,
   // поэтому курс также считается закрытым, если сдан тест с тем же названием.
