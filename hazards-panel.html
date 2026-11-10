@@ -114,6 +114,8 @@ textarea { resize:vertical; min-height:80px; }
 .ppe-table tr:hover td { background:var(--light); }
 .ppe-actions button { margin-right:6px; }
 .ppe-missing { color:var(--red); font-size:11px; }
+.ppe-table .rt-in { width:100%; min-width:110px; padding:6px 8px; font-size:12px; border-radius:8px; }
+.ppe-table select.rt-in { min-width:120px; }
 #ppeSearch { width:100%; padding:10px 12px; border:1.5px solid var(--border); border-radius:8px;
   font-size:13px; margin-bottom:12px; }
 </style>
@@ -146,6 +148,7 @@ textarea { resize:vertical; min-height:80px; }
     <button id="navList" onclick="showScreen('list')">📋 Все сообщения</button>
     <button id="navLink" onclick="showScreen('link')">🔗 Ссылка для анкеты</button>
     <button id="navPpe" onclick="showScreen('ppe')">🦺 СИЗ</button>
+    <button id="navRouting" onclick="showScreen('routing')">👥 Ответственные</button>
   </div>
 
   <div class="wrap">
@@ -242,6 +245,29 @@ textarea { resize:vertical; min-height:80px; }
         <div id="ppeEmpTable"></div>
       </div>
     </div>
+
+    <!-- ══ ОТВЕТСТВЕННЫЕ ══ -->
+    <div id="screenRouting" class="screen">
+      <div class="panel">
+        <div class="panel-title">
+          <span>Кому уходят хазарды</span>
+          <span id="routingStatus" style="font-size:12px;color:var(--gray);font-weight:400"></span>
+        </div>
+        <div style="font-size:12px;color:var(--gray);margin-bottom:12px;line-height:1.5">
+          Новый хазард сразу уходит по email и в Telegram ответственному для пары «участок × категория».
+          Приоритет: точное совпадение, затем участок + «Все», затем «Все» + категория, затем «Все» + «Все».
+          Критический риск дополнительно копируется руководителю. Если хазард остаётся «Новое» дольше
+          <b id="escCrit">2</b> ч (критический) или <b id="escOther">24</b> ч (остальные) — он уходит руководителю.
+        </div>
+        <div id="routingTable" style="overflow-x:auto"></div>
+        <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+          <button class="btn-ghost" onclick="addRoutingRow()">+ Добавить строку</button>
+          <button class="btn-gold" onclick="saveRouting()">Сохранить справочник</button>
+          <button class="btn-ghost" onclick="loadTgInbox()">Кто написал боту (chat_id)</button>
+        </div>
+        <div id="tgInbox" style="margin-top:12px;font-size:12px"></div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -260,6 +286,9 @@ let ITEMS = [];
 let CURRENT_SCREEN = "overview";
 let PPE_NORMS = [];
 let PPE_EMPLOYEES = [];
+let ADMIN_PIN = "";
+let ROUTING = [];
+let ROUTING_META = { sites: ["Все", "Алмалы", "Ашыктас"], categories: ["Все"] };
 
 function escapeHtml(s) {
   return String(s == null ? "" : s)
@@ -270,6 +299,7 @@ function escapeHtml(s) {
 function checkPin() {
   const val = document.getElementById("pinInput").value;
   if (val === CFG.PIN) {
+    ADMIN_PIN = val;
     document.getElementById("loginScreen").style.display = "none";
     document.getElementById("app").style.display = "block";
     document.getElementById("hazardLinkInput").value = location.href.replace(/hazards-panel\.html.*$/, "hazard-report.html");
@@ -281,13 +311,14 @@ function checkPin() {
   }
 }
 function logout() {
+  ADMIN_PIN = "";
   document.getElementById("loginScreen").style.display = "flex";
   document.getElementById("app").style.display = "none";
   document.getElementById("pinInput").value = "";
 }
 
 function showScreen(name) {
-  ["overview","list","link","ppe"].forEach(s => {
+  ["overview","list","link","ppe","routing"].forEach(s => {
     document.getElementById("screen"+s.charAt(0).toUpperCase()+s.slice(1)).classList.remove("active");
     document.getElementById("nav"+s.charAt(0).toUpperCase()+s.slice(1)).classList.remove("active");
   });
@@ -295,6 +326,7 @@ function showScreen(name) {
   document.getElementById("nav"+name.charAt(0).toUpperCase()+name.slice(1)).classList.add("active");
   CURRENT_SCREEN = name;
   if (name === "ppe") loadPpe();
+  if (name === "routing") loadRouting();
 }
 
 async function fetchWithRetry(url, timeoutMs, attempts) {
@@ -317,7 +349,9 @@ async function fetchWithRetry(url, timeoutMs, attempts) {
 }
 
 function onFilterChange() {
-  if (CURRENT_SCREEN === "ppe") loadPpe(); else loadAll();
+  if (CURRENT_SCREEN === "ppe") loadPpe();
+  else if (CURRENT_SCREEN === "routing") return;
+  else loadAll();
 }
 
 async function loadAll() {
@@ -413,6 +447,7 @@ function hazardCardHtml(h) {
             <span class="badge ${statusClass(h.status)}">${h.status}</span>
             <span class="badge" style="background:var(--light);color:var(--gray)">${h.category}</span>
             ${h.immediateActions ? `<span class="badge" style="background:var(--greenbg);color:var(--green)">✓ меры приняты</span>` : ""}
+            ${notifyBadgeHtml(h)}
           </div>
           <div class="hz-desc">${(h.location ? h.location + " — " : "") + h.description}</div>
         </div>
@@ -420,6 +455,17 @@ function hazardCardHtml(h) {
       </div>
     </div>
   `;
+}
+
+function notifyBadgeHtml(h) {
+  const to = String(h.notifiedTo || "");
+  if (!to) return "";
+  const failed = to.indexOf("ОШИБКА") === 0 || to.indexOf("НЕ ОТПРАВЛЕНО") === 0;
+  const esc = h.escalatedAt ? `<span class="badge" style="background:var(--orangebg);color:var(--orange)">⏫ эскалация</span>` : "";
+  const main = failed
+    ? `<span class="badge risk-crit">✉ не доставлено</span>`
+    : `<span class="badge" style="background:var(--light);color:var(--navy)">✉ ${escapeHtml(h.assignedTo || "отправлено")}</span>`;
+  return main + esc;
 }
 
 function renderList() {
@@ -458,6 +504,14 @@ function openHazardModal(h) {
     <div class="field">
       <label>Ответственный</label>
       <input type="text" id="modalAssigned" value="${h.assignedTo||""}" placeholder="ФИО ответственного">
+    </div>
+    <div class="field">
+      <label>Уведомление ответственному</label>
+      <div style="font-size:12px;color:var(--gray);background:var(--light);border-radius:8px;padding:8px;margin-bottom:6px">
+        ${h.notifiedAt ? escapeHtml(h.notifiedAt) + " → " + escapeHtml(h.notifiedTo) : "не отправлялось"}
+        ${h.escalatedAt ? "<br>Эскалация руководителю: " + escapeHtml(h.escalatedAt) : ""}
+      </div>
+      <button class="btn-ghost" onclick="resendHazard('${h.hazardId}')">Отправить повторно</button>
     </div>
     <div class="field">
       <label>Комментарий / как устранено</label>
@@ -510,6 +564,152 @@ async function deleteHazardConfirm(hazardId) {
     else alert("Ошибка: " + (res.error || "неизвестная"));
   } catch (e) {
     alert("Ошибка сети");
+  }
+}
+
+async function resendHazard(hazardId) {
+  try {
+    const res = await fetch(CFG.SHEET_URL, {
+      method: "POST",
+      body: JSON.stringify({ action: "resendHazardNotification", pin: ADMIN_PIN, hazardId }),
+    }).then(r => r.json());
+    if (res.ok) {
+      alert((res.delivered ? "Отправлено: " : "Не доставлено: ") + res.summary);
+      closeModal(); loadAll();
+    } else {
+      alert("Ошибка: " + (res.error || "неизвестная"));
+    }
+  } catch (e) {
+    alert("Ошибка сети");
+  }
+}
+
+// ══════════════════════════════════════════════════════════
+// ОТВЕТСТВЕННЫЕ (справочник маршрутизации)
+// ══════════════════════════════════════════════════════════
+const RT_FIELDS = ["site","category","name","email","telegramChatId","supervisorName","supervisorEmail","supervisorTelegramChatId","active"];
+
+async function loadRouting() {
+  const st = document.getElementById("routingStatus");
+  st.textContent = "загрузка...";
+  try {
+    const res = await fetchWithRetry(`${CFG.SHEET_URL}?action=getHazardRouting&pin=${encodeURIComponent(ADMIN_PIN)}`);
+    if (!res || !res.ok) {
+      const err = res && res.error;
+      st.textContent = err === "Нет доступа"
+        ? "нет доступа: на сервере не задан HAZARD_ADMIN_PIN или он не совпадает с PIN панели"
+        : "ошибка: " + (err || "сервер не знает это действие — не выполнен redeploy Код.gs?");
+      return;
+    }
+    ROUTING = res.items || [];
+    ROUTING_META.sites = res.sites || ROUTING_META.sites;
+    ROUTING_META.categories = res.categories || ROUTING_META.categories;
+    document.getElementById("escCrit").textContent = res.escalate ? res.escalate.critical : 2;
+    document.getElementById("escOther").textContent = res.escalate ? res.escalate.other : 24;
+    st.textContent = res.tgConfigured ? "Telegram-бот подключён" : "Telegram-бот не подключён (нет TG_BOT_TOKEN) — работает только email";
+    renderRouting();
+  } catch (e) {
+    st.textContent = "ошибка загрузки";
+  }
+}
+
+function rtSelect(field, value, options) {
+  return `<select class="rt-in" data-k="${field}">` +
+    options.map(o => `<option value="${escapeHtml(o)}" ${o === value ? "selected" : ""}>${escapeHtml(o)}</option>`).join("") +
+    `</select>`;
+}
+function rtInput(field, value, ph) {
+  return `<input type="text" class="rt-in" data-k="${field}" value="${escapeHtml(value)}" placeholder="${escapeHtml(ph || "")}">`;
+}
+
+function renderRouting() {
+  const el = document.getElementById("routingTable");
+  if (!ROUTING.length) {
+    el.innerHTML = `<div class="empty"><div class="empty-icon">👥</div>Справочник пуст. Без строки для участка и категории хазард никому не уйдёт — добавьте хотя бы одну строку «Все × Все».</div>`;
+    return;
+  }
+  el.innerHTML = `
+    <table class="ppe-table">
+      <thead><tr>
+        <th>Участок</th><th>Категория</th><th>Ответственный (ФИО)</th><th>Email</th><th>Telegram chat_id</th>
+        <th>Руководитель (ФИО)</th><th>Email руководителя</th><th>chat_id руководителя</th><th>Активна</th><th></th>
+      </tr></thead>
+      <tbody>
+        ${ROUTING.map((r, i) => `
+          <tr data-rt="${i}">
+            <td>${rtSelect("site", r.site || "Все", ROUTING_META.sites)}</td>
+            <td>${rtSelect("category", r.category || "Все", ROUTING_META.categories)}</td>
+            <td>${rtInput("name", r.name, "Фамилия И.О.")}</td>
+            <td>${rtInput("email", r.email, "name@company.kz")}</td>
+            <td>${rtInput("telegramChatId", r.telegramChatId, "123456789")}</td>
+            <td>${rtInput("supervisorName", r.supervisorName, "Фамилия И.О.")}</td>
+            <td>${rtInput("supervisorEmail", r.supervisorEmail, "name@company.kz")}</td>
+            <td>${rtInput("supervisorTelegramChatId", r.supervisorTelegramChatId, "123456789")}</td>
+            <td>${rtSelect("active", (r.active || "да").toLowerCase() === "нет" ? "нет" : "да", ["да", "нет"])}</td>
+            <td><button class="btn-red" onclick="delRoutingRow(${i})">✕</button></td>
+          </tr>`).join("")}
+      </tbody>
+    </table>`;
+}
+
+function collectRouting() {
+  const rows = [];
+  document.querySelectorAll("#routingTable tr[data-rt]").forEach(tr => {
+    const o = {};
+    RT_FIELDS.forEach(k => {
+      const f = tr.querySelector(`[data-k="${k}"]`);
+      o[k] = f ? f.value.trim() : "";
+    });
+    rows.push(o);
+  });
+  return rows;
+}
+
+function addRoutingRow() {
+  ROUTING = collectRouting();
+  ROUTING.push({ site: "Все", category: "Все", name: "", email: "", telegramChatId: "",
+    supervisorName: "", supervisorEmail: "", supervisorTelegramChatId: "", active: "да" });
+  renderRouting();
+}
+function delRoutingRow(i) {
+  ROUTING = collectRouting();
+  ROUTING.splice(i, 1);
+  renderRouting();
+}
+
+async function saveRouting() {
+  const rows = collectRouting();
+  const st = document.getElementById("routingStatus");
+  try {
+    const res = await fetch(CFG.SHEET_URL, {
+      method: "POST",
+      body: JSON.stringify({ action: "saveHazardRouting", pin: ADMIN_PIN, rows }),
+    }).then(r => r.json());
+    if (res.ok) {
+      st.textContent = `сохранено строк: ${res.saved}`;
+      ROUTING = rows;
+    } else {
+      alert("Ошибка: " + (res.error || "неизвестная"));
+    }
+  } catch (e) {
+    alert("Ошибка сети");
+  }
+}
+
+async function loadTgInbox() {
+  const el = document.getElementById("tgInbox");
+  el.textContent = "загрузка...";
+  try {
+    const res = await fetchWithRetry(`${CFG.SHEET_URL}?action=getHazardTgInbox&pin=${encodeURIComponent(ADMIN_PIN)}`);
+    if (!res || !res.ok) { el.textContent = "Ошибка: " + ((res && res.error) || "нет ответа"); return; }
+    if (!res.items.length) {
+      el.innerHTML = "За последние сутки боту никто не писал. Пусть человек откроет бота и нажмёт Start, затем повторите.";
+      return;
+    }
+    el.innerHTML = `<div style="color:var(--gray);margin-bottom:6px">Писали боту за последние сутки — скопируйте chat_id в нужную строку:</div>` +
+      res.items.map(i => `<div><b>${escapeHtml(i.name || "—")}</b> ${i.username ? "@" + escapeHtml(i.username) : ""} — <code>${escapeHtml(i.chatId)}</code></div>`).join("");
+  } catch (e) {
+    el.textContent = "Ошибка сети";
   }
 }
 
