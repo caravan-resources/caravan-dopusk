@@ -1736,6 +1736,7 @@ async function loadFullHistoryRun(btn) {
     const d = await jsonpFetchRetry(
       `${CFG.SHEET_URL}?action=getChecklistRecords`, "cb_full_history", 120000, 3);
     if (Array.isArray(d) && d.length) {
+      await loadShiftComments();
       DATA.checklistRecords = d;
       FULL_HISTORY_LOADED = true;
       FULL_HISTORY_LOADING = false;
@@ -4969,6 +4970,47 @@ function balanceAnchors(equipmentId) {
   return out;
 }
 
+// ══════════════════════════════════════════════════════
+// КОММЕНТАРИИ К СМЕНАМ (10.11.2026)
+// Мастер/диспетчер помечает смену техники в окне «Исправление значений»: «Ремонт» или «Простой» —
+// такая смена не идёт в расчёт л/ч и не попадает в «Требует исправления»; «Другое» (или без статуса) —
+// только пометка в отчёте. Хранится на сервере (лист «Комментарии смен»), ключ — recordId первого
+// осмотра смены (= recId строки отчёта по сменам). Логика та же в instructor.html и master.html.
+// ══════════════════════════════════════════════════════
+const SC_STATUSES = ["Ремонт", "Простой", "Другое"];
+const SC_EXCLUDE = ["Ремонт", "Простой"];
+function scMap() {
+  const arr = DATA.shiftComments;
+  if (!Array.isArray(arr)) return {};
+  if (scMap._src !== arr) {
+    const m = {};
+    arr.forEach(c => { if (c && c.recordId) m[String(c.recordId)] = c; });
+    scMap._src = arr; scMap._map = m;
+  }
+  return scMap._map;
+}
+function scOf(rid) { return rid ? (scMap()[String(rid)] || null) : null; }
+function scIsExcl(c) { return !!c && SC_EXCLUDE.indexOf(c.status) >= 0; }
+function scText(c) { return c ? ((c.status || "Комментарий") + (c.comment ? ": " + c.comment : "")) : ""; }
+// моменты (мс) осмотров-начал смен техники, помеченных «Ремонт»/«Простой» — интервалы л/ч с ними не считаются
+function scExclTimes(eq) {
+  const m = scMap(), ids = Object.keys(m).filter(k => scIsExcl(m[k]) && String(m[k].equipmentId) === String(eq));
+  if (!ids.length) return [];
+  const set = new Set(ids), out = [];
+  (DATA.checklistRecords||[]).forEach(rec => {
+    if (!set.has(String(rec.recordId))) return;
+    const d = parseRecordDate(rec.date); if (d) out.push(d.getTime());
+  });
+  return out;
+}
+// Не роняет вход, если на сервере ещё старая версия скрипта (тогда придёт не массив — просто игнорируем)
+async function loadShiftComments() {
+  try {
+    const v = await jsonpFetchRetry(`${CFG.SHEET_URL}?action=getShiftComments`, "cb_shift_comments", 40000, 2);
+    if (Array.isArray(v)) DATA.shiftComments = v;
+  } catch (e) { console.error("Комментарии смен:", e); }
+}
+
 function refuelIntervals(equipmentId, start, end) {
   const anchors = balanceAnchors(equipmentId);
   const fuel = (DATA.fuel||[])
@@ -4976,13 +5018,15 @@ function refuelIntervals(equipmentId, start, end) {
     .map(f => ({ date: parseRecordDate(f.date), liters: Number(f.amountLiters)||0 }))
     .filter(f => f.date);
   const fuelAdj = adaptFuel(anchors, fuel);
-  const out = { intervals: [], skipped: { long: 0, short: 0, negative: 0, negativeOld: 0, badMeter: 0, implausible: 0 },
+  const out = { intervals: [], skipped: { long: 0, short: 0, negative: 0, negativeOld: 0, badMeter: 0, implausible: 0, excluded: 0 },
     anchors: anchors.length, withLevel: anchors.withLevel, withHours: anchors.withHours,
     burned: 0, hours: 0, refueled: 0, rate: null };
+  const exT = scExclTimes(equipmentId);   // смены с комментарием «Ремонт»/«Простой»
   for (let i = 1; i < anchors.length; i++) {
     const a = anchors[i-1], b = anchors[i];
     if (start && b.date < start) continue;
     if (end && b.date >= end) continue;
+    if (exT.some(t => t >= a.date.getTime() && t < b.date.getTime())) { out.skipped.excluded++; continue; }
     const elapsedH = (b.date - a.date) / 3600000;
     const oldData = a.date.getTime() < RULES_STRICT_FROM_MS;
     if (elapsedH > REFUEL_MAX_GAP_H) { out.skipped.long++; continue; }
@@ -5120,8 +5164,10 @@ function shiftReportRows(equipmentIds, start, end) {
       }
       let rate = (!isCar && burned != null && burned > 0 && hours != null && hours >= REFUEL_MIN_HOURS) ? +(burned / hours).toFixed(1) : null;
       if (rate != null && rate > REFUEL_MAX_RATE) { notes.push("л/ч выше " + REFUEL_MAX_RATE + " — проверьте ввод"); rate = null; }
+      const sc = scOf(a.rid);
+      if (scIsExcl(sc)) { notes.length = 0; rate = null; }   // ремонт/простой: без замечаний и без л/ч
       rows.push({ site: (eq.site||"").trim(), date: shiftDateOf(a.date), shift: shiftLabelOf(a.date), emp: a.emp,
-        type: eq.type || "", id, mh0: a.mh, mh1, odo0: a.odo, odo1, level0: a.level, refueled, hours, burned, rate, note: notes.join("; "), at: a.date,
+        type: eq.type || "", id, mh0: a.mh, mh1, odo0: a.odo, odo1, level0: a.level, refueled, hours, burned, rate, note: notes.join("; "), sc, remark: scText(sc), at: a.date,
         recId: a.rid, refuelRecs, nextRecId: hasNext ? nx.rid : "", nextAt: hasNext ? nx.date : null, nextEmp: hasNext ? nx.emp : "", level1: hasNext ? nx.level : null });
     }
   });
@@ -5137,7 +5183,7 @@ function shiftReportAoa(rows) {
   const fmt = d => `${String(d.getDate()).padStart(2,"0")}.${String(d.getMonth()+1).padStart(2,"0")}.${d.getFullYear()}`;
   const v = x => x == null ? "" : x;
   return [SHIFT_REPORT_HEAD].concat(shiftReportSort(rows, false).map(r => [
-    r.site, fmt(r.date), r.shift, r.emp, r.type, r.id, v(r.mh0), v(r.mh1), v(r.odo0), v(r.odo1), v(r.level0), r.refueled, v(r.level1), v(r.hours), v(r.burned), v(r.rate), r.note || "",
+    r.site, fmt(r.date), r.shift, r.emp, r.type, r.id, v(r.mh0), v(r.mh1), v(r.odo0), v(r.odo1), v(r.level0), r.refueled, v(r.level1), v(r.hours), v(r.burned), v(r.rate), [r.note, r.remark].filter(Boolean).join("; "),
   ]));
 }
 
@@ -5150,7 +5196,7 @@ function shiftReportTableHtml(rows, limit, withFix) {
       <tbody>${shown.map(r => `<tr>
         <td>${r.site}</td><td>${fmt(r.date)}</td><td>${r.shift}</td><td>${escapeHtml(r.emp)}</td><td>${r.type}</td><td><b>${r.id}</b></td>
         <td>${v(r.mh0)}</td><td>${v(r.mh1)}</td><td>${v(r.odo0)}</td><td>${v(r.odo1)}</td><td>${v(r.level0)}</td>
-        <td>${r.refueled}</td><td>${v(r.level1)}</td><td>${v(r.hours)}</td><td>${v(r.burned)}</td><td><b>${v(r.rate)}</b></td><td style="color:var(--red);font-size:11px">${escapeHtml(r.note || "")}</td>${withFix ? `<td><button class="btn-ghost" style="width:auto;padding:4px 8px;font-size:11px" onclick="openShiftFix('${r.id}', ${r.at.getTime()})">${/расход ≤ 0/.test(r.note) ? "Исправить / добавить заправку" : "Исправить"}</button></td>` : ""}
+        <td>${r.refueled}</td><td>${v(r.level1)}</td><td>${v(r.hours)}</td><td>${v(r.burned)}</td><td><b>${v(r.rate)}</b></td><td style="font-size:11px"><span style="color:var(--red)">${escapeHtml(r.note || "")}</span>${r.remark ? `<div style="color:var(--navy2,#1B2B5E);font-weight:700">${escapeHtml(r.remark)}</div>` : ""}</td>${withFix ? `<td><button class="btn-ghost" style="width:auto;padding:4px 8px;font-size:11px" onclick="openShiftFix('${r.id}', ${r.at.getTime()})">${/расход ≤ 0/.test(r.note) ? "Исправить / добавить заправку" : "Исправить"}</button></td>` : ""}
       </tr>`).join("")}</tbody></table></div>
     ${sorted.length > shown.length ? `<div style="font-size:11px;color:var(--gray);margin-bottom:8px">Показаны последние ${shown.length} из ${sorted.length} строк — полный отчёт в Excel.</div>` : ""}
     <div style="font-size:11px;color:var(--gray);margin-bottom:8px">Конец смены — по следующему осмотру этой машины (не позже ${SHIFT_END_MAX_GAP_H} ч). Остаток топлива на конец смены — остаток на начало следующей смены этой машины (из следующего осмотра). Пустая ячейка — значение не указано или нет следующего осмотра.</div>`;
@@ -5445,7 +5491,7 @@ function renderFuelTypePanel(site) {
             <td>${r.liters.toLocaleString("ru-RU")}</td>
             <td>${r.rate && r.rate.rate != null ? r.rate.burned.toLocaleString("ru-RU") : "—"}</td>
             <td>${r.rate && r.rate.rate != null ? r.rate.hours : "—"}</td>
-            <td title="${r.rate ? `Опорных осмотров (остаток топлива + моточасы): ${r.rate.anchors} из них остаток указан в ${r.rate.withLevel}, моточасы в ${r.rate.withHours}. Пропущено интервалов: слишком длинный ${r.rate.skipped.long}, короче 1 мч ${r.rate.skipped.short}, расход ≤ 0 ${r.rate.skipped.negative + r.rate.skipped.negativeOld}, моточасы не согласуются ${r.rate.skipped.badMeter}, л/ч выше ${REFUEL_MAX_RATE} ${r.rate.skipped.implausible}` : ""}">${r.rate && r.rate.rate != null ? `<b>${r.rate.rate}</b> <span style="color:var(--gray);font-size:11px">(${r.rate.intervals.length} инт.)</span>` : (r.rate ? (r.rate.anchors < 2 ? `<span style="color:var(--gray);font-size:11px">нет остатка+моточасов</span>` : "—") : "")}</td>
+            <td title="${r.rate ? `Опорных осмотров (остаток топлива + моточасы): ${r.rate.anchors} из них остаток указан в ${r.rate.withLevel}, моточасы в ${r.rate.withHours}. Пропущено интервалов: слишком длинный ${r.rate.skipped.long}, короче 1 мч ${r.rate.skipped.short}, расход ≤ 0 ${r.rate.skipped.negative + r.rate.skipped.negativeOld}, моточасы не согласуются ${r.rate.skipped.badMeter}, л/ч выше ${REFUEL_MAX_RATE} ${r.rate.skipped.implausible}, по комментарию смены ${r.rate.skipped.excluded || 0}` : ""}">${r.rate && r.rate.rate != null ? `<b>${r.rate.rate}</b> <span style="color:var(--gray);font-size:11px">(${r.rate.intervals.length} инт.)</span>` : (r.rate ? (r.rate.anchors < 2 ? `<span style="color:var(--gray);font-size:11px">нет остатка+моточасов</span>` : "—") : "")}</td>
             <td style="color:var(--red);font-size:11px">${skipNoteText(r.rate)}</td>
           </tr>
         `).join("")}</tbody>
@@ -5545,6 +5591,8 @@ function openShiftFix(eq, atMs) {
       <div style="margin-top:6px"><button type="button" class="btn-ghost" style="width:auto;padding:4px 10px;font-size:11px;color:var(--red);border-color:var(--red)" onclick="deleteShiftInspection('${rid}')">Удалить этот осмотр</button></div>
     </div>`;
   SHIFT_FIX_CTX = { eq, row, fuel, orig: {} };
+  const sc = scOf(row.recId);
+  SHIFT_FIX_CTX.sc0 = { status: sc ? (sc.status || "") : "", comment: sc ? (sc.comment || "") : "" };
   SHIFT_FIX_CTX.orig["mh_" + row.recId] = row.mh0; SHIFT_FIX_CTX.orig["lv_" + row.recId] = row.level0; SHIFT_FIX_CTX.orig["od_" + row.recId] = row.odo0;
   SHIFT_FIX_CTX.orig["dt_" + row.recId] = dtVal(row.at, "d") + "T" + dtVal(row.at, "t");
   if (row.nextRecId && row.nextAt) SHIFT_FIX_CTX.orig["dt_" + row.nextRecId] = dtVal(row.nextAt, "d") + "T" + dtVal(row.nextAt, "t");
@@ -5576,6 +5624,14 @@ function openShiftFix(eq, atMs) {
       </div>`).join("")}` : ""}
     ${addFuelBlock("", "Заправка была, но не внесена? Добавить")}
     ${addFuelBlock("2", "Вторая заправка (экскаваторы заправляются дважды) — добавить")}
+    <div style="border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-top:8px">
+      <div style="font-size:12px;font-weight:700;margin-bottom:4px">Комментарий к смене</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start;font-size:12px">
+        <select id="fixScStatus" style="padding:6px 8px;font-size:12px"><option value="">— без статуса —</option>${SC_STATUSES.map(s => `<option value="${s}"${sc && sc.status === s ? " selected" : ""}>${s}</option>`).join("")}</select>
+        <textarea id="fixScText" rows="2" maxlength="300" placeholder="Например: стояла на ремонте, замена гидроцилиндра" style="flex:1;min-width:200px;padding:6px 8px;font-size:12px;font-family:inherit">${escapeHtml(sc ? (sc.comment || "") : "")}</textarea>
+      </div>
+      <div style="font-size:11px;color:var(--gray);margin-top:4px">«Ремонт» и «Простой»: смена не идёт в расчёт л/ч и не попадает в «Требует исправления» (нужен текст). «Другое» и без статуса — только пометка в отчёте. Чтобы убрать комментарий — «без статуса» и пустой текст.${sc && sc.by ? ` Последняя запись: ${escapeHtml(sc.by)}${sc.time ? ", " + escapeHtml(String(sc.time)) : ""}.` : ""}</div>
+    </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 6px">
       <input type="text" id="fixBy" placeholder="Ваша фамилия" value="${escapeHtml(by)}" style="flex:1;min-width:140px;padding:7px 9px;font-size:13px">
       <select id="fixReason" style="flex:1;min-width:160px;padding:7px 9px;font-size:13px">
@@ -5677,6 +5733,18 @@ async function saveShiftFix() {
     }
     changes.push({ action: "addFuelRecordFix", payload: { equipmentId: c.eq, empName: who, fuelAt: d + "T" + t, liters: lit, hourMeter: mh }, label: "Добавить " + (sfx ? "вторую заправку " : "заправку ") + lit + " л, " + d.split("-").reverse().join(".") + " " + t });
   }
+  }
+  // Комментарий к смене (10.11.2026): статус «Ремонт»/«Простой» исключает смену из расчёта л/ч
+  {
+    const stEl = document.getElementById("fixScStatus"), txEl = document.getElementById("fixScText");
+    if (stEl && txEl) {
+      const st = stEl.value, tx = txEl.value.trim().slice(0, 300), o = c.sc0 || { status: "", comment: "" };
+      if (st !== o.status || tx !== o.comment) {
+        if (SC_EXCLUDE.indexOf(st) >= 0 && tx.length < 3) { msg.style.color = "var(--red)"; msg.textContent = "Для статуса «" + st + "» напишите комментарий (что случилось)."; return; }
+        changes.push({ action: "setShiftComment", payload: { recordId: c.row.recId, equipmentId: c.eq, status: st, comment: tx, atMs: c.row.at.getTime() },
+          label: "Комментарий к смене: " + ((st || tx) ? ((st || "без статуса") + (tx ? " — " + tx : "")) : "удалён") });
+      }
+    }
   }
   if (changes.some(x => x.bad === "time")) { msg.style.color = "var(--red)"; msg.textContent = "Проверьте дату и время осмотра: они должны быть заполнены и не в будущем."; return; }
   if (changes.some(x => x.bad)) { msg.style.color = "var(--red)"; msg.textContent = "Проверьте числа: значения должны быть не меньше нуля (литры — больше нуля)."; return; }
@@ -5839,8 +5907,8 @@ function renderFuelEquipmentHistory(site) {
     } else {
       const r = refuelIntervals(equipmentId, start, null);
       const fmtDT = d => `${String(d.getDate()).padStart(2,"0")}.${String(d.getMonth()+1).padStart(2,"0")} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
-      const sk = r.skipped, skTotal = sk.long + sk.short + sk.negative + sk.negativeOld + sk.badMeter + sk.implausible;
-      const skText = skTotal ? `Пропущено интервалов: ${skTotal} (длиннее ${REFUEL_MAX_GAP_H} ч — ${sk.long}, короче ${REFUEL_MIN_HOURS} мч — ${sk.short}, расход ≤ 0 — ${sk.negative + sk.negativeOld}, моточасы не согласуются — ${sk.badMeter}, л/ч выше ${REFUEL_MAX_RATE} — ${sk.implausible}).` : "";
+      const sk = r.skipped, skTotal = sk.long + sk.short + sk.negative + sk.negativeOld + sk.badMeter + sk.implausible + (sk.excluded || 0);
+      const skText = skTotal ? `Пропущено интервалов: ${skTotal} (длиннее ${REFUEL_MAX_GAP_H} ч — ${sk.long}, короче ${REFUEL_MIN_HOURS} мч — ${sk.short}, расход ≤ 0 — ${sk.negative + sk.negativeOld}, моточасы не согласуются — ${sk.badMeter}, л/ч выше ${REFUEL_MAX_RATE} — ${sk.implausible}, по комментарию «ремонт/простой» — ${sk.excluded || 0}).` : "";
       const coverage = `Осмотров с остатком топлива: ${r.withLevel}, с моточасами: ${r.withHours}, с обоими: ${r.anchors}.`;
       if (r.rate != null) {
         rateBlock = `
