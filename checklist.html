@@ -237,8 +237,10 @@ input:focus, select:focus, textarea:focus { border-color:var(--gold); }
       <input type="number" id="hourMeter" min="0" step="0.1" placeholder="Например: 4820.5">
       <div id="meterErrInsp" class="hint" style="color:var(--red);font-weight:700;display:none;margin-top:6px"></div>
       <label id="meterOkInspWrap" style="display:none;align-items:center;gap:8px;margin-top:6px;font-size:12px"><input type="checkbox" id="meterOkInsp" style="width:20px;height:20px"> Показание верное, проверил по счётчику</label>
+      <div id="odometerWrap">
       <label class="label" style="font-size:12px;font-weight:700;color:var(--gray);margin-bottom:6px;display:block">Пробег (км)</label>
       <input type="number" id="odometer" min="0" step="1" placeholder="Например: 128340">
+      </div>
     </div>
 
     <label class="card" id="noIssuesCard" for="noIssuesToggle" style="display:flex;align-items:center;gap:10px;cursor:pointer">
@@ -755,6 +757,12 @@ function showForm() {
   document.getElementById("meterOkInspWrap").style.display = "none";
   document.getElementById("meterOkInsp").checked = false;
   document.getElementById("odometer").value = "";
+  // У экскаваторов пробега нет: поле скрыто, моточасы остаются (14.11.2026).
+  const noOdometer = /Экскаватор/i.test(equipment.type || "");
+  document.getElementById("odometerWrap").style.display = noOdometer ? "none" : "";
+  const metersHintEl = document.getElementById("metersHint");
+  if (!metersHintEl.dataset.full) metersHintEl.dataset.full = metersHintEl.textContent;
+  metersHintEl.textContent = noOdometer ? "Моточасы обязательны: впишите по счётчику." : metersHintEl.dataset.full;
 
   itemStates = {};
   document.getElementById("noIssuesToggle").checked = false; // сброс при каждом новом открытии формы
@@ -765,10 +773,11 @@ function showForm() {
     html += `<div class="section-title">${sectionName}</div>`;
     template.sections[sectionName].forEach(item => {
       const key = sectionName + "::" + item.id;
-      itemStates[key] = { section: sectionName, itemText: item.text, status: "", comment: "" };
+      const optional = isOptionalItem(item.text);
+      itemStates[key] = { section: sectionName, itemText: item.text, status: "", comment: "", optional };
       html += `
         <div class="item-row">
-          <div class="item-text">${item.text}</div>
+          <div class="item-text">${item.text}${optional ? '<div class="hint" style="margin:2px 0 0">Необязательный пункт: если узла на машине нет, не отмечайте. Повторное нажатие снимает отметку.</div>' : ""}</div>
           <div class="item-toggle">
             <button type="button" class="item-btn ok" data-key="${key}" onclick="setItemStatus('${key}','ok')">✓ Исправно</button>
             <button type="button" class="item-btn defect" data-key="${key}" onclick="setItemStatus('${key}','defect')">✗ Неисправно</button>
@@ -784,12 +793,19 @@ function showForm() {
   showScreen("Form");
 }
 
+// Необязательный пункт — узел есть не на каждой машине (метка «(при наличии)» в конце
+// текста пункта в шаблоне). Его можно не отмечать: в запись он тогда не попадает. 14.11.2026.
+function isOptionalItem(text) { return /\(при наличии\)\s*$/i.test(String(text || "")); }
+
 function setItemStatus(key, status) {
+  // Необязательный пункт: повторное нажатие на ту же кнопку снимает отметку.
+  if (itemStates[key].optional && itemStates[key].status === status) status = "";
   itemStates[key].status = status;
   document.querySelectorAll(`[data-key="${key}"]`).forEach(btn => btn.classList.remove("active"));
-  document.querySelector(`.item-btn.${status}[data-key="${key}"]`).classList.add("active");
+  if (status) document.querySelector(`.item-btn.${status}[data-key="${key}"]`).classList.add("active");
   const commentEl = document.getElementById("comment_"+key);
   commentEl.classList.toggle("show", status === "defect");
+  if (!status) { itemStates[key].comment = ""; commentEl.value = ""; }
 }
 
 // «Горячая пересменка» — второй водитель садится на обеде/при
@@ -810,7 +826,8 @@ function toggleNoIssues(checked) {
   const itemsCard = document.getElementById("itemsCard");
   if (checked) {
     Object.keys(itemStates).forEach(key => {
-      itemStates[key].status = "ok";
+      // Необязательные пункты «Без замечаний» не отмечает: узла на машине может не быть.
+      itemStates[key].status = itemStates[key].optional ? "" : "ok";
       itemStates[key].comment = "";
     });
     itemsCard.style.display = "none";
@@ -826,7 +843,7 @@ function toggleNoIssues(checked) {
 }
 
 async function submitChecklist() {
-  const unanswered = Object.values(itemStates).filter(v => !v.status);
+  const unanswered = Object.values(itemStates).filter(v => !v.status && !v.optional);
   const hint = document.getElementById("submitHint");
   if (unanswered.length > 0) {
     hint.style.color = "var(--red)";
@@ -844,7 +861,7 @@ async function submitChecklist() {
     return;
   }
 
-  const items = Object.values(itemStates).map(v => ({
+  const items = Object.values(itemStates).filter(v => v.status).map(v => ({
     section: v.section, itemText: v.itemText, status: v.status, comment: v.comment,
   }));
 
