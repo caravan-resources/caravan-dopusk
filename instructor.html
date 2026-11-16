@@ -524,6 +524,7 @@ tr:hover td { background:#FAFBFD; }
           <span style="font-size:11px;color:var(--gray)">—</span>
           <input type="date" id="checklistToAlmaty" style="max-width:140px" onchange="renderChecklistRecordsList('Алмалы')">
           <button class="btn btn-ghost" onclick="exportChecklistExcel('Алмалы', this)">⬇️ Excel по фильтру</button>
+          <button class="btn btn-ghost" onclick="exportShiftsByWorkerExcel('Алмалы', this)" title="Кто на какой технике и в какие смены по принятым осмотрам за период (без табеля)">⬇️ Работники по сменам</button>
         </div>
         <div id="checklistRecordsListAlmaty"></div>
       </div>
@@ -582,6 +583,7 @@ tr:hover td { background:#FAFBFD; }
           <span style="font-size:11px;color:var(--gray)">—</span>
           <input type="date" id="checklistToAshyktas" style="max-width:140px" onchange="renderChecklistRecordsList('Ашыктас')">
           <button class="btn btn-ghost" onclick="exportChecklistExcel('Ашыктас', this)">⬇️ Excel по фильтру</button>
+          <button class="btn btn-ghost" onclick="exportShiftsByWorkerExcel('Ашыктас', this)" title="Кто на какой технике и в какие смены по принятым осмотрам за период (без табеля)">⬇️ Работники по сменам</button>
         </div>
         <div id="checklistRecordsListAshyktas"></div>
       </div>
@@ -6147,6 +6149,127 @@ async function exportChecklistExcel(site, btn) {
   XLSX.utils.book_append_sheet(wb, ws, "Осмотры");
   const modelPart = modelFilter ? `_${modelFilter.replace(/[^a-z0-9а-яё]+/gi,"-")}` : "";
   XLSX.writeFile(wb, `Осмотры_${site}${modelPart}_${today()}.xlsx`);
+}
+
+// ── Выгрузка «Работники по технике и сменам» ─────────────────────────────
+// Строится только по журналу осмотров (табеля в базе нет): смена = день с принятым
+// осмотром. Период берётся из тех же полей «период», что и у «Excel по фильтру»
+// (по дате НАЧАЛА смены); пусто — с 1-го числа текущего месяца по сегодня.
+// Время считается по Asia/Almaty (UTC+5) независимо от часового пояса браузера.
+function shiftsClassifyRecord(ms, workerMajority) {
+  const t = new Date(ms + 5 * 3600000);               // «стенные» часы Алматы в UTC-полях
+  const h = t.getUTCHours();
+  let typ, startMs = Date.UTC(t.getUTCFullYear(), t.getUTCMonth(), t.getUTCDate());
+  let ambiguous = false;
+  if (h >= 7 && h < 18) typ = "день";
+  else if (h >= 18) typ = "ночь";
+  else if (h < 6) { typ = "ночь"; startMs -= 86400000; }
+  else {                                              // 06:00–06:59 — граница смен
+    ambiguous = true;
+    if (workerMajority === "ночь") { typ = "ночь"; startMs -= 86400000; } else typ = "день";
+  }
+  return { typ, startMs, ambiguous, hh: String(h).padStart(2, "0") + ":" + String(t.getUTCMinutes()).padStart(2, "0") };
+}
+
+async function exportShiftsByWorkerExcel(site, btn) {
+  if (typeof XLSX === "undefined") { alert("Библиотека Excel не загрузилась (нужен интернет) — попробуй ещё раз."); return; }
+  if (!(DATA.checklistRecords||[]).length) {
+    const oldLabel = btn ? btn.textContent : "";
+    if (btn) { btn.disabled = true; btn.textContent = "⏳ Загружаю журнал осмотров..."; }
+    const ok = await loadFullHistory();
+    if (btn) { btn.disabled = false; btn.textContent = oldLabel; }
+    if (!ok || !(DATA.checklistRecords||[]).length) { alert("Не удалось загрузить журнал осмотров (нужен интернет) — попробуй ещё раз."); return; }
+  }
+  const suffix = site === "Ашыктас" ? "Ashyktas" : "Almaty";
+  const fromEl = document.getElementById("checklistFrom"+suffix), toEl = document.getElementById("checklistTo"+suffix);
+  const nowA = new Date(Date.now() + 5 * 3600000);
+  const todayMs = Date.UTC(nowA.getUTCFullYear(), nowA.getUTCMonth(), nowA.getUTCDate());
+  const ymd = v => { const p = String(v).split("-").map(Number); return Date.UTC(p[0], p[1]-1, p[2]); };
+  let fromMs = (fromEl && fromEl.value) ? ymd(fromEl.value) : Date.UTC(nowA.getUTCFullYear(), nowA.getUTCMonth(), 1);
+  let toMs   = (toEl && toEl.value) ? ymd(toEl.value) : todayMs;
+  if (toMs < fromMs) { alert("Конец периода раньше начала."); return; }
+  if ((toMs - fromMs) / 86400000 > 92) { alert("Период больше 93 дней — выберите короче."); return; }
+
+  const eqById = {};
+  (DATA.equipment||[]).forEach(e => { eqById[String(e.equipmentId)] = e; });
+  const eqIds = new Set((DATA.equipment||[]).filter(e => (e.site||"").trim() === site).map(e => String(e.equipmentId)));
+  const key2 = n => String(n||"").toLowerCase().replace(/ё/g,"е").split(/\s+/).filter(Boolean).slice(0,2).join(" ");
+  const empById = {}, empByName = {};
+  (DATA.employees||[]).forEach(e => { empById[String(e.id)] = e; (empByName[key2(e.name)] = empByName[key2(e.name)] || []).push(e); });
+
+  // преобладающий тип смены работника — только по однозначным записям всего журнала
+  const maj = {};
+  (DATA.checklistRecords||[]).forEach(r => {
+    const ms = Date.parse(r.date); if (isNaN(ms)) return;
+    const h = new Date(ms + 5*3600000).getUTCHours(), k = r.empId || r.empName;
+    const m = maj[k] = maj[k] || { д: 0, н: 0 };
+    if (h >= 7 && h < 18) m.д++; else if (h >= 18 || h < 6) m.н++;
+  });
+
+  const shifts = {};   // key -> { empId, name, byShift: {"startMs|тип": {eq:Set, times:[]}} }
+  let used = 0, amb = 0;
+  (DATA.checklistRecords||[]).forEach(r => {
+    if (!eqIds.has(String(r.equipmentId))) return;
+    if (/^тест/i.test(String(r.empName||"").trim())) return;
+    const ms = Date.parse(r.date); if (isNaN(ms)) return;
+    const k = r.empId || r.empName, m = maj[k] || { д: 0, н: 0 };
+    const c = shiftsClassifyRecord(ms, m.н > m.д ? "ночь" : "день");
+    if (c.startMs < fromMs || c.startMs > toMs) return;
+    used++; if (c.ambiguous) amb++;
+    const w = shifts[k] = shifts[k] || { empId: r.empId || "", name: r.empName || "", byShift: {} };
+    const s = w.byShift[c.startMs + "|" + c.typ] = w.byShift[c.startMs + "|" + c.typ] || { eq: [], times: [] };
+    if (!s.eq.includes(r.equipmentId)) s.eq.push(r.equipmentId);
+    s.times.push(c.hh);
+  });
+  const keys = Object.keys(shifts);
+  if (!keys.length) { alert("Нет осмотров за выбранный период."); return; }
+
+  const fmtD = ms => { const d = new Date(ms); return String(d.getUTCDate()).padStart(2,"0") + "." + String(d.getUTCMonth()+1).padStart(2,"0"); };
+  const fmtDY = ms => fmtD(ms) + "." + new Date(ms).getUTCFullYear();
+  const days = []; for (let ms = fromMs; ms <= toMs; ms += 86400000) days.push(ms);
+  const info = w => {
+    let e = w.empId && empById[String(w.empId)];
+    if (!e) { const c = empByName[key2(w.name)]; if (c && c.length === 1) e = c[0]; }
+    return { tab: e ? e.id : (w.empId || ""), fio: (e && e.name) || w.name, pos: e ? (e.position||"") : "", site: e ? (e.site||"") : "" };
+  };
+  keys.sort((a, b) => info(shifts[a]).fio.localeCompare(info(shifts[b]).fio, "ru"));
+
+  const svod = [["№","Ф.И.О.","Таб. №","Должность","Участок","Смен с чек-листом","из них день","из них ночь","Техника (число смен)"]];
+  const matrix = [["Ф.И.О.","Должность", ...days.map(fmtD)]];
+  const detail = [["Ф.И.О.","Таб. №","Должность","Участок","Дата начала смены","Смена","Техника","Модель","Тип техники","Время осмотров","Осмотров"]];
+  keys.forEach((k, i) => {
+    const w = shifts[k], inf = info(w), ids = Object.keys(w.byShift);
+    const cnt = {}; ids.forEach(id => w.byShift[id].eq.forEach(e => cnt[e] = (cnt[e]||0) + 1));
+    svod.push([i+1, inf.fio, inf.tab, inf.pos, inf.site, ids.length,
+      ids.filter(x => x.endsWith("|день")).length, ids.filter(x => x.endsWith("|ночь")).length,
+      Object.entries(cnt).sort((a,b) => b[1]-a[1]).map(([e,n]) => `${e} (${n})`).join(", ")]);
+    matrix.push([inf.fio, inf.pos, ...days.map(d => ["день","ночь"].filter(t => w.byShift[d+"|"+t])
+      .map(t => (t === "день" ? "Д: " : "Н: ") + w.byShift[d+"|"+t].eq.join("/")).join("; "))]);
+    ids.map(id => { const [ms, t] = id.split("|"); return [Number(ms), t]; })
+      .sort((a, b) => a[0] - b[0] || a[1].localeCompare(b[1])).forEach(([ms, t]) => {
+        const s = w.byShift[ms + "|" + t];
+        s.eq.forEach(eid => {
+          const eq = eqById[String(eid)] || {};
+          detail.push([inf.fio, inf.tab, inf.pos, inf.site, fmtDY(ms), t, eid, eq.model||"", eq.type||"", s.times.join(", "), s.times.length]);
+        });
+      });
+  });
+  const notes = [
+    [`Период: смены, начавшиеся с ${fmtDY(fromMs)} по ${fmtDY(toMs)} (Asia/Almaty, UTC+5). Участок: ${site}. Выгрузка: ${fmtDY(todayMs)}.`],
+    ["Источник: журнал осмотров («Чек-листы-Записи»). Табеля в базе нет — смена определяется только по факту осмотра."],
+    ["Смена по времени осмотра: 07:00–17:59 — день этой даты; 18:00–23:59 — ночь этой даты; 00:00–05:59 — ночь, начавшаяся накануне."],
+    [`Осмотры 06:00–06:59 (${amb} из ${used}) отнесены по преобладающему типу смены работника в журнале. [Предположение]`],
+    ["Тип осмотра (предсменный / горячая пересменка) не различается — учитываются все осмотры. Если за смену осмотры на нескольких единицах техники, они перечислены через «/»."],
+    ["Таб. №, должность и участок — из справочника сотрудников; осмотры в журнале хранят ФИО без отчества, сопоставление по таб. №, затем по фамилии и имени (при единственном совпадении)."],
+    ["«Д» — дневная смена, «Н» — ночная. Пустая ячейка — осмотра за смену нет (это не означает, что человек не работал)."],
+  ];
+  const mk = (aoa, cols) => { const s = XLSX.utils.aoa_to_sheet(aoa); s["!cols"] = cols.map(w => ({ wch: w })); return s; };
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, mk(svod, [5,34,13,38,26,12,10,10,44]), "Свод по работникам");
+  XLSX.utils.book_append_sheet(wb, mk(matrix, [34,38,...days.map(() => 13)]), "Матрица по дням");
+  XLSX.utils.book_append_sheet(wb, mk(detail, [34,13,38,26,16,8,10,24,16,26,10]), "Детально");
+  XLSX.utils.book_append_sheet(wb, mk(notes, [140]), "Примечание");
+  XLSX.writeFile(wb, `Работники_по_технике_и_сменам_${site}_${fmtDY(fromMs).replace(/\./g,"-")}_${fmtDY(toMs).replace(/\./g,"-")}.xlsx`);
 }
 
 // ══════════════════════════════════════════════════════
